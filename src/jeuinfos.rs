@@ -172,7 +172,6 @@ impl JeuInfos {
 
       s = res.text().context(DownloadFailed { filename: PathBuf::from(&url) })?;
 
-      println!("{}", s);
       response = serde_json::from_str(&s).context(ParseFailed)?;
 
       Ok(response.response.jeu)
