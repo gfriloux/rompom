@@ -1,0 +1,26 @@
+screenscraper:
+  dev:
+    login:
+    password:
+  user:
+    login:
+    password:
+
+systems:
+  - 
+    name: neogeo
+    basename: neogeo-rom-
+    depends: bios-neogeo
+    dir: neogeo
+  - 
+    name: snes
+    basename: snes-rom-
+    dir: snes
+  - 
+    name: nes
+    basename: nes-rom-
+    dir: nes
+  - 
+    name: megadrive
+    basename: megadrive-rom-
+    dir: megadrive
