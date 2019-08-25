@@ -37,6 +37,13 @@ pub struct Conf {
    pub systems:       Vec<System>
 }
 
+#[derive(Deserialize)]
+pub struct Reference {
+   pub gameid:   u64,
+   pub gamerom:  String,
+   pub systemid: u32
+}
+
 #[derive(Debug, Snafu)]
 pub enum Error {
    ReadConfiguration {
@@ -75,5 +82,15 @@ impl Conf {
          depends:  None,
          dir:      "unknown".to_string()
       }
+   }
+}
+
+impl Reference {
+   pub fn load(file: &String) -> Result<Reference> {
+      let obj: Reference;
+      let data = fs::read_to_string(file.clone()).context(ReadConfiguration { path: file })?;
+      
+      obj = serde_yaml::from_str(data.as_str()).context(ParseConfiguration)?;
+      Ok(obj)
    }
 }
