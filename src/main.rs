@@ -8,6 +8,7 @@
              extern crate chrono;
              extern crate serde_yaml;
              extern crate dirs;
+             extern crate indicatif;
 
 mod conf;
 mod jeuinfos;
@@ -22,6 +23,10 @@ use std::{
       Path,
       PathBuf
    }
+};
+use indicatif::{
+   ProgressBar,
+   ProgressStyle
 };
 
 use jeuinfos::JeuInfos;
@@ -50,6 +55,12 @@ fn main() {
    let     system;
    let     jeuinfos;
    let     hash;
+   let     pb;
+
+   pb  = ProgressBar::new(3);
+
+   let sty = ProgressStyle::default_bar().template("{spinner:.green} {pos:>7}/{len:7} {prefix:.bold}▕{bar:.blue}| {wide_msg}").progress_chars("█▇▆▅▄▃▂▁  ");
+   pb.set_style(sty.clone());
 
    confdir = match dirs::config_dir() {
       Some(x) => { x },
@@ -84,6 +95,8 @@ fn main() {
       hash          = checksums::hash_file(Path::new(&reference.gamerom),
                                            checksums::Algorithm::SHA1);
       system        = conf.system_find(reference.systemid);
+
+      pb.set_message(&format!("Fetching game infos"));
       jeuinfos      = JeuInfos::get(&conf,
                                     &reference.systemid,
                                     &format!("{}", reference.gameid),
@@ -123,12 +136,25 @@ fn main() {
 
       hash = checksums::hash_file(Path::new(&rom), checksums::Algorithm::SHA1);
       system   = conf.system_find(systemid);
+      pb.set_message(&format!("Fetching game infos"));
       jeuinfos = JeuInfos::get(&conf, &system.id, &id, &hash, &rom).unwrap();
    }
 
+   pb.println(format!("👌 Game informations"));
+   pb.inc(1);
+
    name = PathBuf::from(rom.clone()).file_stem().unwrap().to_str().unwrap().to_string();
 
+   pb.set_message(&format!("Downloading medias"));
    package  = Package::new(jeuinfos, &name, &rom, &hash).unwrap();
    package.fetch().unwrap();
+
+   pb.println(format!("👌 Downloaded medias"));
+   pb.inc(1);
+
+   pb.set_message(&format!("Writing PKGBUILD"));
    package.build(&system).unwrap();
+
+   pb.println(format!("👌 PKGBUILD written"));
+   pb.inc(1);
 }
