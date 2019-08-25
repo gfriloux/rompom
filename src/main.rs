@@ -18,12 +18,18 @@ mod emulationstation;
 use getopts::Options;
 use std::{
    env,
-   path::Path
+   path::{
+      Path,
+      PathBuf
+   }
 };
 
 use jeuinfos::JeuInfos;
 use package::Package;
-use conf::Conf;
+use conf::{
+   Conf,
+   Reference
+};
 
 fn print_usage(program: &str, opts: Options) {
    let brief = format!("Usage: {} --rom ROMFILE --id INTEGER", program);
@@ -40,12 +46,28 @@ fn main() {
    let     matches;
    let     name;
    let     confdir;
+   let mut package;
+   let     system;
+   let     jeuinfos;
+   let     hash;
+
+   confdir = match dirs::config_dir() {
+      Some(x) => { x },
+      None    => {
+         eprintln!("Failed to find user configuration dir");
+         return;
+      }
+   };
+
+
+   let     conf     = Conf::load(&format!("{}/rompom.yml", confdir.display())).unwrap();
 
    opts.optopt ("s", "system", "System to search for",     "SYSTEM");
-   opts.optopt ("r", "rom"   , "Rom file to package",      "ROM"   );
-   opts.optopt ("i", "id"    , "Game ID on Screenscraper", "ID"    );
-   opts.optopt ("n", "name"  , "Game name"               , "NAME"  );
-   opts.optflag("h", "help"  , "print this help menu"              );
+   opts.optopt ("r", "rom",    "Rom file to package",      "ROM"   );
+   opts.optopt ("i", "id",     "Game ID on Screenscraper", "ID"    );
+   opts.optopt ("n", "name",   "Game name",                "NAME"  );
+   opts.optflag("h", "help",   "print this help menu"              );
+   opts.optflag("u", "update", "Update package"                    );
 
    matches = match opts.parse(&args[1..]) {
       Ok (m) => { m }
@@ -57,59 +79,56 @@ fn main() {
       return;
    }
 
-   systemid = match matches.opt_str("s") {
-      Some(x) => {
-         x.parse::<u32>().unwrap()
-      },
-      None    => {
-         print_usage(&program, opts);
-         return;
-      }
-   };
+   if matches.opt_present("u") {
+      let reference = Reference::load(&"./rompom.yml".to_string()).unwrap();
+      hash          = checksums::hash_file(Path::new(&reference.gamerom),
+                                           checksums::Algorithm::SHA1);
+      system        = conf.system_find(reference.systemid);
+      jeuinfos      = JeuInfos::get(&conf,
+                                    &reference.systemid,
+                                    &format!("{}", reference.gameid),
+                                    &hash,
+                                    &reference.gamerom).unwrap();
+      rom = reference.gamerom;
+   }
+   else {
+      systemid = match matches.opt_str("s") {
+         Some(x) => {
+            x.parse::<u32>().unwrap()
+         },
+         None    => {
+            print_usage(&program, opts);
+            return;
+         }
+      };
 
-   rom = match matches.opt_str("r") {
-      Some(x) => {
-         x.to_string()
-      },
-      None    => {
-         print_usage(&program, opts);
-         return;
-      }
-   };
+      rom = match matches.opt_str("r") {
+         Some(x) => {
+            x.to_string()
+         },
+         None    => {
+            print_usage(&program, opts);
+            return;
+         }
+      };
 
-   id  = match matches.opt_str("i") {
-      Some(x) => {
-         x.to_string()
-      },
-      None    => {
-         "0".to_string()
-      }
-   };
+      id  = match matches.opt_str("i") {
+         Some(x) => {
+            x.to_string()
+         },
+         None    => {
+            "0".to_string()
+         }
+      };
 
-   name  = match matches.opt_str("n") {
-      Some(x) => {
-         x.to_string()
-      },
-      None    => {
-         print_usage(&program, opts);
-         return;
-      }
-   };
+      hash = checksums::hash_file(Path::new(&rom), checksums::Algorithm::SHA1);
+      system   = conf.system_find(systemid);
+      jeuinfos = JeuInfos::get(&conf, &system.id, &id, &hash, &rom).unwrap();
+   }
 
-   confdir = match dirs::config_dir() {
-      Some(x) => { x },
-      None    => {
-         eprintln!("Failed to find user configuration dir");
-         return;
-      }
-   };
+   name = PathBuf::from(rom.clone()).file_stem().unwrap().to_str().unwrap().to_string();
 
-   let     conf     = Conf::load(&format!("{}/rompom.yml", confdir.display())).unwrap();
-   let     system   = conf.system_find(systemid);
-   let     hash     = checksums::hash_file(Path::new(&rom), checksums::Algorithm::SHA1);
-   let     jeuinfos = JeuInfos::get(&conf, &system.id, &id, &hash, &rom).unwrap();
-   let mut package  = Package::new(jeuinfos, &name, &rom, &hash).unwrap();
-
+   package  = Package::new(jeuinfos, &name, &rom, &hash).unwrap();
    package.fetch().unwrap();
    package.build(&system).unwrap();
 }
