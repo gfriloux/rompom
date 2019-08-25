@@ -1,0 +1,17 @@
+[package]
+name         = "rompom"
+version      = "0.0.1"
+authors      = ["Guillaume Friloux <guillaume@friloux.me>"]
+
+[dependencies]
+serde        = "*"
+serde_json   = "*"
+serde_derive = "*"
+reqwest      = "*"
+getopts      = "*"
+checksums    = "*"
+snafu        = "*"
+serde-xml-rs = "*"
+chrono       = "*"
+serde_yaml   = "*"
+dirs         = "*"
