@@ -9,18 +9,92 @@ screenscraper:
 systems:
   - 
     name: neogeo
+    id: 142
     basename: neogeo-rom-
     depends: bios-neogeo
     dir: neogeo
   - 
     name: snes
+    id: 4
     basename: snes-rom-
     dir: snes
   - 
     name: nes
+    id: 3
     basename: nes-rom-
     dir: nes
   - 
     name: megadrive
+    id: 1
     basename: megadrive-rom-
     dir: megadrive
+  -
+    name: mastersystem
+    id: 2
+    basename: mastersystem-rom-
+    depends: bios-mastersystem
+    dir: mastersystem
+  - 
+    name: gamegear
+    id: 21
+    basename: gamegear-rom-
+    depends: bios-gamegear
+    dir: gamegear
+  - 
+    name: gameboy
+    id: 9
+    basename: gameboy-rom-
+    depends: bios-gameboy
+    dir: gb
+  - 
+    name: gameboycolor
+    id: 10
+    basename: gameboycolor-rom-
+    depends: bios-gameboycolor
+    dir: gbc
+  - 
+    name: gameboyadvance
+    id: 12
+    basename: gameboyadvance-rom-
+    depends: bios-gameboyadvance
+    dir: gba
+  - 
+    name: atomiswave
+    id: 53
+    basename: atomiswave-rom-
+    depends: bios-atomiswave
+    dir: atomiswave
+  - 
+    name: naomi
+    id: 56
+    basename: naomi-rom-
+    depends: bios-naomi
+    dir: naomi
+  - 
+    name: pcengine
+    id: 31
+    basename: pcengine-rom-
+    depends: bios-pcengine
+    dir: pcengine
+  - 
+    name: neogeopocket
+    id: 25
+    basename: neogeopocket-rom-
+    dir: ngp
+  - 
+    name: neogeopocketcolor
+    id: 82
+    basename: neogeopocketcolor-rom-
+    dir: ngpc
+  - 
+    name: nintendo64
+    id: 14
+    basename: nintendo64-rom-
+    depends: bios-nintendo64
+    dir: n64
+  - 
+    name: pcenginecd
+    id: 114
+    basename: pcenginecd-rom-
+    depends: bios-pcenginecd
+    dir: pcenginecd
