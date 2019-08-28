@@ -3,13 +3,28 @@ use serde_xml_rs::to_string;
 use std::{
    fs::File,
    io::Write,
-   path::Path
+   path::Path,
+   fmt
 };
 
 use jeuinfos;
 use jeuinfos::JeuInfos;
 use conf::System;
 use emulationstation::Game;
+
+pub struct Pkgbuild {
+   pub pkgname:  String,
+   pub romname:  String,
+   pub pkgver:   String,
+   pub pkgrel:   u32,
+   pub pkgdesc:  String,
+   pub url:      String,
+   pub depends:  Option<String>,
+   pub source:   Vec<String>,
+   pub sha1sums: Vec<String>,
+   pub build:    Vec<String>,
+   pub package:  Vec<String>
+}
 
 pub struct Medias {
    pub box3d:     Option<jeuinfos::Media>,
@@ -23,7 +38,7 @@ pub struct Package {
    pub hash:   String,
    pub jeu:    JeuInfos,
    pub name:   String,
-   pub medias: Medias
+   pub medias: Medias,
 }
 
 #[derive(Debug, Snafu)]
@@ -111,124 +126,86 @@ impl Package {
    }
 
    pub fn build_pkgbuild(&mut self, system: &System, game: &Game) -> Result<()> {
-      let mut lines   = Vec::new();
-      let     romname = self.name_normalize();
+      let     romname   = self.name_normalize();
+      let     sourcerom = self.rom.replace("'", "'\\''");
+      let mut pkgbuild  = Pkgbuild {
+         pkgname:  format!("{}{}", system.basename, romname),
+         romname:  romname.clone(),
+         pkgver:   "1".to_string(),
+         pkgrel:   1,
+         pkgdesc:  game.name.clone(),
+         url:      format!("https://screenscraper.fr/gameinfos.php?gameid={}", self.jeu.id),
+         depends:  system.depends.clone(),
+         source:   Vec::new(),
+         sha1sums: Vec::new(),
+         build:    Vec::new(),
+         package:  Vec::new()
+      };
 
-      lines.push(format!("pkgname=('{}{}')",
-                         system.basename,
-                         romname
-                        ));
-      lines.push(format!("_romname=\"{}\"", romname));
-      lines.push("pkgver=1".to_string());
-      lines.push("pkgrel=1".to_string());
-      lines.push(format!("pkgdesc=\"{}\"", game.name));
-      lines.push("arch=('any')".to_string());
-      lines.push(format!("url=\"https://screenscraper.fr/gameinfos.php?gameid={}\"",
-                 self.jeu.id));
-      lines.push("license=('All rights reserved')".to_string());
+      pkgbuild.source.push(sourcerom.clone());
+      pkgbuild.sha1sums.push(self.hash.clone());
 
-      if let Some(ref x) = system.depends {
-         lines.push(format!("depends=('{}')", x));
-      }
-
-      let sourcerom = self.rom.replace("'", "'\\''");
-
-      lines.push(format!("source=('{}'", sourcerom));
-
-      if let Some(ref _x) = self.medias.video {
-         lines.push(        "        'video.mp4'".to_string());
-      }
-
-      if let Some(ref _x) = self.medias.bezel {
-         lines.push(     "        'bezel.png'".to_string());
-      }
-
-      if let Some(ref _x) = self.medias.box3d {
-         lines.push(     "        'box3d.png'".to_string());
-      }
-
-      if let Some(ref _x) = self.medias.thumbnail {
-         lines.push(     "        'thumbnail.png'".to_string());
-      }
-      lines.push(        "        'description.xml')".to_string());
-
-      lines.push("noextract=(\"${source[@]##*/}\")".to_string());
-
-      lines.push(format!("sha1sums=('{}'", self.hash));
+      pkgbuild.source.push("description.xml".to_string());
+      pkgbuild.sha1sums.push(checksums::hash_file(Path::new("description.xml"), checksums::Algorithm::SHA1));
 
       if let Some(ref x) = self.medias.video {
-         lines.push(format!("          '{}'", x.sha1));
+         pkgbuild.source.push("video.mp4".to_string());
+         pkgbuild.sha1sums.push(x.sha1.clone());
       }
 
       if let Some(ref x) = self.medias.bezel {
-         lines.push(format!("          '{}'", x.sha1));
+         pkgbuild.source.push("bezel.png".to_string());
+         pkgbuild.sha1sums.push(x.sha1.clone());
       }
 
       if let Some(ref x) = self.medias.box3d {
-         lines.push(format!("          '{}'", x.sha1));
+         pkgbuild.source.push("box3d.png".to_string());
+         pkgbuild.sha1sums.push(x.sha1.clone());
       }
 
       if let Some(ref x) = self.medias.thumbnail {
-         lines.push(format!("          '{}'", x.sha1));
+         pkgbuild.source.push("thumbnail.png".to_string());
+         pkgbuild.sha1sums.push(x.sha1.clone());
       }
 
-      lines.push(format!("          '{}'",
-                         checksums::hash_file(Path::new("description.xml"), checksums::Algorithm::SHA1)
-                        ));
-      lines.push("         )".to_string());
+      match system.id {
+         20 => {
+            pkgbuild.build.push("  IFS=$'\\n'".to_string());
+            pkgbuild.build.push("  cuefile=$(ls *.cue)".to_string());
+            pkgbuild.build.push("  sed -i \"s@FILE \\\"@FILE \\\"data/$_romname/@g\" ${cuefile}".to_string());
 
-      lines.push("build()\n{\n  true\n}\n".to_string());
-      lines.push("package()\n{".to_string());
+            pkgbuild.package.push("  IFS=$'\\n'".to_string());
+            pkgbuild.package.push("  mkdir -m 0700 -p \"$pkgdir/roms/segacd/data/$_romname/\"".to_string());
+            pkgbuild.package.push("  cuefile=$(ls *.cue)".to_string());
+            pkgbuild.package.push("  install -Dm600 ${cuefile} \"$pkgdir\"/roms/segacd/${cuefile}".to_string());
+            pkgbuild.package.push("  for file in $(ls *.bin); do".to_string());
+            pkgbuild.package.push("    install -Dm600 {,\"$pkgdir\"/roms/segacd/data/$_romname/}${file}".to_string());
+            pkgbuild.package.push("  done".to_string());
 
-      lines.push(format!("   mkdir -m 0700 -p \"$pkgdir/roms/{}/data/$_romname/\"",
-                         system.dir
-                        )
-                );
+            pkgbuild.package.push(format!("  sed -i \"s|{}|$cuefile|\" description.xml", self.rom.replace("$", "\\$")));
+            pkgbuild.package.push("  for file in $(ls *.mp4 *.png *.xml); do".to_string());
+            pkgbuild.package.push(format!("    install -Dm600 {{,\"$pkgdir\"/roms/{}/data/$_romname/}}$file", system.dir));
+            pkgbuild.package.push("  done".to_string());
 
-      lines.push(format!("   install -Dm600 \"{}\" \"$pkgdir\"/roms/{}/\"{}\"",
-                         self.rom.replace("$", "\\$"),
-                         system.dir,
-                         self.rom.replace("$", "\\$")
-                        )
-                );
+         }
+         _ => {
+            pkgbuild.build.push("  true".to_string());
 
-      if let Some(ref _x) = self.medias.video {
-         lines.push(format!("   install -Dm600 {{,\"$pkgdir\"/roms/{}/data/$_romname/}}video.mp4",
-                            system.dir
-                           )
-                   );
-      }
-
-      if let Some(ref _x) = self.medias.bezel {
-         lines.push(format!("   install -Dm600 {{,\"$pkgdir\"/roms/{}/data/$_romname/}}bezel.png",
-                            system.dir
-                           )
-                   );
-      }
-
-      if let Some(ref _x) = self.medias.box3d {
-         lines.push(format!("   install -Dm600 {{,\"$pkgdir\"/roms/{}/data/$_romname/}}box3d.png",
-                            system.dir
-                           )
-                   );
-      }
-
-      lines.push(format!("   install -Dm600 {{,\"$pkgdir\"/roms/{}/data/$_romname/}}thumbnail.png",
-                         system.dir
-                        )
-                );
-      lines.push(format!("   install -Dm600 {{,\"$pkgdir\"/roms/{}/data/$_romname/}}description.xml",
-                         system.dir
-                        )
-                );
-      lines.push("}".to_string());
+            pkgbuild.package.push(format!("  mkdir -m 0700 -p \"$pkgdir/roms/{}/data/$_romname/\"", system.dir));
+            pkgbuild.package.push(format!(
+               "  install -Dm600 \"{}\" \"$pkgdir\"/roms/{}/\"{}\"",
+               self.rom.replace("$", "\\$"),
+               system.dir,
+               self.rom.replace("$", "\\$")
+            ));
+            pkgbuild.package.push("  for file in $(ls *.mp4 *.png *.xml); do".to_string());
+            pkgbuild.package.push(format!("    install -Dm600 {{,\"$pkgdir\"/roms/{}/data/$_romname/}}$file", system.dir));
+            pkgbuild.package.push("  done".to_string());
+         }
+      };
 
       let mut f = File::create("./PKGBUILD").unwrap();
-
-      for i in &lines {
-         write!(f, "{}\n", i).unwrap();
-      }
-
+      write!(f, "{}", pkgbuild).unwrap();
       Ok(())
    }
 
@@ -256,5 +233,50 @@ impl Package {
 
       self.build_pkgbuild(system, &game).unwrap();
       Ok(())
+   }
+}
+
+impl fmt::Display for Pkgbuild {
+   fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+      let mut s = String::new();
+
+      s.push_str(&format!("pkgname=('{}')\n", self.pkgname));
+      s.push_str(&format!("_romname=\"{}\"\n", self.romname));
+      s.push_str(&format!("pkgver={}\n", self.pkgver));
+      s.push_str(&format!("pkgrel={}\n", self.pkgrel));
+      s.push_str(&format!("pkgdesc=\"{}\"\n", self.pkgdesc));
+      s.push_str("arch=('any')\n");
+      s.push_str(&format!("url=\"{}\"\n", self.url));
+      s.push_str("license=('All rights reserved')\n");
+
+      if let Some(x) = &self.depends {
+         s.push_str(&format!("depends=('{}')\n", x));
+      }
+
+      s.push_str("source=(\n");
+      for item in &self.source {
+         s.push_str(&format!("  '{}'\n", item));
+      }
+      s.push_str(")\n");
+
+
+      s.push_str("sha1sums=(\n");
+      for item in &self.sha1sums {
+         s.push_str(&format!("  '{}'\n", item));
+      }
+      s.push_str(")\n");
+
+      s.push_str("build()\n{\n");
+      for line in &self.build {
+         s.push_str(&format!("{}\n", line));
+      }
+      s.push_str("}\n");
+
+      s.push_str("package()\n{\n");
+      for line in &self.package {
+         s.push_str(&format!("{}\n", line));
+      }
+      s.push_str("}\n");
+      write!(f, "{}", s)
    }
 }
