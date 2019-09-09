@@ -77,6 +77,7 @@ impl Package {
                                  .replace(";", "")
                                  .replace("$", "")
                                  .replace("~", "-")
+                                 .replace("=", "-")
                                  .to_lowercase()
    }
 
