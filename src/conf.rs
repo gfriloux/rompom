@@ -28,7 +28,8 @@ pub struct System {
    pub id:            u32,
    pub basename:      String,
    pub depends:       Option<String>,
-   pub dir:           String
+   pub dir:           String,
+   pub checksum:      Option<String>
 }
 
 #[derive(Deserialize)]
@@ -80,8 +81,21 @@ impl Conf {
          id:       0,
          basename: "unknown-rom-".to_string(),
          depends:  None,
+         checksum: None,
          dir:      "unknown".to_string()
       }
+   }
+}
+
+impl System {
+   pub fn checksum_disabled(&self) -> bool {
+      if let Some(ref x) = self.checksum {
+         match x.as_str() {
+            "disable" => { return true;  },
+            _         => { return false; }
+         }
+      }
+      false
    }
 }
 

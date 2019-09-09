@@ -92,13 +92,12 @@ fn main() {
 
    if matches.opt_present("u") {
       let reference = Reference::load(&"./rompom.yml".to_string()).unwrap();
-      hash          = checksums::hash_file(Path::new(&reference.gamerom),
-                                           checksums::Algorithm::SHA1);
       system        = conf.system_find(reference.systemid);
+      hash          = checksums::hash_file(Path::new(&reference.gamerom), checksums::Algorithm::SHA1);
 
       pb.set_message(&format!("Fetching game infos"));
       jeuinfos      = JeuInfos::get(&conf,
-                                    &reference.systemid,
+                                    &system,
                                     &format!("{}", reference.gameid),
                                     &hash,
                                     &reference.gamerom).unwrap();
@@ -144,10 +143,10 @@ fn main() {
          }
       }; 
 
-      hash = checksums::hash_file(Path::new(&rom), checksums::Algorithm::SHA1);
       system   = conf.system_find(systemid);
+      hash = checksums::hash_file(Path::new(&rom), checksums::Algorithm::SHA1);
       pb.set_message(&format!("Fetching game infos"));
-      jeuinfos = JeuInfos::get(&conf, &system.id, &id, &hash, &name).unwrap();
+      jeuinfos = JeuInfos::get(&conf, &system, &id, &hash, &name).unwrap();
    }
 
    pb.println(format!("👌 Game informations"));

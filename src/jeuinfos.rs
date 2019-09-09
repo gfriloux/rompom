@@ -11,7 +11,10 @@ use snafu::{ResultExt, Snafu};
 
 use screenscraper::Header;
 use screenscraper::Response;
-use conf::Conf;
+use conf::{
+   Conf,
+   System
+};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct GenericRegionText {
@@ -142,7 +145,7 @@ pub enum Error {
 type Result<T, E = Error> = std::result::Result<T, E>;
 
 impl JeuInfos {
-   pub fn get(conf: &Conf, system: &u32, game: &String, sha1: &String, rom: &String) -> Result<JeuInfos> {
+   pub fn get(conf: &Conf, system: &System, game: &String, sha1: &String, rom: &String) -> Result<JeuInfos> {
       let     client = reqwest::Client::new();
       let     s;
       let     response: JeuInfosResult;
@@ -155,15 +158,15 @@ impl JeuInfos {
       query.push(("ssid"       , conf.screenscraper.user.login.clone()));
       query.push(("sspassword" , conf.screenscraper.user.password.clone()));
       query.push(("output"     , "json".to_string()));
-      query.push(("systemeid"  , format!("{}", system)));
-      query.push(("romtype"    , "rom".to_string()));
+      query.push(("systemeid"  , format!("{}", system.id)));
+      query.push(("romnom"     , rom.to_string()));
+
+      if system.checksum_disabled() == false {
+         query.push(("sha1"       , sha1.clone()));
+      }
 
       if game.as_str() != "0" {
          query.push(("gameid"     , game.to_string()));
-      }
-      else {
-         query.push(("romnom"     , rom.to_string()));
-         query.push(("sha1"       , sha1.to_string()));
       }
 
       let mut res    = client.get(url)
