@@ -103,6 +103,7 @@ fn main() {
                                     &hash,
                                     &reference.gamerom).unwrap();
       rom = reference.gamerom;
+      name = PathBuf::from(rom.clone()).file_stem().unwrap().to_str().unwrap().to_string();
    }
    else {
       systemid = match matches.opt_str("s") {
@@ -134,16 +135,23 @@ fn main() {
          }
       };
 
+      name = match matches.opt_str("n") {
+         Some(x) => {
+            x.to_string()
+         },
+         None    => {
+            rom.clone()
+         }
+      }; 
+
       hash = checksums::hash_file(Path::new(&rom), checksums::Algorithm::SHA1);
       system   = conf.system_find(systemid);
       pb.set_message(&format!("Fetching game infos"));
-      jeuinfos = JeuInfos::get(&conf, &system.id, &id, &hash, &rom).unwrap();
+      jeuinfos = JeuInfos::get(&conf, &system.id, &id, &hash, &name).unwrap();
    }
 
    pb.println(format!("👌 Game informations"));
    pb.inc(1);
-
-   name = PathBuf::from(rom.clone()).file_stem().unwrap().to_str().unwrap().to_string();
 
    pb.set_message(&format!("Downloading medias"));
    package  = Package::new(jeuinfos, &name, &rom, &hash).unwrap();
