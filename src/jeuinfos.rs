@@ -281,6 +281,13 @@ impl Media {
       let mut dst = File::create(path).context(WriteFailed { filename: PathBuf::from(path) })?;
       copy(&mut src, &mut dst).context(WriteFailed { filename: PathBuf::from(path) })?;
 
+      // We cannot trust SHA1 returned by SS, see issue #11
+      let hash = checksums::hash_file(Path::new(&path), checksums::Algorithm::SHA1);
+
+      if ! hash.is_empty() {
+         self.sha1 = hash;
+      }
+
       Ok(())
    }
 }
