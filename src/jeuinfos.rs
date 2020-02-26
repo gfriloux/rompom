@@ -49,9 +49,9 @@ pub struct Classification {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct GenericObject {
    pub id:              String,
-   pub principale:      String,
-   pub parentid:        String,
-   pub noms:            Vec<GenericLangueText>
+   pub principale:      Option<String>,
+   pub parentid:        Option<String>,
+   pub noms:            Option<Vec<GenericLangueText>>
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -94,10 +94,10 @@ pub struct Rom {
 pub struct JeuInfos {
    pub id:              String,
    pub romid:           Option<String>,
-   pub notgame:         String,
+   pub notgame:         Option<String>,
    pub noms:            Vec<GenericRegionText>,
-   pub systemeid:       String,
-   pub systemenom:      String,
+   pub systemeid:       Option<String>,
+   pub systemenom:      Option<String>,
    pub editeur:         Option<GenericIdText>,
    pub developpeur:     Option<GenericIdText>,
    pub joueurs:         Option<GenericText>,
@@ -112,7 +112,7 @@ pub struct JeuInfos {
    pub familles:        Option<Vec<GenericObject>>,
    pub styles:          Option<Vec<GenericObject>>,
    pub medias:          Vec<Media>,
-   pub roms:            Vec<Rom>,
+   pub roms:            Option<Vec<Rom>>,
    pub rom:             Option<Rom>
 }
 
@@ -147,7 +147,7 @@ type Result<T, E = Error> = std::result::Result<T, E>;
 impl JeuInfos {
    pub fn get(conf: &Conf, system: &System, game: &String, sha1: &String, rom: &String) -> Result<JeuInfos> {
       let     client = reqwest::Client::new();
-      let     s;
+      let mut s;
       let     response: JeuInfosResult;
       let     url    = "https://www.screenscraper.fr/api2/jeuInfos.php";
       let mut query  = Vec::new();
@@ -174,6 +174,20 @@ impl JeuInfos {
                              .send().context(DownloadFailed { filename: PathBuf::from(&url) })?;
 
       s = res.text().context(DownloadFailed { filename: PathBuf::from(&url) })?;
+//println!("{}", s);
+
+      // Obviously a nasty hack to work around a bug with SS that
+      // leaves a trailing coma in some cases, breaking the JSON format.
+      {
+         let len = s.len();
+         let final_str = &s[len-14..];
+         let bug_to_find = "],\n\t\t}\n\t}\n}\n  ";
+
+         if bug_to_find == final_str {
+            let fix = s.replace("],\n\t\t}\n\t}\n}\n  ","]\n\t\t}\n\t}\n}\n  ");
+            s       = fix;
+         }
+      }
 
       response = serde_json::from_str(&s).context(ParseFailed)?;
 
@@ -252,13 +266,17 @@ impl JeuInfos {
       if let Some(ref x) = &self.genres {
          for i in fav {
             for ref genre in x {
-               if genre.principale != "1" {
-                  continue;
+               if let Some(x)  = &genre.principale {
+                  if x != "1" {
+                     continue;
+                  }
                }
 
-               for nom in &genre.noms {
-                  if &nom.langue == i {
-                     return nom.text.clone();
+               if let Some(x) = &genre.noms {
+                  for nom in x {
+                     if nom.langue == *i {
+                        return nom.text.clone();
+                     }
                   }
                }
             }

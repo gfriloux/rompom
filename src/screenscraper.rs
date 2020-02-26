@@ -25,7 +25,7 @@ pub struct Ssuser {
    pub uploadmedia:        String,
    pub maxthreads:         String,
    pub maxdownloadspeed:   String,
-   pub requeststoday:      String,
+   pub requeststoday:      Option<String>,
    pub visites:            String,
    pub datedernierevisite: String,
    pub favregion:          String
