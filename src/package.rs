@@ -27,10 +27,11 @@ pub struct Pkgbuild {
 }
 
 pub struct Medias {
-   pub box3d:     Option<jeuinfos::Media>,
-   pub thumbnail: Option<jeuinfos::Media>,
-   pub bezel:     Option<jeuinfos::Media>,
-   pub video:     Option<jeuinfos::Media>
+   pub box3d:         Option<jeuinfos::Media>,
+   pub thumbnail:     Option<jeuinfos::Media>,
+   pub bezel:         Option<jeuinfos::Media>,
+   pub video:         Option<jeuinfos::Media>,
+   pub marquee:       Option<jeuinfos::Media>,
 }
 
 pub struct Package {
@@ -91,6 +92,7 @@ impl Package {
          }
       };
       let bezel     = jeu.media("bezel-16-9");
+      let marquee   = jeu.media("screenmarquee");
 
       Ok(Package {
          rom: file.to_string(),
@@ -101,7 +103,8 @@ impl Package {
             box3d,
             thumbnail,
             bezel,
-            video
+            video,
+            marquee
          }
       })
    }
@@ -121,6 +124,10 @@ impl Package {
 
       if let Some(ref mut x) = self.medias.video {
          x.download("./video.mp4").context(MediaDownload { filename: "video-normalized".to_string() })?;
+      }
+
+      if let Some(ref mut x) = self.medias.marquee {
+         x.download("./marquee.png").context(MediaDownload { filename: "screenmarquee".to_string() })?;
       }
 
       Ok(())
@@ -166,6 +173,11 @@ impl Package {
 
       if let Some(ref x) = self.medias.thumbnail {
          pkgbuild.source.push("thumbnail.png".to_string());
+         pkgbuild.sha1sums.push(x.sha1.clone());
+      }
+
+      if let Some(ref x) = self.medias.marquee {
+         pkgbuild.source.push("marquee.png".to_string());
          pkgbuild.sha1sums.push(x.sha1.clone());
       }
 
