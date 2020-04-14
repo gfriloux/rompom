@@ -27,12 +27,13 @@ pub struct Pkgbuild {
 }
 
 pub struct Medias {
-   pub box3d:         Option<jeuinfos::Media>,
+   pub box2d:         Option<jeuinfos::Media>,
    pub thumbnail:     Option<jeuinfos::Media>,
    pub bezel:         Option<jeuinfos::Media>,
    pub video:         Option<jeuinfos::Media>,
    pub marquee:       Option<jeuinfos::Media>,
    pub screenshot:    Option<jeuinfos::Media>,
+   pub wheel:         Option<jeuinfos::Media>,
 }
 
 pub struct Package {
@@ -84,8 +85,8 @@ impl Package {
    }
 
    pub fn new(mut jeu: JeuInfos, name: &String, file: &String, hash: &String) -> Result<Package> {
-      let box3d      = jeu.media("box-3D");
-      let thumbnail  = jeu.media("mixrbv2");
+      let box2d      = jeu.media("box-2D");
+      let thumbnail  = jeu.media("sstitle");
       let video      = match jeu.media("video-normalized") {
          Some(x) => { Some(x) },
          None    => {
@@ -95,6 +96,7 @@ impl Package {
       let bezel      = jeu.media("bezel-16-9");
       let marquee    = jeu.media("screenmarquee");
       let screenshot = jeu.media("ss");
+      let wheel      = jeu.media("wheel");
 
       Ok(Package {
          rom: file.to_string(),
@@ -102,23 +104,24 @@ impl Package {
          jeu,
          name: name.to_string(),
          medias: Medias {
-            box3d,
+            box2d,
             thumbnail,
             bezel,
             video,
             marquee,
-            screenshot
+            screenshot,
+            wheel
          }
       })
    }
 
    pub fn fetch(&mut self) -> Result<()> {
-      if let Some(ref mut x) = self.medias.box3d {
-         x.download("./box3d.png").context(MediaDownload { filename: "box-3D".to_string() })?;
+      if let Some(ref mut x) = self.medias.box2d {
+         x.download("./box2d.png").context(MediaDownload { filename: "box-2D".to_string() })?;
       }
 
       if let Some(ref mut x) = self.medias.thumbnail {
-         x.download("./thumbnail.png").context(MediaDownload { filename: "mixrbv2".to_string() })?;
+         x.download("./thumbnail.png").context(MediaDownload { filename: "thumbnail".to_string() })?;
       }
 
       if let Some(ref mut x) = self.medias.bezel {
@@ -135,6 +138,10 @@ impl Package {
 
       if let Some(ref mut x) = self.medias.screenshot {
          x.download("./screenshot.png").context(MediaDownload { filename: "ss".to_string() })?;
+      }
+
+      if let Some(ref mut x) = self.medias.wheel {
+         x.download("./wheel.png").context(MediaDownload { filename: "wheel".to_string() })?;
       }
 
       Ok(())
@@ -173,8 +180,8 @@ impl Package {
          pkgbuild.sha1sums.push(x.sha1.clone());
       }
 
-      if let Some(ref x) = self.medias.box3d {
-         pkgbuild.source.push("box3d.png".to_string());
+      if let Some(ref x) = self.medias.box2d {
+         pkgbuild.source.push("box2d.png".to_string());
          pkgbuild.sha1sums.push(x.sha1.clone());
       }
 
@@ -190,6 +197,11 @@ impl Package {
 
       if let Some(ref x) = self.medias.screenshot {
          pkgbuild.source.push("screenshot.png".to_string());
+         pkgbuild.sha1sums.push(x.sha1.clone());
+      }
+
+      if let Some(ref x) = self.medias.wheel {
+         pkgbuild.source.push("wheel.png".to_string());
          pkgbuild.sha1sums.push(x.sha1.clone());
       }
 
@@ -239,11 +251,11 @@ impl Package {
       let mut game    = Game::french(&self.jeu, &self.rom).unwrap();
 
       if let Some(_x) = &self.medias.thumbnail {
-         game.image     = Some(format!("./data/{}/thumbnail.png", romname));
+         game.image     = Some(format!("./data/{}/box2d.png", romname));
       }
 
-      if let Some(_x) = &self.medias.box3d {
-         game.thumbnail = Some(format!("./data/{}/box3d.png", romname));
+      if let Some(_x) = &self.medias.box2d {
+         game.thumbnail = Some(format!("./data/{}/thumbnail.png", romname));
       }
 
 
@@ -257,6 +269,10 @@ impl Package {
 
       if let Some(_x) = &self.medias.screenshot {
          game.screenshot= Some(format!("./data/{}/screenshot.png", romname));
+      }
+
+      if let Some(_x) = &self.medias.wheel {
+         game.wheel     = Some(format!("./data/{}/wheel.png", romname));
       }
 
       let s =  to_string(&game).unwrap();
