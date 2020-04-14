@@ -32,6 +32,7 @@ pub struct Medias {
    pub bezel:         Option<jeuinfos::Media>,
    pub video:         Option<jeuinfos::Media>,
    pub marquee:       Option<jeuinfos::Media>,
+   pub screenshot:    Option<jeuinfos::Media>,
 }
 
 pub struct Package {
@@ -83,16 +84,17 @@ impl Package {
    }
 
    pub fn new(mut jeu: JeuInfos, name: &String, file: &String, hash: &String) -> Result<Package> {
-      let box3d     = jeu.media("box-3D");
-      let thumbnail = jeu.media("mixrbv2");
-      let video     = match jeu.media("video-normalized") {
+      let box3d      = jeu.media("box-3D");
+      let thumbnail  = jeu.media("mixrbv2");
+      let video      = match jeu.media("video-normalized") {
          Some(x) => { Some(x) },
          None    => {
             jeu.media("video")
          }
       };
-      let bezel     = jeu.media("bezel-16-9");
-      let marquee   = jeu.media("screenmarquee");
+      let bezel      = jeu.media("bezel-16-9");
+      let marquee    = jeu.media("screenmarquee");
+      let screenshot = jeu.media("ss");
 
       Ok(Package {
          rom: file.to_string(),
@@ -104,7 +106,8 @@ impl Package {
             thumbnail,
             bezel,
             video,
-            marquee
+            marquee,
+            screenshot
          }
       })
    }
@@ -128,6 +131,10 @@ impl Package {
 
       if let Some(ref mut x) = self.medias.marquee {
          x.download("./marquee.png").context(MediaDownload { filename: "screenmarquee".to_string() })?;
+      }
+
+      if let Some(ref mut x) = self.medias.screenshot {
+         x.download("./screenshot.png").context(MediaDownload { filename: "ss".to_string() })?;
       }
 
       Ok(())
@@ -178,6 +185,11 @@ impl Package {
 
       if let Some(ref x) = self.medias.marquee {
          pkgbuild.source.push("marquee.png".to_string());
+         pkgbuild.sha1sums.push(x.sha1.clone());
+      }
+
+      if let Some(ref x) = self.medias.screenshot {
+         pkgbuild.source.push("screenshot.png".to_string());
          pkgbuild.sha1sums.push(x.sha1.clone());
       }
 
@@ -237,6 +249,14 @@ impl Package {
 
       if let Some(_x) = &self.medias.video {
          game.video     = Some(format!("./data/{}/video.mp4", romname));
+      }
+
+      if let Some(_x) = &self.medias.marquee {
+         game.marquee   = Some(format!("./data/{}/marquee.png", romname));
+      }
+
+      if let Some(_x) = &self.medias.screenshot {
+         game.screenshot= Some(format!("./data/{}/screenshot.png", romname));
       }
 
       let s =  to_string(&game).unwrap();

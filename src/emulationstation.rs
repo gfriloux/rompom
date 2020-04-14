@@ -26,7 +26,9 @@ pub struct Game {
    pub players:     String,
    pub image:       Option<String>,
    pub thumbnail:   Option<String>,
-   pub video:       Option<String>
+   pub video:       Option<String>,
+   pub marquee:     Option<String>,
+   pub screenshot:  Option<String>,
 }
 
 impl Game {
@@ -80,7 +82,9 @@ impl Game {
          players:     joueurs,
          image:       None,
          thumbnail:   None,
-         video:       None
+         video:       None,
+         marquee:     None,
+         screenshot:  None
       })
    }
 }
