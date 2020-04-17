@@ -49,6 +49,7 @@ fn main() {
    let     rom;
    let     id;
    let     matches;
+   let     pkgname;
    let     name;
    let     confdir;
    let mut package;
@@ -73,12 +74,13 @@ fn main() {
 
    let     conf     = Conf::load(&format!("{}/rompom.yml", confdir.display())).unwrap();
 
-   opts.optopt ("s", "system", "System to search for",     "SYSTEM");
-   opts.optopt ("r", "rom",    "Rom file to package",      "ROM"   );
-   opts.optopt ("i", "id",     "Game ID on Screenscraper", "ID"    );
-   opts.optopt ("n", "name",   "Game name",                "NAME"  );
-   opts.optflag("h", "help",   "print this help menu"              );
-   opts.optflag("u", "update", "Update package"                    );
+   opts.optopt ("s", "system",  "System to search for",     "SYSTEM" );
+   opts.optopt ("r", "rom",     "Rom file to package",      "ROM"    );
+   opts.optopt ("i", "id",      "Game ID on Screenscraper", "ID"     );
+   opts.optopt ("n", "name",    "Game name",                "NAME"   );
+   opts.optopt ("p", "package", "Package name",             "PACKAGE");
+   opts.optflag("h", "help",    "print this help menu"               );
+   opts.optflag("u", "update",  "Update package"                     );
 
    matches = match opts.parse(&args[1..]) {
       Ok (m) => { m }
@@ -101,8 +103,9 @@ fn main() {
                                     &format!("{}", reference.gameid),
                                     &hash,
                                     &reference.gamerom).unwrap();
-      rom = reference.gamerom;
-      name = PathBuf::from(rom.clone()).file_stem().unwrap().to_str().unwrap().to_string();
+      rom           = reference.gamerom;
+      name          = PathBuf::from(rom.clone()).file_stem().unwrap().to_str().unwrap().to_string();
+      pkgname       = name.clone();
    }
    else {
       systemid = match matches.opt_str("s") {
@@ -141,7 +144,16 @@ fn main() {
          None    => {
             rom.clone()
          }
-      }; 
+      };
+
+      pkgname = match matches.opt_str("p") {
+         Some(x) => {
+            x.to_string()
+         },
+         None    => {
+            rom.clone()
+         }
+      };
 
       system   = conf.system_find(systemid);
       hash = checksums::hash_file(Path::new(&rom), checksums::Algorithm::SHA1);
@@ -154,6 +166,7 @@ fn main() {
 
    pb.set_message(&format!("Downloading medias"));
    package  = Package::new(jeuinfos, &name, &rom, &hash).unwrap();
+   package.set_pkgname(&pkgname);
    package.fetch().unwrap();
 
    pb.println(format!("👌 Downloaded medias"));

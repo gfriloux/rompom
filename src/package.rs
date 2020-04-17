@@ -81,6 +81,8 @@ impl Package {
                                  .replace("$", "")
                                  .replace("~", "-")
                                  .replace("=", "-")
+                                 .replace("[", "")
+                                 .replace("]", "")
                                  .to_lowercase()
    }
 
@@ -113,6 +115,10 @@ impl Package {
             wheel
          }
       })
+   }
+
+   pub fn set_pkgname(&mut self, name: &String) {
+      self.name = name.clone();
    }
 
    pub fn fetch(&mut self) -> Result<()> {
@@ -167,6 +173,15 @@ impl Package {
       pkgbuild.source.push(sourcerom.clone());
       pkgbuild.sha1sums.push(self.hash.clone());
 
+      match system.id {
+         214 => {
+            // Create launcher
+            pkgbuild.source.push("launcher".to_string());
+            pkgbuild.sha1sums.push(checksums::hash_file(Path::new("launcher"), checksums::Algorithm::SHA1));
+         },
+         _   => { }
+      };
+
       pkgbuild.source.push("description.xml".to_string());
       pkgbuild.sha1sums.push(checksums::hash_file(Path::new("description.xml"), checksums::Algorithm::SHA1));
 
@@ -206,7 +221,7 @@ impl Package {
       }
 
       match system.id {
-         20 => {
+         20  => {
             pkgbuild.build.push("  IFS=$'\\n'".to_string());
             pkgbuild.build.push("  cuefile=$(ls *.cue)".to_string());
             pkgbuild.build.push("  sed -i \"s@FILE \\\"@FILE \\\"data/$_romname/@g\" ${cuefile}".to_string());
@@ -224,6 +239,27 @@ impl Package {
             pkgbuild.package.push(format!("    install -Dm600 {{,\"$pkgdir\"/roms/{}/data/$_romname/}}$file", system.dir));
             pkgbuild.package.push("  done".to_string());
 
+         },
+         214 => {
+            pkgbuild.build.push("  true".to_string());
+
+            pkgbuild.package.push(format!("  mkdir -p 0700 -p \"$pkgdir/roms/{}/data/$_romname/\" \"$pkgdir/roms/{}/.data/\"",
+                                          system.dir,
+                                          system.dir
+                                         )
+                                 );
+            pkgbuild.package.push(format!("  install -m 0600 '{}' \"$pkgdir/roms/{}/.data/\"",
+                                          self.rom.replace("$", "\\$"),
+                                          system.dir
+                                         )
+                                 );
+            pkgbuild.package.push(format!("  install -m 0700 launcher \"$pkgdir/roms/{}/${{pkgdesc}}.sh\"",
+                                          system.dir
+                                         )
+                                 );
+            pkgbuild.package.push("  for file in $(ls *.mp4 *.png *.xml); do".to_string());
+            pkgbuild.package.push(format!("    install -Dm600 {{,\"$pkgdir\"/roms/{}/data/$_romname/}}$file", system.dir));
+            pkgbuild.package.push("  done".to_string());
          }
          _ => {
             pkgbuild.build.push("  true".to_string());
@@ -273,6 +309,26 @@ impl Package {
 
       if let Some(_x) = &self.medias.wheel {
          game.wheel     = Some(format!("./data/{}/wheel.png", romname));
+      }
+
+      match system.id {
+         214 => {
+            // Create launcher
+            let mut s = String::new();
+
+            s.push_str("DIR=\"$(dirname \"$(readlink -f \"$0\")\")\"\n");
+            s.push_str("cd ${DIR}/.data/\n\n");
+            s.push_str("export LD_LIBRARY_PATH=\"${DIR}/.data/lib/\"\n");
+            s.push_str(&format!("./OpenBOR '{}'",
+                                self.rom.replace("'", "'\\''")
+                               )
+                      );
+            std::fs::write("./launcher", &s)
+                     .context(IoError { filename: "./launcher".to_string() })?;
+
+            game.path = format!("./{}.sh", game.name);
+         },
+         _ => { }
       }
 
       let s =  to_string(&game).unwrap();
