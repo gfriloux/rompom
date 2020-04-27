@@ -240,6 +240,38 @@ impl Package {
             pkgbuild.package.push("  done".to_string());
 
          },
+         57  => {
+            pkgbuild.build.push(
+               "  IFS=$'\\n'".to_string()
+            );
+            pkgbuild.build.push(
+               "  for file in $(ls *.chd); do".to_string()
+            );
+
+            pkgbuild.build.push(
+               "    echo \".data/$_romname/${file}\" >>${pkgdesc}.m3u".to_string()
+            );
+
+            pkgbuild.build.push(
+               "  done".to_string()
+            );
+
+            pkgbuild.package.push(format!("  mkdir -p 0700 -p \"$pkgdir/roms/{}/data/$_romname/\" \"$pkgdir/roms/{}/.data/$_romname\"",
+                                          system.dir,
+                                          system.dir
+                                         )
+            );
+            
+            pkgbuild.package.push(
+               format!("  install -m 0600 *.chd \"$pkgdir/roms/{}/.data/$_romname/\"", system.dir)
+            );
+            pkgbuild.package.push(
+               format!("  install -m 0600 \"${{pkgdesc}}.m3u\" \"$pkgdir/roms/{}/\"", system.dir)
+            );
+            pkgbuild.package.push("  for file in $(ls *.mp4 *.png *.xml); do".to_string());
+            pkgbuild.package.push(format!("    install -Dm600 {{,\"$pkgdir\"/roms/{}/data/$_romname/}}$file", system.dir));
+            pkgbuild.package.push("  done".to_string());
+         }
          214 => {
             pkgbuild.build.push("  true".to_string());
 
@@ -327,6 +359,9 @@ impl Package {
                      .context(IoError { filename: "./launcher".to_string() })?;
 
             game.path = format!("./{}.sh", game.name);
+         },
+         57 => {
+            game.path = format!("./{}.m3u", game.name);
          },
          _ => { }
       }
