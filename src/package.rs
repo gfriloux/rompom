@@ -249,7 +249,7 @@ impl Package {
             );
 
             pkgbuild.build.push(
-               "    echo \".data/$_romname/${file}\" >>${pkgdesc}.m3u".to_string()
+               "    echo \".data/$_romname/${file}\" >>${_romname}.m3u".to_string()
             );
 
             pkgbuild.build.push(
@@ -261,7 +261,7 @@ impl Package {
                                           system.dir
                                          )
             );
-            
+
             pkgbuild.package.push(
                format!("  install -m 0600 *.chd \"$pkgdir/roms/{}/.data/$_romname/\"", system.dir)
             );
