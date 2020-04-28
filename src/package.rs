@@ -266,7 +266,7 @@ impl Package {
                format!("  install -m 0600 *.chd \"$pkgdir/roms/{}/.data/$_romname/\"", system.dir)
             );
             pkgbuild.package.push(
-               format!("  install -m 0600 \"${{pkgdesc}}.m3u\" \"$pkgdir/roms/{}/\"", system.dir)
+               format!("  install -m 0600 \"${{_romname}}.m3u\" \"$pkgdir/roms/{}/\"", system.dir)
             );
             pkgbuild.package.push("  for file in $(ls *.mp4 *.png *.xml); do".to_string());
             pkgbuild.package.push(format!("    install -Dm600 {{,\"$pkgdir\"/roms/{}/data/$_romname/}}$file", system.dir));
@@ -361,7 +361,7 @@ impl Package {
             game.path = format!("./{}.sh", game.name);
          },
          57 => {
-            game.path = format!("./{}.m3u", game.name);
+            game.path = format!("./{}.m3u", romname);
          },
          _ => { }
       }
