@@ -33,6 +33,6 @@ pub struct Ssuser {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Response {
-   pub ssuser:   Ssuser,
+   pub ssuser:   Option<Ssuser>,
    pub jeu:      JeuInfos,
 }
