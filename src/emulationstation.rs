@@ -1,7 +1,7 @@
 use snafu::Snafu;
 use chrono::prelude::*;
 
-use jeuinfos::{
+use super::jeuinfos::{
    GenericIdText,
    JeuInfos
 };

@@ -8,10 +8,9 @@ use std::{
 };
 
 use snafu::{ResultExt, Snafu};
-
-use screenscraper::Header;
-use screenscraper::Response;
-use conf::{
+use super::screenscraper::Header;
+use super::screenscraper::Response;
+use super::conf::{
    Conf,
    System
 };
@@ -146,7 +145,7 @@ type Result<T, E = Error> = std::result::Result<T, E>;
 
 impl JeuInfos {
    pub fn get(conf: &Conf, system: &System, game: &String, sha1: &String, rom: &String) -> Result<JeuInfos> {
-      let     client = reqwest::Client::new();
+      let     client = reqwest::blocking::Client::new();
       let mut s;
       let     response: JeuInfosResult;
       let     url    = "https://www.screenscraper.fr/api2/jeuInfos.php";
@@ -169,9 +168,10 @@ impl JeuInfos {
          query.push(("gameid"     , game.to_string()));
       }
 
-      let mut res    = client.get(url)
+      let res    = client.get(url)
                              .query(&query)
-                             .send().context(DownloadFailed { filename: PathBuf::from(&url) })?;
+                             .send()
+	                         .context(DownloadFailed { filename: PathBuf::from(&url) })?;
 
       s = res.text().context(DownloadFailed { filename: PathBuf::from(&url) })?;
 //println!("{}", s);
@@ -295,7 +295,8 @@ impl Media {
          }
       }
 
-      let mut src = reqwest::get(&self.url).context(DownloadFailed { filename: PathBuf::from(&self.url) })?;
+      let mut src = reqwest::blocking::get(&self.url)
+	                        .context(DownloadFailed { filename: PathBuf::from(&self.url) })?;
       let mut dst = File::create(path).context(WriteFailed { filename: PathBuf::from(path) })?;
       copy(&mut src, &mut dst).context(WriteFailed { filename: PathBuf::from(path) })?;
 

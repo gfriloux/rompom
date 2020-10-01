@@ -29,9 +29,9 @@ use indicatif::{
    ProgressStyle
 };
 
-use jeuinfos::JeuInfos;
-use package::Package;
-use conf::{
+use crate::jeuinfos::JeuInfos;
+use crate::package::Package;
+use crate::conf::{
    Conf,
    Reference
 };

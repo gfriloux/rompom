@@ -7,10 +7,10 @@ use std::{
    fmt
 };
 
-use jeuinfos;
-use jeuinfos::JeuInfos;
-use conf::System;
-use emulationstation::Game;
+use super::jeuinfos;
+use super::jeuinfos::JeuInfos;
+use super::conf::System;
+use super::emulationstation::Game;
 
 pub struct Pkgbuild {
    pub pkgname:  String,

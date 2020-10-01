@@ -1,4 +1,4 @@
-use jeuinfos::JeuInfos;
+use super::jeuinfos::JeuInfos;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Header {

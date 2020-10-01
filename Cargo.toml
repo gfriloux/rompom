@@ -1,18 +1,20 @@
 [package]
-name         = "rompom"
-version      = "0.0.1"
-authors      = ["Guillaume Friloux <guillaume@friloux.me>"]
+edition = "2018"
+authors = ["Guillaume Friloux <guillaume@friloux.me>"]
+name = "rompom"
+version = "0.0.1"
 
 [dependencies]
-serde        = "*"
-serde_json   = "*"
-serde_derive = "*"
-reqwest      = "*"
-getopts      = "*"
-checksums    = "*"
-snafu        = "*"
+checksums = "*"
+chrono = "*"
+dirs = "*"
+getopts = "*"
+indicatif = "*"
+serde = "*"
 serde-xml-rs = "*"
-chrono       = "*"
-serde_yaml   = "*"
-dirs         = "*"
-indicatif    = "*"
+serde_derive = "*"
+serde_json = "*"
+serde_yaml = "*"
+snafu = "*"
+reqwest = { version = "*", features = ["blocking"] }
+openssl = { version = '0.10', features = ["vendored"] }
