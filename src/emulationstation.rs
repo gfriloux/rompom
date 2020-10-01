@@ -30,6 +30,7 @@ pub struct Game {
    pub marquee:     Option<String>,
    pub screenshot:  Option<String>,
    pub wheel:       Option<String>,
+   pub manual:      Option<String>,
 }
 
 impl Game {
@@ -86,7 +87,8 @@ impl Game {
          video:       None,
          marquee:     None,
          screenshot:  None,
-         wheel:       None
+         wheel:       None,
+		 manual:      None
       })
    }
 }
