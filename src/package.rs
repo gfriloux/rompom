@@ -173,15 +173,6 @@ impl Package {
       pkgbuild.source.push(sourcerom.clone());
       pkgbuild.sha1sums.push(self.hash.clone());
 
-      match system.id {
-         214 => {
-            // Create launcher
-            pkgbuild.source.push("launcher".to_string());
-            pkgbuild.sha1sums.push(checksums::hash_file(Path::new("launcher"), checksums::Algorithm::SHA1));
-         },
-         _   => { }
-      };
-
       pkgbuild.source.push("description.xml".to_string());
       pkgbuild.sha1sums.push(checksums::hash_file(Path::new("description.xml"), checksums::Algorithm::SHA1));
 
@@ -268,27 +259,6 @@ impl Package {
             pkgbuild.package.push(
                format!("  install -m 0600 \"${{_romname}}.m3u\" \"$pkgdir/roms/{}/\"", system.dir)
             );
-            pkgbuild.package.push("  for file in $(ls *.mp4 *.png *.xml); do".to_string());
-            pkgbuild.package.push(format!("    install -Dm600 {{,\"$pkgdir\"/roms/{}/data/$_romname/}}$file", system.dir));
-            pkgbuild.package.push("  done".to_string());
-         }
-         214 => {
-            pkgbuild.build.push("  true".to_string());
-
-            pkgbuild.package.push(format!("  mkdir -p 0700 -p \"$pkgdir/roms/{}/data/$_romname/\" \"$pkgdir/roms/{}/.data/\"",
-                                          system.dir,
-                                          system.dir
-                                         )
-                                 );
-            pkgbuild.package.push(format!("  install -m 0600 '{}' \"$pkgdir/roms/{}/.data/\"",
-                                          self.rom.replace("$", "\\$"),
-                                          system.dir
-                                         )
-                                 );
-            pkgbuild.package.push(format!("  install -m 0700 launcher \"$pkgdir/roms/{}/${{pkgdesc}}.sh\"",
-                                          system.dir
-                                         )
-                                 );
             pkgbuild.package.push("  for file in $(ls *.mp4 *.png *.xml); do".to_string());
             pkgbuild.package.push(format!("    install -Dm600 {{,\"$pkgdir\"/roms/{}/data/$_romname/}}$file", system.dir));
             pkgbuild.package.push("  done".to_string());
