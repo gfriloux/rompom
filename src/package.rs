@@ -34,6 +34,7 @@ pub struct Medias {
    pub marquee:       Option<jeuinfos::Media>,
    pub screenshot:    Option<jeuinfos::Media>,
    pub wheel:         Option<jeuinfos::Media>,
+   pub manual:        Option<jeuinfos::Media>,
 }
 
 pub struct Package {
@@ -99,6 +100,7 @@ impl Package {
       let marquee    = jeu.media("screenmarquee");
       let screenshot = jeu.media("ss");
       let wheel      = jeu.media("wheel");
+      let manual     = jeu.media("manuel");
 
       Ok(Package {
          rom: file.to_string(),
@@ -112,7 +114,8 @@ impl Package {
             video,
             marquee,
             screenshot,
-            wheel
+            wheel,
+            manual
          }
       })
    }
@@ -148,6 +151,10 @@ impl Package {
 
       if let Some(ref mut x) = self.medias.wheel {
          x.download("./wheel.png").context(MediaDownload { filename: "wheel".to_string() })?;
+      }
+
+      if let Some(ref mut x) = self.medias.manual {
+      	x.download("./manual.pdf").context(MediaDownload { filename: "manuel".to_string() })?;
       }
 
       Ok(())
@@ -211,6 +218,11 @@ impl Package {
          pkgbuild.sha1sums.push(x.sha1.clone());
       }
 
+      if let Some(ref x) = self.medias.manual {
+         pkgbuild.source.push("manual.pdf".to_string());
+         pkgbuild.sha1sums.push(x.sha1.clone());
+      }
+
       match system.id {
          20  => {
             pkgbuild.build.push("  IFS=$'\\n'".to_string());
@@ -226,7 +238,7 @@ impl Package {
             pkgbuild.package.push("  done".to_string());
 
             pkgbuild.package.push(format!("  sed -i \"s|{}|$cuefile|\" description.xml", self.rom.replace("$", "\\$")));
-            pkgbuild.package.push("  for file in $(ls *.mp4 *.png *.xml); do".to_string());
+            pkgbuild.package.push("  for file in $(ls *.mp4 *.png *.xml *.pdf); do".to_string());
             pkgbuild.package.push(format!("    install -Dm600 {{,\"$pkgdir\"/roms/{}/data/$_romname/}}$file", system.dir));
             pkgbuild.package.push("  done".to_string());
 
@@ -259,7 +271,7 @@ impl Package {
             pkgbuild.package.push(
                format!("  install -m 0600 \"${{_romname}}.m3u\" \"$pkgdir/roms/{}/\"", system.dir)
             );
-            pkgbuild.package.push("  for file in $(ls *.mp4 *.png *.xml); do".to_string());
+            pkgbuild.package.push("  for file in $(ls *.mp4 *.png *.xml *.pdf); do".to_string());
             pkgbuild.package.push(format!("    install -Dm600 {{,\"$pkgdir\"/roms/{}/data/$_romname/}}$file", system.dir));
             pkgbuild.package.push("  done".to_string());
          }
@@ -273,7 +285,7 @@ impl Package {
                system.dir,
                self.rom.replace("$", "\\$")
             ));
-            pkgbuild.package.push("  for file in $(ls *.mp4 *.png *.xml); do".to_string());
+            pkgbuild.package.push("  for file in $(ls *.mp4 *.png *.xml *.pdf); do".to_string());
             pkgbuild.package.push(format!("    install -Dm600 {{,\"$pkgdir\"/roms/{}/data/$_romname/}}$file", system.dir));
             pkgbuild.package.push("  done".to_string());
          }
@@ -311,6 +323,10 @@ impl Package {
 
       if let Some(_x) = &self.medias.wheel {
          game.wheel     = Some(format!("./data/{}/wheel.png", romname));
+      }
+
+      if let Some(_x) = &self.medias.manual {
+         game.manual     = Some(format!("./data/{}/manual.pdf", romname));
       }
 
       match system.id {
