@@ -27,7 +27,7 @@ pub struct Pkgbuild {
 }
 
 pub struct Medias {
-   pub box2d:         Option<jeuinfos::Media>,
+   pub image:         Option<jeuinfos::Media>,
    pub thumbnail:     Option<jeuinfos::Media>,
    pub bezel:         Option<jeuinfos::Media>,
    pub video:         Option<jeuinfos::Media>,
@@ -88,8 +88,8 @@ impl Package {
    }
 
    pub fn new(mut jeu: JeuInfos, name: &String, file: &String, hash: &String) -> Result<Package> {
-      let box2d      = jeu.media("box-2D");
-      let thumbnail  = jeu.media("sstitle");
+      let thumbnail  = jeu.media("box-2D");
+      let image      = jeu.media("sstitle");
       let video      = match jeu.media("video-normalized") {
          Some(x) => { Some(x) },
          None    => {
@@ -97,7 +97,7 @@ impl Package {
          }
       };
       let bezel      = jeu.media("bezel-16-9");
-      let marquee    = jeu.media("screenmarquee");
+      let marquee    = jeu.media("marquee");
       let screenshot = jeu.media("ss");
       let wheel      = jeu.media("wheel");
       let manual     = jeu.media("manuel");
@@ -108,7 +108,7 @@ impl Package {
          jeu,
          name: name.to_string(),
          medias: Medias {
-            box2d,
+            image,
             thumbnail,
             bezel,
             video,
@@ -122,42 +122,6 @@ impl Package {
 
    pub fn set_pkgname(&mut self, name: &String) {
       self.name = name.clone();
-   }
-
-   pub fn fetch(&mut self) -> Result<()> {
-      if let Some(ref mut x) = self.medias.box2d {
-         x.download("./box2d.png").context(MediaDownload { filename: "box-2D".to_string() })?;
-      }
-
-      if let Some(ref mut x) = self.medias.thumbnail {
-         x.download("./thumbnail.png").context(MediaDownload { filename: "thumbnail".to_string() })?;
-      }
-
-      if let Some(ref mut x) = self.medias.bezel {
-         x.download("./bezel.png").context(MediaDownload { filename: "bezel-16-9".to_string() })?;
-      }
-
-      if let Some(ref mut x) = self.medias.video {
-         x.download("./video.mp4").context(MediaDownload { filename: "video-normalized".to_string() })?;
-      }
-
-      if let Some(ref mut x) = self.medias.marquee {
-         x.download("./marquee.png").context(MediaDownload { filename: "screenmarquee".to_string() })?;
-      }
-
-      if let Some(ref mut x) = self.medias.screenshot {
-         x.download("./screenshot.png").context(MediaDownload { filename: "ss".to_string() })?;
-      }
-
-      if let Some(ref mut x) = self.medias.wheel {
-         x.download("./wheel.png").context(MediaDownload { filename: "wheel".to_string() })?;
-      }
-
-      if let Some(ref mut x) = self.medias.manual {
-      	x.download("./manual.pdf").context(MediaDownload { filename: "manuel".to_string() })?;
-      }
-
-      Ok(())
    }
 
    pub fn build_pkgbuild(&mut self, system: &System, game: &Game) -> Result<()> {
@@ -184,37 +148,64 @@ impl Package {
       pkgbuild.sha1sums.push(checksums::hash_file(Path::new("description.xml"), checksums::Algorithm::SHA1));
 
       if let Some(ref x) = self.medias.video {
-         pkgbuild.source.push("video.mp4".to_string());
+         pkgbuild.source.push(format!(
+         							  "video.mp4::https://screenscraper.fr/medias/{}/{}/video.mp4",
+         							  system.id,
+         							  self.jeu.id
+         							 ));
          pkgbuild.sha1sums.push(x.sha1.clone());
       }
 
       if let Some(ref x) = self.medias.bezel {
-         pkgbuild.source.push("bezel.png".to_string());
+         pkgbuild.source.push(format!("bezel.png::https://screenscraper.fr/medias/{}/{}/marquee.png",
+                                      system.id,
+                                      self.jeu.id
+                                     ));
          pkgbuild.sha1sums.push(x.sha1.clone());
       }
 
-      if let Some(ref x) = self.medias.box2d {
-         pkgbuild.source.push("box2d.png".to_string());
+      if let Some(ref x) = self.medias.image {
+         pkgbuild.source.push(format!(
+         							  "image.png::https://screenscraper.fr/medias/{}/{}/sstitle({}).png",
+         							  system.id,
+         							  self.jeu.id,
+         							  x.region.as_ref().unwrap_or(&"wor".to_string())
+         							 ));
          pkgbuild.sha1sums.push(x.sha1.clone());
       }
 
       if let Some(ref x) = self.medias.thumbnail {
-         pkgbuild.source.push("thumbnail.png".to_string());
+         pkgbuild.source.push(format!("thumbnail.png::https://screenscraper.fr/medias/{}/{}/box-2D({}).png",
+                  					  system.id,
+                  					  self.jeu.id,
+                  					  x.region.as_ref().unwrap_or(&"wor".to_string())
+                  					 ));
          pkgbuild.sha1sums.push(x.sha1.clone());
       }
 
       if let Some(ref x) = self.medias.marquee {
-         pkgbuild.source.push("marquee.png".to_string());
+         pkgbuild.source.push(format!("marquee.png::https://screenscraper.fr/medias/{}/{}/marquee.png",
+                           			  system.id,
+                           			  self.jeu.id
+                           			 ));
          pkgbuild.sha1sums.push(x.sha1.clone());
       }
 
       if let Some(ref x) = self.medias.screenshot {
-         pkgbuild.source.push("screenshot.png".to_string());
+         pkgbuild.source.push(format!("screenshot.png::https://screenscraper.fr/medias/{}/{}/ss({}).png",
+                           			  system.id,
+                           			  self.jeu.id,
+                           			  x.region.as_ref().unwrap_or(&"wor".to_string())
+                           			 ));
          pkgbuild.sha1sums.push(x.sha1.clone());
       }
 
       if let Some(ref x) = self.medias.wheel {
-         pkgbuild.source.push("wheel.png".to_string());
+         pkgbuild.source.push(format!("wheel.png::https://screenscraper.fr/medias/{}/{}/wheel({}).png",
+                                 	  system.id,
+                                 	  self.jeu.id,
+                                 	  x.region.as_ref().unwrap_or(&"wor".to_string())
+                                 	  ));
          pkgbuild.sha1sums.push(x.sha1.clone());
       }
 
@@ -230,16 +221,16 @@ impl Package {
             pkgbuild.build.push("  sed -i \"s@FILE \\\"@FILE \\\"data/$_romname/@g\" ${cuefile}".to_string());
 
             pkgbuild.package.push("  IFS=$'\\n'".to_string());
-            pkgbuild.package.push("  mkdir -m 0700 -p \"$pkgdir/roms/segacd/data/$_romname/\"".to_string());
+            pkgbuild.package.push("  mkdir -m 0700 -p \"$pkgdir/userdata/roms/segacd/data/$_romname/\"".to_string());
             pkgbuild.package.push("  cuefile=$(ls *.cue)".to_string());
-            pkgbuild.package.push("  install -Dm600 ${cuefile} \"$pkgdir\"/roms/segacd/${cuefile}".to_string());
+            pkgbuild.package.push("  install -Dm600 ${cuefile} \"$pkgdir\"/userdata/roms/segacd/${cuefile}".to_string());
             pkgbuild.package.push("  for file in $(ls *.bin); do".to_string());
-            pkgbuild.package.push("    install -Dm600 {,\"$pkgdir\"/roms/segacd/data/$_romname/}${file}".to_string());
+            pkgbuild.package.push("    install -Dm600 {,\"$pkgdir\"/userdata/roms/segacd/data/$_romname/}${file}".to_string());
             pkgbuild.package.push("  done".to_string());
 
             pkgbuild.package.push(format!("  sed -i \"s|{}|$cuefile|\" description.xml", self.rom.replace("$", "\\$")));
             pkgbuild.package.push("  for file in $(ls *.mp4 *.png *.xml *.pdf); do".to_string());
-            pkgbuild.package.push(format!("    install -Dm600 {{,\"$pkgdir\"/roms/{}/data/$_romname/}}$file", system.dir));
+            pkgbuild.package.push(format!("    install -Dm600 {{,\"$pkgdir\"/userdata/roms/{}/data/$_romname/}}$file", system.dir));
             pkgbuild.package.push("  done".to_string());
 
          },
@@ -259,35 +250,39 @@ impl Package {
                "  done".to_string()
             );
 
-            pkgbuild.package.push(format!("  mkdir -p 0700 -p \"$pkgdir/roms/{}/data/$_romname/\" \"$pkgdir/roms/{}/.data/$_romname\"",
+            pkgbuild.package.push(format!("  mkdir -p 0700 -p \"$pkgdir/userdata/roms/{}/data/$_romname/\" \"$pkgdir/userdata/roms/{}/.data/$_romname\"",
                                           system.dir,
                                           system.dir
                                          )
             );
 
             pkgbuild.package.push(
-               format!("  install -m 0600 *.chd \"$pkgdir/roms/{}/.data/$_romname/\"", system.dir)
+               format!("  install -m 0600 *.chd \"$pkgdir/userdata/roms/{}/.data/$_romname/\"", system.dir)
             );
             pkgbuild.package.push(
-               format!("  install -m 0600 \"${{_romname}}.m3u\" \"$pkgdir/roms/{}/\"", system.dir)
+               format!("  install -m 0600 \"${{_romname}}.m3u\" \"$pkgdir/userdata/roms/{}/\"", system.dir)
             );
             pkgbuild.package.push("  for file in $(ls *.mp4 *.png *.xml *.pdf); do".to_string());
-            pkgbuild.package.push(format!("    install -Dm600 {{,\"$pkgdir\"/roms/{}/data/$_romname/}}$file", system.dir));
+            pkgbuild.package.push(format!("    install -Dm600 {{,\"$pkgdir\"/userdata/roms/{}/data/$_romname/}}$file", system.dir));
             pkgbuild.package.push("  done".to_string());
          }
          _ => {
             pkgbuild.build.push("  true".to_string());
 
-            pkgbuild.package.push(format!("  mkdir -m 0700 -p \"$pkgdir/roms/{}/data/$_romname/\"", system.dir));
+            pkgbuild.package.push(format!("  mkdir -m 0700 -p \"$pkgdir/userdata/roms/{}/data/$_romname/\" \\", system.dir));
+            pkgbuild.package.push("                   \"$pkgdir/userdata/system/pacman/batoexec/\"".to_string());
             pkgbuild.package.push(format!(
-               "  install -Dm600 \"{}\" \"$pkgdir\"/roms/{}/\"{}\"",
+               "  install -Dm600 \"{}\" \"$pkgdir\"/userdata/roms/{}/\"{}\"",
                self.rom.replace("$", "\\$"),
                system.dir,
                self.rom.replace("$", "\\$")
             ));
             pkgbuild.package.push("  for file in $(ls *.mp4 *.png *.xml *.pdf); do".to_string());
-            pkgbuild.package.push(format!("    install -Dm600 {{,\"$pkgdir\"/roms/{}/data/$_romname/}}$file", system.dir));
+            pkgbuild.package.push(format!("    install -Dm600 {{,\"$pkgdir\"/userdata/roms/{}/data/$_romname/}}$file", system.dir));
             pkgbuild.package.push("  done".to_string());
+
+            pkgbuild.package.push(format!("   echo \"gamelist = {}\" >  \"$pkgdir\"/userdata/system/pacman/batoexec/${{pkgname[0]}}", system.dir));
+            pkgbuild.package.push("   cat description.xml          >> \"$pkgdir\"/userdata/system/pacman/batoexec/${pkgname[0]}".to_string());
          }
       };
 
@@ -301,11 +296,11 @@ impl Package {
       let mut game    = Game::french(&self.jeu, &self.rom).unwrap();
 
       if let Some(_x) = &self.medias.thumbnail {
-         game.image     = Some(format!("./data/{}/box2d.png", romname));
+         game.image     = Some(format!("./data/{}/thumbnail.png", romname));
       }
 
-      if let Some(_x) = &self.medias.box2d {
-         game.thumbnail = Some(format!("./data/{}/thumbnail.png", romname));
+      if let Some(_x) = &self.medias.image {
+         game.thumbnail = Some(format!("./data/{}/image.png", romname));
       }
 
 
@@ -354,7 +349,7 @@ impl Package {
 
       let s =  to_string(&game).unwrap();
 
-      std::fs::write("./description.xml", &s)
+      std::fs::write("./description.xml", &s.replace("Game>", "game>"))
          .context(IoError { filename: "./description.xml".to_string() })?;
 
       self.build_pkgbuild(system, &game).unwrap();
