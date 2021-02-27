@@ -223,7 +223,7 @@ impl Package {
 		 let i           = x.url.find("media=").unwrap() + 6;
 		 let (_, region) = x.url.split_at(i);
 
-         pkgbuild.source.push(format!("manual.pdf::https://screenscraper.fr/medias/{}/{}/manuel({}).pdf",
+         pkgbuild.source.push(format!("manual.pdf::https://screenscraper.fr/medias/{}/{}/{}.pdf",
                                       system.id,
                                       self.jeu.id,
                                       region
