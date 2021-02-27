@@ -157,9 +157,10 @@ impl Package {
       }
 
       if let Some(ref x) = self.medias.bezel {
-         pkgbuild.source.push(format!("bezel.png::https://screenscraper.fr/medias/{}/{}/marquee.png",
+         pkgbuild.source.push(format!("bezel.png::https://screenscraper.fr/medias/{}/{}/bezel-16-9({}).png",
                                       system.id,
-                                      self.jeu.id
+                                      self.jeu.id,
+                                      x.region.as_ref().unwrap_or(&"wor".to_string())
                                      ));
          pkgbuild.sha1sums.push(x.sha1.clone());
       }
@@ -201,16 +202,32 @@ impl Package {
       }
 
       if let Some(ref x) = self.medias.wheel {
-         pkgbuild.source.push(format!("wheel.png::https://screenscraper.fr/medias/{}/{}/wheel({}).png",
+         // ScreenScraper's region are often false concerning wheels.
+         // It can reference an 'us' region while the URL links to 'wor', etc.
+         // Very confusing.
+		 let i           = x.url.find("media=").unwrap() + 6;
+		 let (_, region) = x.url.split_at(i);
+
+         pkgbuild.source.push(format!("wheel.png::https://screenscraper.fr/medias/{}/{}/{}.png",
                                  	  system.id,
                                  	  self.jeu.id,
-                                 	  x.region.as_ref().unwrap_or(&"wor".to_string())
+                                 	  region
                                  	  ));
          pkgbuild.sha1sums.push(x.sha1.clone());
       }
 
       if let Some(ref x) = self.medias.manual {
-         pkgbuild.source.push("manual.pdf".to_string());
+         // ScreenScraper's region are often false concerning manuals.
+         // It can reference an 'us' region while the URL links to 'wor', etc.
+         // Very confusing.
+		 let i           = x.url.find("media=").unwrap() + 6;
+		 let (_, region) = x.url.split_at(i);
+
+         pkgbuild.source.push(format!("manual.pdf::https://screenscraper.fr/medias/{}/{}/manuel({}).pdf",
+                                      system.id,
+                                      self.jeu.id,
+                                      region
+         							  ));
          pkgbuild.sha1sums.push(x.sha1.clone());
       }
 
