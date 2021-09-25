@@ -115,7 +115,7 @@ impl Package {
             marquee,
             screenshot,
             wheel,
-            manual
+            manual,
          }
       })
    }
@@ -166,21 +166,32 @@ impl Package {
       }
 
       if let Some(ref x) = self.medias.image {
-         pkgbuild.source.push(format!(
-         							  "image.png::https://screenscraper.fr/medias/{}/{}/sstitle({}).png",
-         							  system.id,
-         							  self.jeu.id,
-         							  x.region.as_ref().unwrap_or(&"wor".to_string())
-         							 ));
+         // ScreenScraper's region are often false concerning wheels.
+         // It can reference an 'us' region while the URL links to 'wor', etc.
+         // Very confusing.
+		 let i           = x.url.find("media=").unwrap() + 6;
+		 let (_, region) = x.url.split_at(i);
+
+         pkgbuild.source.push(format!("image.png::https://screenscraper.fr/medias/{}/{}/{}.png",
+                                 	  system.id,
+                                 	  self.jeu.id,
+                                 	  region
+                                 	  ));
          pkgbuild.sha1sums.push(x.sha1.clone());
       }
 
       if let Some(ref x) = self.medias.thumbnail {
-         pkgbuild.source.push(format!("thumbnail.png::https://screenscraper.fr/medias/{}/{}/box-2D({}).png",
-                  					  system.id,
-                  					  self.jeu.id,
-                  					  x.region.as_ref().unwrap_or(&"wor".to_string())
-                  					 ));
+         // ScreenScraper's region are often false concerning wheels.
+         // It can reference an 'us' region while the URL links to 'wor', etc.
+         // Very confusing.
+		 let i           = x.url.find("media=").unwrap() + 6;
+		 let (_, region) = x.url.split_at(i);
+
+         pkgbuild.source.push(format!("thumbnail.png::https://screenscraper.fr/medias/{}/{}/{}.png",
+                                 	  system.id,
+                                 	  self.jeu.id,
+                                 	  region
+                                 	  ));
          pkgbuild.sha1sums.push(x.sha1.clone());
       }
 
@@ -251,7 +262,7 @@ impl Package {
             pkgbuild.package.push("  done".to_string());
 
          },
-         57  => {
+         22 | 57  => {
             pkgbuild.build.push(
                "  IFS=$'\\n'".to_string()
             );
@@ -266,6 +277,9 @@ impl Package {
             pkgbuild.build.push(
                "  done".to_string()
             );
+
+            pkgbuild.package.push(format!("  mkdir -m 0700 -p \"$pkgdir/userdata/roms/{}/data/$_romname/\" \\", system.dir));
+            pkgbuild.package.push("                   \"$pkgdir/userdata/system/pacman/batoexec/\"".to_string());
 
             pkgbuild.package.push(format!("  mkdir -p 0700 -p \"$pkgdir/userdata/roms/{}/data/$_romname/\" \"$pkgdir/userdata/roms/{}/.data/$_romname\"",
                                           system.dir,
@@ -282,6 +296,9 @@ impl Package {
             pkgbuild.package.push("  for file in $(ls *.mp4 *.png *.xml *.pdf); do".to_string());
             pkgbuild.package.push(format!("    install -Dm600 {{,\"$pkgdir\"/userdata/roms/{}/data/$_romname/}}$file", system.dir));
             pkgbuild.package.push("  done".to_string());
+
+            pkgbuild.package.push(format!("   echo \"gamelist = {}\" >  \"$pkgdir\"/userdata/system/pacman/batoexec/${{pkgname[0]}}", system.dir));
+            pkgbuild.package.push("   cat description.xml          >> \"$pkgdir\"/userdata/system/pacman/batoexec/${pkgname[0]}".to_string());
          }
          _ => {
             pkgbuild.build.push("  true".to_string());
@@ -294,7 +311,7 @@ impl Package {
                system.dir,
                self.rom.replace("$", "\\$")
             ));
-            pkgbuild.package.push("  for file in $(ls *.mp4 *.png *.xml *.pdf); do".to_string());
+            pkgbuild.package.push("  for file in $(ls *.mp4 *.png *.jpg *.xml *.pdf); do".to_string());
             pkgbuild.package.push(format!("    install -Dm600 {{,\"$pkgdir\"/userdata/roms/{}/data/$_romname/}}$file", system.dir));
             pkgbuild.package.push("  done".to_string());
 
@@ -358,7 +375,7 @@ impl Package {
 
             game.path = format!("./{}.sh", game.name);
          },
-         57 => {
+         22 | 57 => {
             game.path = format!("./{}.m3u", romname);
          },
          _ => { }
