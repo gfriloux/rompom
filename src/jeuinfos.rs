@@ -285,28 +285,3 @@ impl JeuInfos {
       "Unknown".to_string()
    }
 }
-
-impl Media {
-   pub fn download(&mut self, path: &str) -> Result<()> {
-      if Path::new(path).exists() == true {
-         let hash = checksums::hash_file(Path::new(&path), checksums::Algorithm::SHA1);
-         if &hash.to_lowercase() == &self.sha1.to_lowercase() {
-            return Ok(());
-         }
-      }
-
-      let mut src = reqwest::blocking::get(&self.url)
-	                        .context(DownloadFailed { filename: PathBuf::from(&self.url) })?;
-      let mut dst = File::create(path).context(WriteFailed { filename: PathBuf::from(path) })?;
-      copy(&mut src, &mut dst).context(WriteFailed { filename: PathBuf::from(path) })?;
-
-      // We cannot trust SHA1 returned by SS, see issue #11
-      let hash = checksums::hash_file(Path::new(&path), checksums::Algorithm::SHA1);
-
-      if ! hash.is_empty() {
-         self.sha1 = hash;
-      }
-
-      Ok(())
-   }
-}

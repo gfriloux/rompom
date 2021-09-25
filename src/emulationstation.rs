@@ -24,6 +24,7 @@ pub struct Game {
    pub publisher:   String,
    pub genre:       String,
    pub players:     String,
+   pub region:      String,
    pub image:       Option<String>,
    pub thumbnail:   Option<String>,
    pub video:       Option<String>,
@@ -47,6 +48,7 @@ impl Game {
          Some(x) => { x.text.clone()        }
          None    => { "Unknown".to_string() }
       };
+      let mut region   = "".to_string();
 
       if let Some(ref x) = &jeu.note {
          rating = x.text.parse::<f32>().unwrap_or(0.0) / 20.0;
@@ -72,6 +74,12 @@ impl Game {
       let dt       = DateTime::parse_from_str(&fulldate,
                                               "%Y-%m-%d %H:%M:%S %z").unwrap();
 
+	  if let Some(ref x) = jeu.rom {
+	    if let Some(ref y) = x.romregions {
+	    	region = y.to_string();
+	    }
+	  }
+
       Ok(Game {
          path:        format!("./{}", path),
          name:        name,
@@ -82,13 +90,14 @@ impl Game {
          publisher:   jeu.editeur.as_ref().unwrap_or(&GenericIdText { id: "0".to_string(), text: "Unknown".to_string() }).text.clone(),
          genre:       genre,
          players:     joueurs,
+         region:      region,
          image:       None,
          thumbnail:   None,
          video:       None,
          marquee:     None,
          screenshot:  None,
          wheel:       None,
-		 manual:      None
+		 manual:      None,
       })
    }
 }

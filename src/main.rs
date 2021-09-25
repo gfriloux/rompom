@@ -167,7 +167,6 @@ fn main() {
    pb.set_message(&format!("Downloading medias"));
    package  = Package::new(jeuinfos, &name, &rom, &hash).unwrap();
    package.set_pkgname(&pkgname);
-   package.fetch().unwrap();
 
    pb.println(format!("👌 Downloaded medias"));
    pb.inc(1);
