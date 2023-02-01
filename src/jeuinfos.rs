@@ -1,9 +1,6 @@
 use std::{
-   io::copy,
-   fs::File,
    path::{
-      PathBuf,
-      Path
+      PathBuf
    }
 };
 
@@ -171,10 +168,10 @@ impl JeuInfos {
       let res    = client.get(url)
                              .query(&query)
                              .send()
-	                         .context(DownloadFailed { filename: PathBuf::from(&url) })?;
+	                         .context(DownloadFailedSnafu { filename: PathBuf::from(&url) })?;
 
-      s = res.text().context(DownloadFailed { filename: PathBuf::from(&url) })?;
-//println!("{}", s);
+      s = res.text().context(DownloadFailedSnafu { filename: PathBuf::from(&url) })?;
+println!("{}", s);
 
       // Obviously a nasty hack to work around a bug with SS that
       // leaves a trailing coma in some cases, breaking the JSON format.
@@ -189,7 +186,7 @@ impl JeuInfos {
          }
       }
 
-      response = serde_json::from_str(&s).context(ParseFailed)?;
+      response = serde_json::from_str(&s).context(ParseFailedSnafu)?;
 
       Ok(response.response.jeu)
    }

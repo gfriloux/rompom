@@ -60,7 +60,7 @@ fn main() {
 
    pb  = ProgressBar::new(3);
 
-   let sty = ProgressStyle::default_bar().template("{spinner:.green} {pos:>7}/{len:7} {prefix:.bold}▕{bar:.blue}| {wide_msg}").progress_chars("█▇▆▅▄▃▂▁  ");
+   let sty = ProgressStyle::default_bar().template("{spinner:.green} {pos:>7}/{len:7} {prefix:.bold}▕{bar:.blue}| {wide_msg}").unwrap().progress_chars("█▇▆▅▄▃▂▁  ");
    pb.set_style(sty.clone());
 
    confdir = match dirs::config_dir() {
@@ -84,7 +84,7 @@ fn main() {
 
    matches = match opts.parse(&args[1..]) {
       Ok (m) => { m }
-      Err(f) => { panic!(f.to_string()) }
+      Err(f) => { panic!("{}", f.to_string()) }
    };
 
    if matches.opt_present("h") {
@@ -97,7 +97,7 @@ fn main() {
       system        = conf.system_find(reference.systemid);
       hash          = checksums::hash_file(Path::new(&reference.gamerom), checksums::Algorithm::SHA1);
 
-      pb.set_message(&format!("Fetching game infos"));
+      pb.set_message(format!("Fetching game infos"));
       jeuinfos      = JeuInfos::get(&conf,
                                     &system,
                                     &format!("{}", reference.gameid),
@@ -157,21 +157,21 @@ fn main() {
 
       system   = conf.system_find(systemid);
       hash = checksums::hash_file(Path::new(&rom), checksums::Algorithm::SHA1);
-      pb.set_message(&format!("Fetching game infos"));
+      pb.set_message(format!("Fetching game infos"));
       jeuinfos = JeuInfos::get(&conf, &system, &id, &hash, &name).unwrap();
    }
 
    pb.println(format!("👌 Game informations"));
    pb.inc(1);
 
-   pb.set_message(&format!("Downloading medias"));
+   pb.set_message(format!("Downloading medias"));
    package  = Package::new(jeuinfos, &name, &rom, &hash).unwrap();
    package.set_pkgname(&pkgname);
 
    pb.println(format!("👌 Downloaded medias"));
    pb.inc(1);
 
-   pb.set_message(&format!("Writing PKGBUILD"));
+   pb.set_message(format!("Writing PKGBUILD"));
    package.build(&system).unwrap();
 
    pb.println(format!("👌 PKGBUILD written"));

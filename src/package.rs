@@ -47,21 +47,10 @@ pub struct Package {
 
 #[derive(Debug, Snafu)]
 pub enum Error {
-   #[snafu(display("Failed to find media {}", filename))]
-   MediaFind {
-      filename: String,
-   },
-
-   #[snafu(display("Failed to fetch media {}: {}", filename, source))]
-   MediaDownload {
-      filename: String,
-      source: jeuinfos::Error
-   },
-
    #[snafu(display("Failed to write {}: {}", filename, source))]
-   IoError {
+   WriteResult {
+      source: std::io::Error,
       filename: String,
-      source: std::io::Error
    },
 }
 
@@ -371,7 +360,7 @@ impl Package {
                                )
                       );
             std::fs::write("./launcher", &s)
-                     .context(IoError { filename: "./launcher".to_string() })?;
+                     .context(WriteResultSnafu { filename: "./launcher".to_string() })?;
 
             game.path = format!("./{}.sh", game.name);
          },
@@ -384,7 +373,7 @@ impl Package {
       let s =  to_string(&game).unwrap();
 
       std::fs::write("./description.xml", &s.replace("Game>", "game>"))
-         .context(IoError { filename: "./description.xml".to_string() })?;
+         .context(WriteResultSnafu { filename: "./description.xml".to_string() })?;
 
       self.build_pkgbuild(system, &game).unwrap();
       Ok(())

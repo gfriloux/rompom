@@ -62,9 +62,9 @@ type Result<T, E = Error> = std::result::Result<T, E>;
 impl Conf {
    pub fn load(file: &String) -> Result<Conf> {
       let obj: Conf;
-      let data = fs::read_to_string(file.clone()).context(ReadConfiguration { path: file })?;
+      let data = fs::read_to_string(file.clone()).context(ReadConfigurationSnafu { path: file })?;
 
-      obj = serde_yaml::from_str(data.as_str()).context(ParseConfiguration)?;
+      obj = serde_yaml::from_str(data.as_str()).context(ParseConfigurationSnafu)?;
 
       Ok(obj)
    }
@@ -102,9 +102,9 @@ impl System {
 impl Reference {
    pub fn load(file: &String) -> Result<Reference> {
       let obj: Reference;
-      let data = fs::read_to_string(file.clone()).context(ReadConfiguration { path: file })?;
+      let data = fs::read_to_string(file.clone()).context(ReadConfigurationSnafu { path: file })?;
       
-      obj = serde_yaml::from_str(data.as_str()).context(ParseConfiguration)?;
+      obj = serde_yaml::from_str(data.as_str()).context(ParseConfigurationSnafu)?;
       Ok(obj)
    }
 }
