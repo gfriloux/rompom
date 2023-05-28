@@ -1,3 +1,4 @@
+use serde_derive::{Deserialize, Serialize};
 use std::{
    io,
    fs,
@@ -10,29 +11,36 @@ use snafu::{
    Backtrace
 };
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 pub struct Auth {
    pub login:         String,
    pub password:      String
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 pub struct ScreenScraper {
    pub dev:           Auth,
    pub user:          Auth
 }
 
-#[derive(Deserialize, Clone)]
+#[derive(Deserialize, Clone, Debug)]
+pub struct Item{
+  pub item: String,
+  pub filter: String
+}
+
+#[derive(Deserialize, Clone, Debug)]
 pub struct System {
    pub name:          String,
    pub id:            u32,
    pub basename:      String,
    pub depends:       Option<String>,
    pub dir:           String,
-   pub checksum:      Option<String>
+   pub checksum:      Option<String>,
+   pub ia_items:      Option<Vec<Item>>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 pub struct Conf {
    pub screenscraper: ScreenScraper,
    pub systems:       Vec<System>
@@ -69,9 +77,9 @@ impl Conf {
       Ok(obj)
    }
 
-   pub fn system_find(&self, id: u32) -> System {
+   pub fn system_find(&self, name: &str) -> System {
       for system in &self.systems {
-         if system.id == id {
+         if system.name.eq(name) {
             return system.clone()
          }
       }
@@ -82,7 +90,8 @@ impl Conf {
          basename: "unknown-rom-".to_string(),
          depends:  None,
          checksum: None,
-         dir:      "unknown".to_string()
+         dir:      "unknown".to_string(),
+         ia_items: None
       }
    }
 }

@@ -1,18 +1,19 @@
-             extern crate reqwest;
-             extern crate getopts;
-#[macro_use] extern crate serde_derive;
-             extern crate serde_json;
-             extern crate checksums;
-             extern crate snafu;
-             extern crate serde_xml_rs;
-             extern crate chrono;
-             extern crate serde_yaml;
-             extern crate dirs;
-             extern crate indicatif;
+extern crate reqwest;
+extern crate getopts;
+extern crate serde_derive;
+extern crate serde_json;
+extern crate checksums;
+extern crate snafu;
+extern crate serde_xml_rs;
+extern crate chrono;
+extern crate serde_yaml;
+extern crate dirs;
+extern crate indicatif;
+extern crate screenscraper;
+extern crate internet_archive;
+extern crate glob;
 
 mod conf;
-mod jeuinfos;
-mod screenscraper;
 mod package;
 mod emulationstation;
 
@@ -24,12 +25,11 @@ use std::{
       PathBuf
    }
 };
-use indicatif::{
-   ProgressBar,
-   ProgressStyle
-};
+use glob::Pattern;
 
-use crate::jeuinfos::JeuInfos;
+use screenscraper::{ScreenScraper,jeuinfo::JeuInfo};
+use internet_archive::metadata::Metadata;
+
 use crate::package::Package;
 use crate::conf::{
    Conf,
@@ -42,138 +42,68 @@ fn print_usage(program: &str, opts: Options) {
 }
 
 fn main() {
-   let     args: Vec<String> = env::args().collect();
-   let mut opts              = Options::new();
-   let     program           = args[0].clone();
-   let     systemid;
-   let     rom;
-   let     id;
-   let     matches;
-   let     pkgname;
-   let     name;
-   let     confdir;
-   let mut package;
-   let     system;
-   let     jeuinfos;
-   let     hash;
-   let     pb;
+  let     args: Vec<String> = env::args().collect();
+  let mut opts              = Options::new();
+  let     program           = args[0].clone();
 
-   pb  = ProgressBar::new(3);
-
-   let sty = ProgressStyle::default_bar().template("{spinner:.green} {pos:>7}/{len:7} {prefix:.bold}▕{bar:.blue}| {wide_msg}").unwrap().progress_chars("█▇▆▅▄▃▂▁  ");
-   pb.set_style(sty.clone());
-
-   confdir = match dirs::config_dir() {
-      Some(x) => { x },
-      None    => {
-         eprintln!("Failed to find user configuration dir");
-         return;
-      }
-   };
+  let confdir = match dirs::config_dir() {
+    Some(x) => { x },
+    None    => {
+      eprintln!("Failed to find user configuration dir");
+      return;
+    }
+  };
 
 
-   let     conf     = Conf::load(&format!("{}/rompom.yml", confdir.display())).unwrap();
+  let     conf     = Conf::load(&format!("{}/rompom.yml", confdir.display())).unwrap();
 
-   opts.optopt ("s", "system",  "System to search for",     "SYSTEM" );
-   opts.optopt ("r", "rom",     "Rom file to package",      "ROM"    );
-   opts.optopt ("i", "id",      "Game ID on Screenscraper", "ID"     );
-   opts.optopt ("n", "name",    "Game name",                "NAME"   );
-   opts.optopt ("p", "package", "Package name",             "PACKAGE");
-   opts.optflag("h", "help",    "print this help menu"               );
-   opts.optflag("u", "update",  "Update package"                     );
+  opts.optopt ("s", "system",  "System to search for",     "SYSTEM" );
+  opts.optflag("h", "help",    "print this help menu"               );
 
-   matches = match opts.parse(&args[1..]) {
-      Ok (m) => { m }
-      Err(f) => { panic!("{}", f.to_string()) }
-   };
+  let matches = match opts.parse(&args[1..]) {
+    Ok (m) => { m }
+    Err(f) => { panic!("{}", f.to_string()) }
+  };
 
-   if matches.opt_present("h") {
+  if matches.opt_present("h") {
+    print_usage(&program, opts);
+    return;
+  }
+
+  let system_name = match matches.opt_str("s") {
+    Some(x) => { x },
+    None    => {
       print_usage(&program, opts);
       return;
-   }
+    }
+  };
 
-   if matches.opt_present("u") {
-      let reference = Reference::load(&"./rompom.yml".to_string()).unwrap();
-      system        = conf.system_find(reference.systemid);
-      hash          = checksums::hash_file(Path::new(&reference.gamerom), checksums::Algorithm::SHA1);
+  let system = conf.system_find(&system_name);
+  for item in &system.ia_items.clone().unwrap() {
+    let metadata = Metadata::get(&item.item).unwrap();
 
-      pb.set_message(format!("Fetching game infos"));
-      jeuinfos      = JeuInfos::get(&conf,
-                                    &system,
-                                    &format!("{}", reference.gameid),
-                                    &hash,
-                                    &reference.gamerom).unwrap();
-      rom           = reference.gamerom;
-      name          = PathBuf::from(rom.clone()).file_stem().unwrap().to_str().unwrap().to_string();
-      pkgname       = name.clone();
-   }
-   else {
-      systemid = match matches.opt_str("s") {
-         Some(x) => {
-            x.parse::<u32>().unwrap()
-         },
-         None    => {
-            print_usage(&program, opts);
-            return;
-         }
+    for file in &metadata.files {
+      let path = Path::new(&file.name);
+      let filename = path.file_name().unwrap().to_str().unwrap();
+
+      if ! Pattern::new(&item.filter).unwrap().matches(filename) {
+        println!("Skipping {}", filename);
+        continue;
+      }
+      let ss = ScreenScraper::new(&conf.screenscraper.user.login,
+                                  &conf.screenscraper.user.password,
+                                  &conf.screenscraper.dev.login,
+                                  &conf.screenscraper.dev.password).unwrap();
+      let res = ss.jeuinfo(system.id.clone(), filename, file.size.clone().unwrap().parse::<u64>().unwrap(), file.crc32.clone(), file.md5.clone(), file.sha1.clone());
+      let ji: Option<JeuInfo> = match res {
+        Ok(x)  => Some(x),
+        Err(_) => None,
       };
+      let mut package = Package::new(ji, &filename.to_string(), &metadata.fileurl_get(&file.name).unwrap(), &file.sha1.clone().unwrap_or("".to_string())).unwrap();
+      package.build(&system).unwrap();
+    }
+  }
+  
 
-      rom = match matches.opt_str("r") {
-         Some(x) => {
-            x.to_string()
-         },
-         None    => {
-            print_usage(&program, opts);
-            return;
-         }
-      };
 
-      id  = match matches.opt_str("i") {
-         Some(x) => {
-            x.to_string()
-         },
-         None    => {
-            "0".to_string()
-         }
-      };
-
-      name = match matches.opt_str("n") {
-         Some(x) => {
-            x.to_string()
-         },
-         None    => {
-            rom.clone()
-         }
-      };
-
-      pkgname = match matches.opt_str("p") {
-         Some(x) => {
-            x.to_string()
-         },
-         None    => {
-            rom.clone()
-         }
-      };
-
-      system   = conf.system_find(systemid);
-      hash = checksums::hash_file(Path::new(&rom), checksums::Algorithm::SHA1);
-      pb.set_message(format!("Fetching game infos"));
-      jeuinfos = JeuInfos::get(&conf, &system, &id, &hash, &name).unwrap();
-   }
-
-   pb.println(format!("👌 Game informations"));
-   pb.inc(1);
-
-   pb.set_message(format!("Downloading medias"));
-   package  = Package::new(jeuinfos, &name, &rom, &hash).unwrap();
-   package.set_pkgname(&pkgname);
-
-   pb.println(format!("👌 Downloaded medias"));
-   pb.inc(1);
-
-   pb.set_message(format!("Writing PKGBUILD"));
-   package.build(&system).unwrap();
-
-   pb.println(format!("👌 PKGBUILD written"));
-   pb.inc(1);
 }

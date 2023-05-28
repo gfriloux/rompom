@@ -1,10 +1,8 @@
+use serde_derive::{Deserialize, Serialize};
 use snafu::Snafu;
 use chrono::prelude::*;
 
-use super::jeuinfos::{
-   GenericIdText,
-   JeuInfos
-};
+use screenscraper::jeuinfo::{JeuInfo,GenericIdText};
 
 #[derive(Debug, Snafu)]
 pub enum Error {
@@ -35,27 +33,47 @@ pub struct Game {
 }
 
 impl Game {
-   pub fn french(jeu: &JeuInfos, path: &String) -> Result<Game> {
+   pub fn french(jeu: &Option<JeuInfo>, path: &String) -> Result<Game> {
       let fulldate;
       let rating;
       let v = vec!["fr", "eu", "en", "us", "wor", "jp", "ss"];
 
-      let name     = jeu.find_name(&v);
-      let desc     = jeu.find_desc(&v);
-      let ss_date  = jeu.find_date(&v);
-      let genre    = jeu.find_genre(&v);
-      let joueurs  = match &jeu.joueurs {
-         Some(x) => { x.text.clone()        }
-         None    => { "Unknown".to_string() }
+      let name     = match jeu {
+        Some(x) => x.find_name(&v),
+        None    => "".to_string()
+      };
+      let desc     = match jeu {
+        Some(x) => x.find_desc(&v),
+        None    => "".to_string()
+      };
+      let ss_date  = match jeu {
+        Some(x) => x.find_date(&v),
+        None    => "".to_string()
+      };
+      let genre    = match jeu {
+        Some(x) => x.find_genre(&v),
+        None    => "".to_string()
+      };
+      let joueurs  = match jeu {
+        Some(x) => {
+          match &x.joueurs {
+            Some(y) => y.text.clone(),
+            None    =>  "Unknown".to_string()
+          }
+        },
+        None   => "Unknown".to_string()
       };
       let mut region   = "".to_string();
 
-      if let Some(ref x) = &jeu.note {
-         rating = x.text.parse::<f32>().unwrap_or(0.0) / 20.0;
-      }
-      else {
-         rating = 0.0;
-      }
+      rating = match jeu {
+        Some(x) => {
+          match &x.note {
+            Some(y) => y.text.parse::<f32>().unwrap_or(0.0) / 20.0,
+            None    => 0.0
+          }
+        }
+        None    => 0.8
+      };
 
       if ss_date.len() == 4 {
          fulldate = format!("{}-01-01 00:00:00 +00:00", ss_date);
@@ -73,24 +91,38 @@ impl Game {
       }
       let dt       = DateTime::parse_from_str(&fulldate,
                                               "%Y-%m-%d %H:%M:%S %z").unwrap();
-
-	  if let Some(ref x) = jeu.rom {
-	    if let Some(ref y) = x.romregions {
-	    	region = y.to_string();
-	    }
-	  }
+    region = match jeu {
+      Some(x) => {
+        match &x.rom {
+          Some(y) => {
+            match &y.romregions {
+              Some(z) => z.to_string(),
+              None    => "".to_string()
+            }
+          },
+          None    => "".to_string()
+        }
+      },
+      None    => "".to_string()
+    };
 
       Ok(Game {
          path:        format!("./{}", path),
-         name:        name,
-         desc:        desc,
-         rating:      rating,
+         name,
+         desc,
+         rating,
          releasedate: dt.format("%Y%m%dT%H%M%S").to_string(),
-         developer:   jeu.developpeur.as_ref().unwrap_or(&GenericIdText { id: "0".to_string(), text: "Unknown".to_string() }).text.clone(),
-         publisher:   jeu.editeur.as_ref().unwrap_or(&GenericIdText { id: "0".to_string(), text: "Unknown".to_string() }).text.clone(),
-         genre:       genre,
+         developer:   match jeu {
+          Some(x) => x.developpeur.as_ref().unwrap_or(&GenericIdText { id: "0".to_string(), text: "Unknown".to_string() }).text.clone(),
+          None    => "Unknown".to_string()
+         },
+         publisher:   match jeu {
+          Some(x) => x.editeur.as_ref().unwrap_or(&GenericIdText { id: "0".to_string(), text: "Unknown".to_string() }).text.clone(),
+          None    => "Unknown".to_string()
+         },
+         genre,
          players:     joueurs,
-         region:      region,
+         region,
          image:       None,
          thumbnail:   None,
          video:       None,
