@@ -1,4 +1,4 @@
-use serde_derive::{Deserialize, Serialize};
+use serde_derive::Deserialize;
 use std::{fs, io, path::PathBuf};
 
 use snafu::{Backtrace, ResultExt, Snafu};
@@ -28,7 +28,6 @@ pub struct System {
   pub basename: String,
   pub depends: Option<String>,
   pub dir: String,
-  pub checksum: Option<String>,
   pub ia_items: Option<Vec<Item>>,
 }
 
@@ -36,13 +35,6 @@ pub struct System {
 pub struct Conf {
   pub screenscraper: ScreenScraper,
   pub systems: Vec<System>,
-}
-
-#[derive(Deserialize)]
-pub struct Reference {
-  pub gameid: u64,
-  pub gamerom: String,
-  pub systemid: u32,
 }
 
 #[derive(Debug, Snafu)]
@@ -61,14 +53,10 @@ type Result<T, E = Error> = std::result::Result<T, E>;
 
 impl Conf {
   pub fn load(file: &String) -> Result<Conf> {
-    let obj: Conf;
     let data = fs::read_to_string(file.clone()).context(ReadConfigurationSnafu { path: file })?;
-
-    obj = serde_yaml::from_str(data.as_str()).context(ParseConfigurationSnafu)?;
-
+    let obj: Conf = serde_yaml::from_str(data.as_str()).context(ParseConfigurationSnafu)?;
     Ok(obj)
   }
-
   pub fn system_find(&self, name: &str) -> System {
     for system in &self.systems {
       if system.name.eq(name) {
@@ -81,35 +69,8 @@ impl Conf {
       id: 0,
       basename: "unknown-rom-".to_string(),
       depends: None,
-      checksum: None,
       dir: "unknown".to_string(),
       ia_items: None,
     }
-  }
-}
-
-impl System {
-  pub fn checksum_disabled(&self) -> bool {
-    if let Some(ref x) = self.checksum {
-      match x.as_str() {
-        "disable" => {
-          return true;
-        }
-        _ => {
-          return false;
-        }
-      }
-    }
-    false
-  }
-}
-
-impl Reference {
-  pub fn load(file: &String) -> Result<Reference> {
-    let obj: Reference;
-    let data = fs::read_to_string(file.clone()).context(ReadConfigurationSnafu { path: file })?;
-
-    obj = serde_yaml::from_str(data.as_str()).context(ParseConfigurationSnafu)?;
-    Ok(obj)
   }
 }

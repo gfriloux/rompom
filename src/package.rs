@@ -1,4 +1,3 @@
-use serde_derive::{Deserialize, Serialize};
 use serde_xml_rs::to_string;
 use snafu::{ResultExt, Snafu};
 use std::{
@@ -121,10 +120,6 @@ impl Package {
     })
   }
 
-  pub fn set_pkgname(&mut self, name: &String) {
-    self.name = name.clone();
-  }
-
   pub fn build_pkgbuild(&mut self, system: &System, game: &Game) -> Result<()> {
     let romname = self.name_normalize();
     let sourcerom = self.rom.replace("'", "'\\''");
@@ -137,7 +132,7 @@ impl Package {
       pkgdesc: game.name.clone(),
       url: match &self.jeu {
         Some(x) => format!("https://screenscraper.fr/gameinfos.php?gameid={}", x.id),
-        None => format!(""),
+        None => String::new(),
       },
       depends: system.depends.clone(),
       source: Vec::new(),
@@ -412,7 +407,7 @@ impl Package {
       game.wheel = Some(format!("./data/{}/wheel.{}", romname, x.format));
     }
 
-    if let Some(x) = &self.medias.manual {
+    if self.medias.manual.is_some() {
       game.manual = Some(format!("./data/{}/manual.pdf", romname));
     }
 
@@ -439,13 +434,13 @@ impl Package {
 
     let directory = Path::new(&self.rom).with_extension("");
 
-    create_dir_all(&directory);
+    create_dir_all(&directory).ok();
 
     let s = to_string(&game).unwrap();
     let file = format!("{}/description.xml", directory.display());
 
     println!("Writing {}", file);
-    std::fs::write(file, &s.replace("Game>", "game>")).context(WriteResultSnafu {
+    std::fs::write(file, s.replace("Game>", "game>")).context(WriteResultSnafu {
       filename: "./description.xml".to_string(),
     })?;
 

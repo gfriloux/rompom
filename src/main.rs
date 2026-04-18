@@ -19,15 +19,12 @@ mod package;
 
 use getopts::Options;
 use glob::Pattern;
-use std::{
-  env,
-  path::{Path, PathBuf},
-};
+use std::{env, path::Path};
 
 use internet_archive::metadata::Metadata;
 use screenscraper::{jeuinfo::JeuInfo, ScreenScraper};
 
-use crate::conf::{Conf, Reference};
+use crate::conf::Conf;
 use crate::package::Package;
 
 fn print_usage(program: &str, opts: Options) {
@@ -93,17 +90,14 @@ fn main() {
       )
       .unwrap();
       let res = ss.jeuinfo(
-        system.id.clone(),
+        system.id,
         filename,
         file.size.clone().unwrap().parse::<u64>().unwrap(),
         file.crc32.clone(),
         file.md5.clone(),
         file.sha1.clone(),
       );
-      let ji: Option<JeuInfo> = match res {
-        Ok(x) => Some(x),
-        Err(_) => None,
-      };
+      let ji: Option<JeuInfo> = res.ok();
       let mut package = Package::new(
         ji,
         &filename.to_string(),

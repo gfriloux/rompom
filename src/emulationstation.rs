@@ -33,7 +33,6 @@ pub struct Game {
 impl Game {
   pub fn french(jeu: &Option<JeuInfo>, path: &String) -> Result<Game> {
     let fulldate;
-    let rating;
     let v = vec!["fr", "eu", "en", "us", "wor", "jp", "ss"];
 
     let name = match jeu {
@@ -59,9 +58,7 @@ impl Game {
       },
       None => "Unknown".to_string(),
     };
-    let mut region = "".to_string();
-
-    rating = match jeu {
+    let rating = match jeu {
       Some(x) => match &x.note {
         Some(y) => y.text.parse::<f32>().unwrap_or(0.0) / 20.0,
         None => 0.0,
@@ -81,7 +78,7 @@ impl Game {
       fulldate = "1970-01-01 00:00:00 +00:00".to_string();
     }
     let dt = DateTime::parse_from_str(&fulldate, "%Y-%m-%d %H:%M:%S %z").unwrap();
-    region = match jeu {
+    let region = match jeu {
       Some(x) => match &x.rom {
         Some(y) => match &y.romregions {
           Some(z) => z.to_string(),
