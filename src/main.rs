@@ -1,35 +1,75 @@
-extern crate checksums;
-extern crate chrono;
-extern crate dirs;
-extern crate getopts;
-extern crate glob;
-extern crate indicatif;
-extern crate internet_archive;
-extern crate reqwest;
-extern crate screenscraper;
-extern crate serde_derive;
-extern crate serde_json;
-extern crate serde_xml_rs;
-extern crate serde_yaml;
-extern crate snafu;
-
 mod conf;
 mod emulationstation;
 mod package;
+mod pkgbuild;
 
 use getopts::Options;
 use glob::Pattern;
 use std::{env, path::Path};
 
-use internet_archive::metadata::Metadata;
+use internet_archive::download::{Download, DownloadMethod};
+use internet_archive::metadata::{Metadata, MetadataFile};
 use screenscraper::{jeuinfo::JeuInfo, ScreenScraper};
 
-use crate::conf::Conf;
+use crate::conf::{Conf, System};
 use crate::package::Package;
 
 fn print_usage(program: &str, opts: Options) {
-  let brief = format!("Usage: {} --rom ROMFILE --id INTEGER", program);
+  let brief = format!("Usage: {} -s SYSTEM", program);
   print!("{}", opts.usage(&brief));
+}
+
+fn process_rom(conf: &Conf, system: &System, metadata: &Metadata, file: &MetadataFile) {
+  let path = Path::new(&file.name);
+  let filename = path.file_name().unwrap().to_str().unwrap();
+
+  let ss = ScreenScraper::new(
+    &conf.screenscraper.user.login,
+    &conf.screenscraper.user.password,
+    &conf.screenscraper.dev.login,
+    &conf.screenscraper.dev.password,
+  )
+  .unwrap();
+
+  let size = file
+    .size
+    .as_deref()
+    .and_then(|s| s.parse::<u64>().ok())
+    .unwrap_or(0);
+
+  let ji: Option<JeuInfo> = ss
+    .jeuinfo(
+      system.id,
+      filename,
+      size,
+      file.crc32.clone(),
+      file.md5.clone(),
+      file.sha1.clone(),
+    )
+    .ok();
+
+  let urls = metadata.file_urls(&file.name).unwrap();
+  let sha1 = file.sha1.clone().unwrap_or_default();
+
+  let mut package = Package::new(ji, &filename.to_string(), urls.first().unwrap(), &sha1).unwrap();
+  package.build(system).unwrap();
+
+  let directory = Path::new(filename).with_extension("");
+  let dest = directory.join(filename);
+  let download = Download::new(metadata, &file.name).unwrap();
+  if dest.exists() {
+    match download.verify_sha1(&dest) {
+      Ok(()) => println!("Skipping {} (already exists, checksum OK)", filename),
+      Err(_) => {
+        println!("Re-downloading {} (checksum mismatch)", filename);
+        download.fetch(&dest, DownloadMethod::Https).unwrap();
+        download.verify_sha1(&dest).unwrap();
+      }
+    }
+  } else {
+    download.fetch(&dest, DownloadMethod::Https).unwrap();
+    download.verify_sha1(&dest).unwrap();
+  }
 }
 
 fn main() {
@@ -70,9 +110,16 @@ fn main() {
     }
   };
 
-  let system = conf.system_find(&system_name);
+  let system = match conf.system_find(&system_name) {
+    Some(s) => s,
+    None => {
+      eprintln!("System '{}' not found in rompom.yml", system_name);
+      return;
+    }
+  };
+
   let ia_items = match system.ia_items {
-    Some(ref items) => items,
+    Some(ref items) => items.clone(),
     None => {
       eprintln!(
         "System '{}' has no ia_items configured in rompom.yml",
@@ -81,42 +128,17 @@ fn main() {
       return;
     }
   };
-  for item in ia_items {
-    let metadata = Metadata::get(&item.item).unwrap();
 
+  for item in &ia_items {
+    let metadata = Metadata::get(&item.item).unwrap();
     for file in &metadata.files {
       let path = Path::new(&file.name);
       let filename = path.file_name().unwrap().to_str().unwrap();
-
       if !Pattern::new(&item.filter).unwrap().matches(filename) {
         println!("Skipping {}", filename);
         continue;
       }
-      let ss = ScreenScraper::new(
-        &conf.screenscraper.user.login,
-        &conf.screenscraper.user.password,
-        &conf.screenscraper.dev.login,
-        &conf.screenscraper.dev.password,
-      )
-      .unwrap();
-      let res = ss.jeuinfo(
-        system.id,
-        filename,
-        file.size.clone().unwrap().parse::<u64>().unwrap(),
-        file.crc32.clone(),
-        file.md5.clone(),
-        file.sha1.clone(),
-      );
-      let ji: Option<JeuInfo> = res.ok();
-      let urls = metadata.file_urls(&file.name).unwrap();
-      let mut package = Package::new(
-        ji,
-        &filename.to_string(),
-        urls.first().unwrap(),
-        &file.sha1.clone().unwrap_or("".to_string()),
-      )
-      .unwrap();
-      package.build(&system).unwrap();
+      process_rom(&conf, &system, &metadata, file);
     }
   }
 }

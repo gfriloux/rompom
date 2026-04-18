@@ -1,30 +1,12 @@
 use serde_xml_rs::to_string;
 use snafu::{ResultExt, Snafu};
-use std::{
-  fmt,
-  fs::{create_dir_all, File},
-  io::Write,
-  path::Path,
-};
+use std::{fs::create_dir_all, path::Path};
 
 use super::conf::System;
 use super::emulationstation::Game;
+use super::pkgbuild::Pkgbuild;
 
 use screenscraper::jeuinfo::{JeuInfo, Media};
-
-pub struct Pkgbuild {
-  pub pkgname: String,
-  pub romname: String,
-  pub pkgver: String,
-  pub pkgrel: u32,
-  pub pkgdesc: String,
-  pub url: String,
-  pub depends: Option<String>,
-  pub source: Vec<String>,
-  pub sha1sums: Vec<String>,
-  pub build: Vec<String>,
-  pub package: Vec<String>,
-}
 
 pub struct Medias {
   pub image: Option<Media>,
@@ -53,6 +35,8 @@ pub enum Error {
     source: std::io::Error,
     filename: String,
   },
+  #[snafu(display("Failed to write PKGBUILD: {}", source))]
+  WritePkgbuild { source: super::pkgbuild::Error },
 }
 
 type Result<T, E = Error> = std::result::Result<T, E>;
@@ -173,9 +157,6 @@ impl Package {
     }
 
     if let Some(ref x) = self.medias.image {
-      // ScreenScraper's region are often false concerning wheels.
-      // It can reference an 'us' region while the URL links to 'wor', etc.
-      // Very confusing.
       let i = x.url.find("media=").unwrap() + 6;
       let (_, region) = x.url.split_at(i);
       pkgbuild.source.push(format!(
@@ -189,9 +170,6 @@ impl Package {
     }
 
     if let Some(ref x) = self.medias.thumbnail {
-      // ScreenScraper's region are often false concerning wheels.
-      // It can reference an 'us' region while the URL links to 'wor', etc.
-      // Very confusing.
       let i = x.url.find("media=").unwrap() + 6;
       let (_, region) = x.url.split_at(i);
       pkgbuild.source.push(format!(
@@ -225,12 +203,8 @@ impl Package {
     }
 
     if let Some(ref x) = self.medias.wheel {
-      // ScreenScraper's region are often false concerning wheels.
-      // It can reference an 'us' region while the URL links to 'wor', etc.
-      // Very confusing.
       let i = x.url.find("media=").unwrap() + 6;
       let (_, region) = x.url.split_at(i);
-
       pkgbuild.source.push(format!(
         "wheel.png::https://screenscraper.fr/medias/{}/{}/{}.{}",
         system.id,
@@ -242,12 +216,8 @@ impl Package {
     }
 
     if let Some(ref x) = self.medias.manual {
-      // ScreenScraper's region are often false concerning manuals.
-      // It can reference an 'us' region while the URL links to 'wor', etc.
-      // Very confusing.
       let i = x.url.find("media=").unwrap() + 6;
       let (_, region) = x.url.split_at(i);
-
       pkgbuild.source.push(format!(
         "manual.pdf::https://screenscraper.fr/medias/{}/{}/{}.pdf",
         system.id,
@@ -281,7 +251,6 @@ impl Package {
             .to_string(),
         );
         pkgbuild.package.push("  done".to_string());
-
         pkgbuild.package.push(format!(
           "  sed -i \"s|{}|$cuefile|\" description.xml",
           self.rom.replace("$", "\\$")
@@ -300,11 +269,9 @@ impl Package {
         pkgbuild
           .build
           .push("  for file in $(ls *.chd); do".to_string());
-
         pkgbuild
           .build
           .push("    echo \".data/$_romname/${file}\" >>${_romname}.m3u".to_string());
-
         pkgbuild.build.push("  done".to_string());
 
         pkgbuild.package.push(format!(
@@ -314,13 +281,10 @@ impl Package {
         pkgbuild
           .package
           .push("                   \"$pkgdir/userdata/system/pacman/batoexec/\"".to_string());
-
-        pkgbuild.package.push(format!("  mkdir -p 0700 -p \"$pkgdir/userdata/roms/{}/data/$_romname/\" \"$pkgdir/userdata/roms/{}/.data/$_romname\"",
-                                          system.dir,
-                                          system.dir
-                                         )
-            );
-
+        pkgbuild.package.push(format!(
+          "  mkdir -p 0700 -p \"$pkgdir/userdata/roms/{}/data/$_romname/\" \"$pkgdir/userdata/roms/{}/.data/$_romname\"",
+          system.dir, system.dir
+        ));
         pkgbuild.package.push(format!(
           "  install -m 0600 *.chd \"$pkgdir/userdata/roms/{}/.data/$_romname/\"",
           system.dir
@@ -337,9 +301,13 @@ impl Package {
           system.dir
         ));
         pkgbuild.package.push("  done".to_string());
-
-        pkgbuild.package.push(format!("   echo \"gamelist = {}\" >  \"$pkgdir\"/userdata/system/pacman/batoexec/${{pkgname[0]}}", system.dir));
-        pkgbuild.package.push("   cat description.xml          >> \"$pkgdir\"/userdata/system/pacman/batoexec/${pkgname[0]}".to_string());
+        pkgbuild.package.push(format!(
+          "   echo \"gamelist = {}\" >  \"$pkgdir\"/userdata/system/pacman/batoexec/${{pkgname[0]}}",
+          system.dir
+        ));
+        pkgbuild.package.push(
+          "   cat description.xml          >> \"$pkgdir\"/userdata/system/pacman/batoexec/${pkgname[0]}".to_string(),
+        );
       }
       _ => {
         pkgbuild.build.push("  true".to_string());
@@ -365,23 +333,24 @@ impl Package {
           system.dir
         ));
         pkgbuild.package.push("  done".to_string());
-
-        pkgbuild.package.push(format!("   echo \"gamelist = {}\" >  \"$pkgdir\"/userdata/system/pacman/batoexec/${{pkgname[0]}}", system.dir));
-        pkgbuild.package.push("   cat description.xml          >> \"$pkgdir\"/userdata/system/pacman/batoexec/${pkgname[0]}".to_string());
+        pkgbuild.package.push(format!(
+          "   echo \"gamelist = {}\" >  \"$pkgdir\"/userdata/system/pacman/batoexec/${{pkgname[0]}}",
+          system.dir
+        ));
+        pkgbuild.package.push(
+          "   cat description.xml          >> \"$pkgdir\"/userdata/system/pacman/batoexec/${pkgname[0]}".to_string(),
+        );
       }
     };
 
-    let file = format!("{}/PKGBUILD", directory.display());
-    println!("Writing {}", file);
+    pkgbuild.write(&directory).context(WritePkgbuildSnafu)?;
 
-    let mut f = File::create(file).unwrap();
-    write!(f, "{}", pkgbuild).unwrap();
     Ok(())
   }
 
   pub fn build(&mut self, system: &System) -> Result<()> {
     let romname = self.name_normalize();
-    let mut game = Game::french(&self.jeu, &self.rom).unwrap();
+    let mut game = Game::from_jeuinfo(&self.jeu, &self.rom);
 
     if let Some(x) = &self.medias.thumbnail {
       game.image = Some(format!("./data/{}/thumbnail.{}", romname, x.format));
@@ -413,9 +382,7 @@ impl Package {
 
     match system.id {
       214 => {
-        // Create launcher
         let mut s = String::new();
-
         s.push_str("DIR=\"$(dirname \"$(readlink -f \"$0\")\")\"\n");
         s.push_str("cd ${DIR}/.data/\n\n");
         s.push_str("export LD_LIBRARY_PATH=\"${DIR}/.data/lib/\"\n");
@@ -423,7 +390,6 @@ impl Package {
         std::fs::write("./launcher", &s).context(WriteResultSnafu {
           filename: "./launcher".to_string(),
         })?;
-
         game.path = format!("./{}.sh", game.name);
       }
       22 | 57 => {
@@ -433,62 +399,16 @@ impl Package {
     }
 
     let directory = Path::new(&self.rom).with_extension("");
-
     create_dir_all(&directory).ok();
 
     let s = to_string(&game).unwrap();
     let file = format!("{}/description.xml", directory.display());
-
     println!("Writing {}", file);
     std::fs::write(file, s.replace("Game>", "game>")).context(WriteResultSnafu {
       filename: "./description.xml".to_string(),
     })?;
 
-    self.build_pkgbuild(system, &game).unwrap();
+    self.build_pkgbuild(system, &game)?;
     Ok(())
-  }
-}
-
-impl fmt::Display for Pkgbuild {
-  fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-    let mut s = String::new();
-
-    s.push_str(&format!("pkgname=('{}')\n", self.pkgname));
-    s.push_str(&format!("_romname=\"{}\"\n", self.romname));
-    s.push_str(&format!("pkgver={}\n", self.pkgver));
-    s.push_str(&format!("pkgrel={}\n", self.pkgrel));
-    s.push_str(&format!("pkgdesc=\"{}\"\n", self.pkgdesc));
-    s.push_str("arch=('any')\n");
-    s.push_str(&format!("url=\"{}\"\n", self.url));
-    s.push_str("license=('All rights reserved')\n");
-
-    if let Some(x) = &self.depends {
-      s.push_str(&format!("depends=('{}')\n", x));
-    }
-
-    s.push_str("source=(\n");
-    for item in &self.source {
-      s.push_str(&format!("  '{}'\n", item));
-    }
-    s.push_str(")\n");
-
-    s.push_str("sha1sums=(\n");
-    for item in &self.sha1sums {
-      s.push_str(&format!("  '{}'\n", item));
-    }
-    s.push_str(")\n");
-
-    s.push_str("build()\n{\n");
-    for line in &self.build {
-      s.push_str(&format!("{}\n", line));
-    }
-    s.push_str("}\n");
-
-    s.push_str("package()\n{\n");
-    for line in &self.package {
-      s.push_str(&format!("{}\n", line));
-    }
-    s.push_str("}\n");
-    write!(f, "{}", s)
   }
 }

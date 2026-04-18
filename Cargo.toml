@@ -1,8 +1,8 @@
 [package]
-#edition = "2023"
+edition = "2021"
 authors = ["Guillaume Friloux <guillaume@friloux.me>"]
 name = "rompom"
-version = "0.5.0"
+version = "0.6.0"
 
 [dependencies]
 screenscraper = { git = "https://github.com/gfriloux/screenscraper", tag = "v0.3.0" }

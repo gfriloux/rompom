@@ -1,13 +1,7 @@
 use chrono::prelude::*;
 use serde_derive::{Deserialize, Serialize};
-use snafu::Snafu;
 
 use screenscraper::jeuinfo::{GenericIdText, JeuInfo};
-
-#[derive(Debug, Snafu)]
-pub enum Error {}
-
-type Result<T, E = Error> = std::result::Result<T, E>;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Game {
@@ -31,8 +25,7 @@ pub struct Game {
 }
 
 impl Game {
-  pub fn french(jeu: &Option<JeuInfo>, path: &String) -> Result<Game> {
-    let fulldate;
+  pub fn from_jeuinfo(jeu: &Option<JeuInfo>, path: &str) -> Game {
     let v = vec!["fr", "eu", "en", "us", "wor", "jp", "ss"];
 
     let name = match jeu {
@@ -66,6 +59,7 @@ impl Game {
       None => 0.8,
     };
 
+    let fulldate;
     if ss_date.len() == 4 {
       fulldate = format!("{}-01-01 00:00:00 +00:00", ss_date);
     } else if ss_date.len() == 10 {
@@ -78,6 +72,7 @@ impl Game {
       fulldate = "1970-01-01 00:00:00 +00:00".to_string();
     }
     let dt = DateTime::parse_from_str(&fulldate, "%Y-%m-%d %H:%M:%S %z").unwrap();
+
     let region = match jeu {
       Some(x) => match &x.rom {
         Some(y) => match &y.regions {
@@ -89,7 +84,7 @@ impl Game {
       None => "".to_string(),
     };
 
-    Ok(Game {
+    Game {
       path: format!("./{}", path),
       name,
       desc,
@@ -129,6 +124,6 @@ impl Game {
       screenshot: None,
       wheel: None,
       manual: None,
-    })
+    }
   }
 }

@@ -57,20 +57,7 @@ impl Conf {
     let obj: Conf = serde_yaml::from_str(data.as_str()).context(ParseConfigurationSnafu)?;
     Ok(obj)
   }
-  pub fn system_find(&self, name: &str) -> System {
-    for system in &self.systems {
-      if system.name.eq(name) {
-        return system.clone();
-      }
-    }
-
-    System {
-      name: "unknown".to_string(),
-      id: 0,
-      basename: "unknown-rom-".to_string(),
-      depends: None,
-      dir: "unknown".to_string(),
-      ia_items: None,
-    }
+  pub fn system_find(&self, name: &str) -> Option<System> {
+    self.systems.iter().find(|s| s.name == name).cloned()
   }
 }
