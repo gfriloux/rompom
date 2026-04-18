@@ -79,6 +79,21 @@ Each system entry:
 
 ## Changelog
 
+### v0.8.0
+
+- **Reworked TUI** — replaced the flat spinner list with a proper panel-based interface
+  built on `ratatui` + `crossterm`:
+  - Top: scrolling **Completed** log (newest first) with a global progress gauge
+  - Bottom: three side-by-side panels — **Discovery**, **Packaging**, **Downloads** —
+    each showing only the ROMs currently active in that phase, with their own
+    per-phase progress gauge
+  - Accent colors per phase (cyan / yellow / green), rounded borders, bold labels,
+    status text colored by state (active, done, error, queued)
+
+**Migration from v0.7.0:** none — configuration file is unchanged.
+
+---
+
 ### v0.7.0
 
 - **Parallel pipeline** — discovery, packaging, and downloads now run concurrently.
