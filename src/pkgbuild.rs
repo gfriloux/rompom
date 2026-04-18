@@ -35,7 +35,6 @@ impl Pkgbuild {
 
   pub fn write(&self, directory: &Path) -> Result<()> {
     let path = format!("{}/PKGBUILD", directory.display());
-    println!("Writing {}", path);
     let mut f = File::create(&path).context(WriteSnafu { path: path.clone() })?;
     write!(f, "{}", self).context(WriteSnafu { path })?;
     Ok(())

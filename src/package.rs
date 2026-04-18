@@ -340,8 +340,7 @@ impl Package {
       }
     };
 
-    pkgbuild.write(&directory).context(WritePkgbuildSnafu)?;
-    Ok(())
+    pkgbuild.write(&directory).context(WritePkgbuildSnafu)
   }
 
   pub fn build(&mut self, system: &System) -> Result<()> {
@@ -393,7 +392,6 @@ impl Package {
 
     let s = to_string(&game).unwrap();
     let file = format!("{}/description.xml", directory.display());
-    println!("Writing {}", file);
     std::fs::write(file, s.replace("Game>", "game>")).context(WriteResultSnafu {
       filename: "./description.xml".to_string(),
     })?;
