@@ -2,6 +2,7 @@ mod conf;
 mod emulationstation;
 mod package;
 mod pkgbuild;
+mod summary;
 mod ui;
 
 use getopts::Options;
@@ -344,4 +345,8 @@ fn main() {
   for h in dl_handles {
     h.join().unwrap();
   }
+
+  let summary = ui.summary();
+  drop(ui);
+  summary.print();
 }

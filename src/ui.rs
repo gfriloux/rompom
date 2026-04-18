@@ -8,6 +8,8 @@ use std::{
   time::Duration,
 };
 
+use crate::summary::Summary;
+
 use crossterm::{
   execute,
   terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
@@ -16,6 +18,7 @@ use ratatui::{
   backend::CrosstermBackend,
   layout::{Constraint, Direction, Layout, Rect},
   style::{Color, Modifier, Style},
+  text::{Line, Span},
   widgets::{Block, BorderType, Borders, Gauge, List, ListItem},
   Frame, Terminal,
 };
@@ -24,6 +27,19 @@ const SPINNER_FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦
 const TICK_MS: u64 = 80;
 /// Height (in terminal lines) reserved for the active-phase panels at the bottom.
 const PANEL_HEIGHT: u16 = 12;
+
+/// Canonical media types with their display icon.
+/// Order here is the order icons appear in the Completed log and summary.
+pub(crate) const MEDIA_ICONS: &[(&str, &str)] = &[
+  ("video", "󰕧"),
+  ("image", "󰋩"),
+  ("thumbnail", "󰋫"),
+  ("screenshot", "󰹙"),
+  ("bezel", "󱂬"),
+  ("marquee", "󰯃"),
+  ("wheel", "󰊢"),
+  ("manual", "󰂺"),
+];
 
 // ── Phase ──────────────────────────────────────────────────────────────────
 
@@ -76,13 +92,23 @@ struct RomEntry {
   label: String,
   status: String,
   phase: RomPhase,
+  media_found: Vec<String>,
+  media_missing: Vec<String>,
+}
+
+/// One entry in the Completed log.
+pub(crate) struct CompletedEntry {
+  pub(crate) label: String,
+  pub(crate) success: bool,
+  pub(crate) media_found: Vec<String>,
+  pub(crate) media_missing: Vec<String>,
 }
 
 struct AppState {
   roms: Vec<RomEntry>,
   total: usize,
-  /// Finished ROM lines, newest first.
-  completed: Vec<String>,
+  /// Finished ROM entries, newest first.
+  completed: Vec<CompletedEntry>,
   /// Shown in the completed panel when no ROM has finished yet.
   header: String,
   tick: usize,
@@ -175,26 +201,42 @@ impl RomBar {
   }
 
   pub fn media_done(&self, kind: &str) {
-    self.set_status(format!("{} ✓", kind));
+    let mut s = self.state.lock().unwrap();
+    s.roms[self.index].status = format!("{} ✓", kind);
+    s.roms[self.index].media_found.push(kind.to_string());
   }
 
   pub fn media_unavailable(&self, kind: &str) {
-    self.set_status(format!("{} — not available", kind));
+    let mut s = self.state.lock().unwrap();
+    s.roms[self.index].status = format!("{} — not available", kind);
+    s.roms[self.index].media_missing.push(kind.to_string());
   }
 
   // End
   pub fn finish(&self) {
     let mut s = self.state.lock().unwrap();
-    let label = s.roms[self.index].label.clone();
+    let entry = &s.roms[self.index];
+    let completed = CompletedEntry {
+      label: entry.label.clone(),
+      success: true,
+      media_found: entry.media_found.clone(),
+      media_missing: entry.media_missing.clone(),
+    };
     s.roms[self.index].phase = RomPhase::Done { success: true };
-    s.completed.insert(0, format!("✓  {}", label));
+    s.completed.insert(0, completed);
   }
 
   pub fn finish_error(&self) {
     let mut s = self.state.lock().unwrap();
-    let label = s.roms[self.index].label.clone();
+    let entry = &s.roms[self.index];
+    let completed = CompletedEntry {
+      label: entry.label.clone(),
+      success: false,
+      media_found: entry.media_found.clone(),
+      media_missing: entry.media_missing.clone(),
+    };
     s.roms[self.index].phase = RomPhase::Done { success: false };
-    s.completed.insert(0, format!("✗  {} — error", label));
+    s.completed.insert(0, completed);
   }
 }
 
@@ -257,10 +299,36 @@ impl Ui {
       label: filename.to_string(),
       status: "queued".to_string(),
       phase: RomPhase::Discovering,
+      media_found: Vec::new(),
+      media_missing: Vec::new(),
     });
     RomBar {
       state: Arc::clone(&self.state),
       index: bar_index,
+    }
+  }
+
+  /// Extract end-of-run statistics. Call before dropping `Ui`, print after.
+  pub fn summary(&self) -> Summary {
+    let s = self.state.lock().unwrap();
+    let success = s.completed.iter().filter(|e| e.success).count();
+    let errors = s.completed.iter().filter(|e| !e.success).count();
+    let media_stats = MEDIA_ICONS
+      .iter()
+      .map(|&(kind, icon)| {
+        let found = s
+          .completed
+          .iter()
+          .filter(|e| e.media_found.iter().any(|k| k == kind))
+          .count();
+        (kind, icon, found)
+      })
+      .collect();
+    Summary {
+      total: s.total,
+      success,
+      errors,
+      media_stats,
     }
   }
 }
@@ -331,21 +399,43 @@ fn render_completed(frame: &mut Frame, area: Rect, state: &AppState) {
         .add_modifier(Modifier::ITALIC),
     )]
   } else {
-    state
-      .completed
-      .iter()
-      .map(|line| {
-        let style = if line.starts_with('✓') {
-          Style::default().fg(Color::Green)
-        } else {
-          Style::default().fg(Color::Red)
-        };
-        ListItem::new(line.as_str()).style(style)
-      })
-      .collect()
+    state.completed.iter().map(completed_item).collect()
   };
 
   frame.render_widget(List::new(items), chunks[1]);
+}
+
+fn completed_item(entry: &CompletedEntry) -> ListItem<'static> {
+  let (check, label_color) = if entry.success {
+    ("✓  ", Color::Green)
+  } else {
+    ("✗  ", Color::Red)
+  };
+
+  let mut spans = vec![
+    Span::styled(check, Style::default().fg(label_color)),
+    Span::styled(
+      entry.label.clone(),
+      Style::default()
+        .fg(label_color)
+        .add_modifier(Modifier::BOLD),
+    ),
+    Span::raw("  "),
+  ];
+
+  // Media icons in canonical order: green if found, red if missing.
+  for &(kind, icon) in MEDIA_ICONS {
+    let style = if entry.media_found.iter().any(|k| k == kind) {
+      Style::default().fg(Color::Green)
+    } else if entry.media_missing.iter().any(|k| k == kind) {
+      Style::default().fg(Color::Red)
+    } else {
+      continue;
+    };
+    spans.push(Span::styled(format!("{} ", icon), style));
+  }
+
+  ListItem::new(Line::from(spans))
 }
 
 fn render_active(frame: &mut Frame, area: Rect, state: &AppState) {
@@ -416,21 +506,16 @@ fn render_panel(
   let items: Vec<ListItem> = entries
     .iter()
     .map(|e| {
-      let spinner_span =
-        ratatui::text::Span::styled(spinner.to_string(), Style::default().fg(panel.color));
-      let label_span = ratatui::text::Span::styled(
+      let spinner_span = Span::styled(spinner.to_string(), Style::default().fg(panel.color));
+      let label_span = Span::styled(
         format!(" {} ", e.label),
         Style::default().add_modifier(Modifier::BOLD),
       );
-      let status_span = ratatui::text::Span::styled(
+      let status_span = Span::styled(
         format!("— {}", e.status),
         status_style(&e.status, panel.color),
       );
-      ListItem::new(ratatui::text::Line::from(vec![
-        spinner_span,
-        label_span,
-        status_span,
-      ]))
+      ListItem::new(Line::from(vec![spinner_span, label_span, status_span]))
     })
     .collect();
 
@@ -444,7 +529,7 @@ fn status_style(status: &str, accent: Color) -> Style {
   } else if status.contains("error") || status.contains("mismatch") || status.contains("not found")
   {
     Style::default().fg(Color::Red)
-  } else if status == "queued" {
+  } else if status == "queued" || status == "waiting" {
     Style::default().fg(Color::DarkGray)
   } else {
     Style::default().fg(accent)
