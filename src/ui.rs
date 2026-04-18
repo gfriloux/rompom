@@ -15,8 +15,8 @@ use crossterm::{
 use ratatui::{
   backend::CrosstermBackend,
   layout::{Constraint, Direction, Layout, Rect},
-  style::{Color, Style},
-  widgets::{Block, Borders, List, ListItem},
+  style::{Color, Modifier, Style},
+  widgets::{Block, BorderType, Borders, Gauge, List, ListItem},
   Frame, Terminal,
 };
 
@@ -43,11 +43,14 @@ enum RomPhase {
 
 // ── Panel descriptors ──────────────────────────────────────────────────────
 
-/// Associates a display title with the phase it represents.
+/// Associates a display title, accent color, phase matcher, and completion predicate.
 /// The renderer iterates `PANELS` dynamically — no match arms to update.
 struct PanelDef {
   matches: fn(&RomPhase) -> bool,
+  /// Returns true if a ROM has already passed through (or past) this phase.
+  past: fn(&RomPhase) -> bool,
   title: &'static str,
+  color: Color,
 }
 
 /// Ordered active-phase panels.
@@ -55,15 +58,21 @@ struct PanelDef {
 const PANELS: &[PanelDef] = &[
   PanelDef {
     matches: |p| matches!(p, RomPhase::Discovering),
+    past: |p| !matches!(p, RomPhase::Discovering),
     title: "Discovery",
+    color: Color::Cyan,
   },
   PanelDef {
     matches: |p| matches!(p, RomPhase::Packaging),
+    past: |p| matches!(p, RomPhase::Downloading | RomPhase::Done { .. }),
     title: "Packaging",
+    color: Color::Yellow,
   },
   PanelDef {
     matches: |p| matches!(p, RomPhase::Downloading),
+    past: |p| matches!(p, RomPhase::Done { .. }),
     title: "Downloads",
+    color: Color::Green,
   },
 ];
 
@@ -275,6 +284,15 @@ fn render(frame: &mut Frame, state: &AppState) {
   render_active(frame, areas[1], state);
 }
 
+fn styled_block(title: String, color: Color) -> Block<'static> {
+  Block::default()
+    .borders(Borders::ALL)
+    .border_type(BorderType::Rounded)
+    .border_style(Style::default().fg(color))
+    .title(title)
+    .title_style(Style::default().fg(color).add_modifier(Modifier::BOLD))
+}
+
 fn render_completed(frame: &mut Frame, area: Rect, state: &AppState) {
   let done = state.completed.len();
   let title = if state.total > 0 {
@@ -283,8 +301,33 @@ fn render_completed(frame: &mut Frame, area: Rect, state: &AppState) {
     " Completed ".to_string()
   };
 
+  let block = styled_block(title, Color::White);
+  let inner = block.inner(area);
+  frame.render_widget(block, area);
+
+  let chunks = Layout::default()
+    .direction(Direction::Vertical)
+    .constraints([Constraint::Length(1), Constraint::Min(0)])
+    .split(inner);
+
+  let ratio = if state.total > 0 {
+    done as f64 / state.total as f64
+  } else {
+    0.0
+  };
+  let gauge_label = format!("{}/{}", done, state.total);
+  let gauge = Gauge::default()
+    .gauge_style(Style::default().fg(Color::White).bg(Color::DarkGray))
+    .ratio(ratio)
+    .label(gauge_label);
+  frame.render_widget(gauge, chunks[0]);
+
   let items: Vec<ListItem> = if state.completed.is_empty() {
-    vec![ListItem::new(state.header.as_str())]
+    vec![ListItem::new(state.header.as_str()).style(
+      Style::default()
+        .fg(Color::DarkGray)
+        .add_modifier(Modifier::ITALIC),
+    )]
   } else {
     state
       .completed
@@ -300,10 +343,7 @@ fn render_completed(frame: &mut Frame, area: Rect, state: &AppState) {
       .collect()
   };
 
-  frame.render_widget(
-    List::new(items).block(Block::default().borders(Borders::ALL).title(title)),
-    area,
-  );
+  frame.render_widget(List::new(items), chunks[1]);
 }
 
 fn render_active(frame: &mut Frame, area: Rect, state: &AppState) {
@@ -327,20 +367,84 @@ fn render_active(frame: &mut Frame, area: Rect, state: &AppState) {
       .iter()
       .filter(|r| (panel.matches)(&r.phase))
       .collect();
-    render_panel(frame, panel_areas[i], panel.title, &entries, spinner);
+    let past_count = state.roms.iter().filter(|r| (panel.past)(&r.phase)).count();
+    render_panel(
+      frame,
+      panel_areas[i],
+      panel,
+      &entries,
+      spinner,
+      past_count,
+      state.total,
+    );
   }
 }
 
-fn render_panel(frame: &mut Frame, area: Rect, title: &str, entries: &[&RomEntry], spinner: &str) {
-  let title_str = format!(" {} ({}) ", title, entries.len());
+fn render_panel(
+  frame: &mut Frame,
+  area: Rect,
+  panel: &PanelDef,
+  entries: &[&RomEntry],
+  spinner: &str,
+  past_count: usize,
+  total: usize,
+) {
+  let title = format!(" {} ({}) ", panel.title, entries.len());
+  let block = styled_block(title, panel.color);
+  let inner = block.inner(area);
+  frame.render_widget(block, area);
+
+  let chunks = Layout::default()
+    .direction(Direction::Vertical)
+    .constraints([Constraint::Length(1), Constraint::Min(0)])
+    .split(inner);
+
+  let ratio = if total > 0 {
+    past_count as f64 / total as f64
+  } else {
+    0.0
+  };
+  let gauge_label = format!("{}/{}", past_count, total);
+  let gauge = Gauge::default()
+    .gauge_style(Style::default().fg(panel.color).bg(Color::DarkGray))
+    .ratio(ratio)
+    .label(gauge_label);
+  frame.render_widget(gauge, chunks[0]);
 
   let items: Vec<ListItem> = entries
     .iter()
-    .map(|e| ListItem::new(format!("{} {} — {}", spinner, e.label, e.status)))
+    .map(|e| {
+      let spinner_span =
+        ratatui::text::Span::styled(spinner.to_string(), Style::default().fg(panel.color));
+      let label_span = ratatui::text::Span::styled(
+        format!(" {} ", e.label),
+        Style::default().add_modifier(Modifier::BOLD),
+      );
+      let status_span = ratatui::text::Span::styled(
+        format!("— {}", e.status),
+        status_style(&e.status, panel.color),
+      );
+      ListItem::new(ratatui::text::Line::from(vec![
+        spinner_span,
+        label_span,
+        status_span,
+      ]))
+    })
     .collect();
 
-  frame.render_widget(
-    List::new(items).block(Block::default().borders(Borders::ALL).title(title_str)),
-    area,
-  );
+  frame.render_widget(List::new(items), chunks[1]);
+}
+
+/// Color a status message based on its content.
+fn status_style(status: &str, accent: Color) -> Style {
+  if status.contains('✓') {
+    Style::default().fg(Color::Green)
+  } else if status.contains("error") || status.contains("mismatch") || status.contains("not found")
+  {
+    Style::default().fg(Color::Red)
+  } else if status == "queued" {
+    Style::default().fg(Color::DarkGray)
+  } else {
+    Style::default().fg(accent)
+  }
 }
