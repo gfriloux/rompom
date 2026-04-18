@@ -6,14 +6,21 @@ mod ui;
 
 use getopts::Options;
 use glob::Pattern;
-use std::{env, path::Path, sync::Arc};
+use std::{
+  env,
+  path::{Path, PathBuf},
+  sync::Arc,
+};
 
 use internet_archive::download::{Download, DownloadMethod};
 use internet_archive::metadata::Metadata;
-use screenscraper::{jeuinfo::JeuInfo, ScreenScraper};
+use screenscraper::{
+  jeuinfo::{JeuInfo, Media},
+  ScreenScraper,
+};
 
 use crate::conf::Conf;
-use crate::package::Package;
+use crate::package::{Medias, Package};
 use crate::ui::Ui;
 
 fn print_usage(program: &str, opts: Options) {
@@ -30,6 +37,12 @@ fn game_label(jeu: &Option<JeuInfo>, filename: &str) -> String {
     .unwrap_or_else(|| filename.to_string())
 }
 
+fn download_media_if_needed(ss: &ScreenScraper, media: &Media, dest: &Path) {
+  if !dest.exists() || ss.media_download(media).verify_sha1(dest).is_err() {
+    ss.media_download(media).fetch(dest).unwrap();
+  }
+}
+
 struct RomJob {
   metadata: Arc<Metadata>,
   file_name: String,
@@ -40,6 +53,8 @@ struct RomJob {
   size: u64,
   jeu: Option<JeuInfo>,
   rom_url: String,
+  medias: Medias,
+  romname: String,
 }
 
 fn main() {
@@ -137,6 +152,8 @@ fn main() {
           .unwrap_or(0),
         jeu: None,
         rom_url,
+        medias: Medias::default(),
+        romname: String::new(),
       });
     }
   }
@@ -185,6 +202,8 @@ fn main() {
       Ok(()) => progress.done(),
       Err(_) => progress.error(),
     }
+    job.romname = package.name_normalize();
+    job.medias = package.medias;
     job.jeu = package.jeu;
   }
 
@@ -194,9 +213,10 @@ fn main() {
     let label = game_label(&job.jeu, &job.filename);
     let progress = ui.download_progress(i + 1, total, &label);
     let directory = Path::new(&job.filename).with_extension("");
+
+    // ROM
     let dest = directory.join(&job.filename);
     let download = Download::new(&job.metadata, &job.file_name).unwrap();
-
     if dest.exists() {
       progress.rom_checking();
       match download.verify_sha1(&dest) {
@@ -214,6 +234,79 @@ fn main() {
       download.verify_sha1(&dest).unwrap();
       progress.rom_done();
     }
+
+    // Médias
+    let d = &directory;
+    let media_entries: Vec<(&str, Option<&Media>, PathBuf)> = vec![
+      ("video", job.medias.video.as_ref(), d.join("video.mp4")),
+      (
+        "image",
+        job.medias.image.as_ref(),
+        job
+          .medias
+          .image
+          .as_ref()
+          .map_or_else(PathBuf::new, |m| d.join(format!("image.{}", m.format))),
+      ),
+      (
+        "thumbnail",
+        job.medias.thumbnail.as_ref(),
+        job
+          .medias
+          .thumbnail
+          .as_ref()
+          .map_or_else(PathBuf::new, |m| d.join(format!("thumbnail.{}", m.format))),
+      ),
+      (
+        "bezel",
+        job.medias.bezel.as_ref(),
+        job
+          .medias
+          .bezel
+          .as_ref()
+          .map_or_else(PathBuf::new, |m| d.join(format!("bezel.{}", m.format))),
+      ),
+      (
+        "marquee",
+        job.medias.marquee.as_ref(),
+        job
+          .medias
+          .marquee
+          .as_ref()
+          .map_or_else(PathBuf::new, |m| d.join(format!("marquee.{}", m.format))),
+      ),
+      (
+        "screenshot",
+        job.medias.screenshot.as_ref(),
+        job
+          .medias
+          .screenshot
+          .as_ref()
+          .map_or_else(PathBuf::new, |m| d.join(format!("screenshot.{}", m.format))),
+      ),
+      (
+        "wheel",
+        job.medias.wheel.as_ref(),
+        job
+          .medias
+          .wheel
+          .as_ref()
+          .map_or_else(PathBuf::new, |m| d.join(format!("wheel.{}", m.format))),
+      ),
+      ("manual", job.medias.manual.as_ref(), d.join("manual.pdf")),
+    ];
+
+    for (kind, maybe_media, dest) in &media_entries {
+      match maybe_media {
+        Some(m) => {
+          progress.start_media(kind);
+          download_media_if_needed(&ss, m, dest);
+          progress.media_done(kind);
+        }
+        None => progress.media_unavailable(kind),
+      }
+    }
+
     progress.finish();
   }
 }

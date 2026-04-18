@@ -5,7 +5,8 @@ name = "rompom"
 version = "0.6.0"
 
 [dependencies]
-screenscraper = { git = "https://github.com/gfriloux/screenscraper", tag = "v0.3.0" }
+screenscraper = { git = "https://github.com/gfriloux/screenscraper", tag = "v0.4.0" }
+#screenscraper = { path = "../screenscraper" }
 internet_archive = { git = "https://github.com/gfriloux/internetarchive", tag = "v0.2.0" }
 checksums = "*"
 chrono = "*"
