@@ -79,6 +79,19 @@ Each system entry:
 
 ## Changelog
 
+### v0.9.0
+
+- **Media icons in Completed log** — each finished ROM now shows a Nerd Font icon per
+  media type, colored green if downloaded or red if unavailable:
+  `󰕧` video · `󰋩` image · `󰋫` thumbnail · `󰹙` screenshot · `󱂬` bezel · `󰯃` marquee · `󰊢` wheel · `󰂺` manual
+- **End-of-run summary** — after the TUI exits, rompom prints a concise report:
+  success/error counts and a per-media-type coverage bar with percentages.
+  Requires a Nerd Font terminal for icons to render correctly.
+
+**Migration from v0.8.x:** none — configuration file is unchanged.
+
+---
+
 ### v0.8.1
 
 - **TUI fixes** — two visual correctness fixes:
