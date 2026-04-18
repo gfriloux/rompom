@@ -6,11 +6,7 @@ mod ui;
 
 use getopts::Options;
 use glob::Pattern;
-use std::{
-  env,
-  path::{Path, PathBuf},
-  sync::Arc,
-};
+use std::{env, path::Path, sync::Arc};
 
 use internet_archive::download::{Download, DownloadMethod};
 use internet_archive::metadata::Metadata;
@@ -35,6 +31,14 @@ fn game_label(jeu: &Option<JeuInfo>, filename: &str) -> String {
     .map(|j| j.find_name(&v))
     .filter(|n| !n.is_empty() && n != "Unknown")
     .unwrap_or_else(|| filename.to_string())
+}
+
+fn media_filename(kind: &str, format: &str) -> String {
+  match kind {
+    "video" => "video.mp4".to_string(),
+    "manual" => "manual.pdf".to_string(),
+    _ => format!("{}.{}", kind, format),
+  }
 }
 
 fn download_media_if_needed(ss: &ScreenScraper, media: &Media, dest: &Path) {
@@ -237,70 +241,21 @@ fn main() {
 
     // Médias
     let d = &directory;
-    let media_entries: Vec<(&str, Option<&Media>, PathBuf)> = vec![
-      ("video", job.medias.video.as_ref(), d.join("video.mp4")),
-      (
-        "image",
-        job.medias.image.as_ref(),
-        job
-          .medias
-          .image
-          .as_ref()
-          .map_or_else(PathBuf::new, |m| d.join(format!("image.{}", m.format))),
-      ),
-      (
-        "thumbnail",
-        job.medias.thumbnail.as_ref(),
-        job
-          .medias
-          .thumbnail
-          .as_ref()
-          .map_or_else(PathBuf::new, |m| d.join(format!("thumbnail.{}", m.format))),
-      ),
-      (
-        "bezel",
-        job.medias.bezel.as_ref(),
-        job
-          .medias
-          .bezel
-          .as_ref()
-          .map_or_else(PathBuf::new, |m| d.join(format!("bezel.{}", m.format))),
-      ),
-      (
-        "marquee",
-        job.medias.marquee.as_ref(),
-        job
-          .medias
-          .marquee
-          .as_ref()
-          .map_or_else(PathBuf::new, |m| d.join(format!("marquee.{}", m.format))),
-      ),
-      (
-        "screenshot",
-        job.medias.screenshot.as_ref(),
-        job
-          .medias
-          .screenshot
-          .as_ref()
-          .map_or_else(PathBuf::new, |m| d.join(format!("screenshot.{}", m.format))),
-      ),
-      (
-        "wheel",
-        job.medias.wheel.as_ref(),
-        job
-          .medias
-          .wheel
-          .as_ref()
-          .map_or_else(PathBuf::new, |m| d.join(format!("wheel.{}", m.format))),
-      ),
-      ("manual", job.medias.manual.as_ref(), d.join("manual.pdf")),
-    ];
-
-    for (kind, maybe_media, dest) in &media_entries {
+    for (kind, maybe_media) in [
+      ("video", job.medias.video.as_ref()),
+      ("image", job.medias.image.as_ref()),
+      ("thumbnail", job.medias.thumbnail.as_ref()),
+      ("bezel", job.medias.bezel.as_ref()),
+      ("marquee", job.medias.marquee.as_ref()),
+      ("screenshot", job.medias.screenshot.as_ref()),
+      ("wheel", job.medias.wheel.as_ref()),
+      ("manual", job.medias.manual.as_ref()),
+    ] {
       match maybe_media {
         Some(m) => {
           progress.start_media(kind);
-          download_media_if_needed(&ss, m, dest);
+          let dest = d.join(media_filename(kind, &m.format));
+          download_media_if_needed(&ss, m, &dest);
           progress.media_done(kind);
         }
         None => progress.media_unavailable(kind),
