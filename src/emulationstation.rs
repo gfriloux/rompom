@@ -1,7 +1,7 @@
 use chrono::prelude::*;
 use serde_derive::{Deserialize, Serialize};
 
-use screenscraper::jeuinfo::{GenericIdText, JeuInfo};
+use screenscraper::jeuinfo::JeuInfo;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Game {
@@ -26,63 +26,57 @@ pub struct Game {
 
 impl Game {
   pub fn from_jeuinfo(jeu: &Option<JeuInfo>, path: &str) -> Game {
-    let v = vec!["fr", "eu", "en", "us", "wor", "jp", "ss"];
+    let v = ["fr", "eu", "en", "us", "wor", "jp", "ss"];
 
-    let name = match jeu {
-      Some(x) => x.find_name(&v),
-      None => "".to_string(),
-    };
-    let desc = match jeu {
-      Some(x) => x.find_desc(&v),
-      None => "".to_string(),
-    };
-    let ss_date = match jeu {
-      Some(x) => x.find_date(&v),
-      None => "".to_string(),
-    };
-    let genre = match jeu {
-      Some(x) => x.find_genre(&v),
-      None => "".to_string(),
-    };
-    let joueurs = match jeu {
-      Some(x) => match &x.joueurs {
-        Some(y) => y.text.clone(),
-        None => "Unknown".to_string(),
-      },
-      None => "Unknown".to_string(),
-    };
+    let name = jeu.as_ref().map(|x| x.find_name(&v)).unwrap_or_default();
+    let desc = jeu.as_ref().map(|x| x.find_desc(&v)).unwrap_or_default();
+    let ss_date = jeu.as_ref().map(|x| x.find_date(&v)).unwrap_or_default();
+    let genre = jeu.as_ref().map(|x| x.find_genre(&v)).unwrap_or_default();
+
+    let players = jeu
+      .as_ref()
+      .and_then(|x| x.joueurs.as_ref())
+      .map(|y| y.text.clone())
+      .unwrap_or_else(|| "Unknown".to_string());
+
     let rating = match jeu {
-      Some(x) => match &x.note {
-        Some(y) => y.text.parse::<f32>().unwrap_or(0.0) / 20.0,
-        None => 0.0,
-      },
       None => 0.8,
+      Some(x) => x
+        .note
+        .as_ref()
+        .and_then(|y| y.text.parse::<f32>().ok())
+        .map(|n| n / 20.0)
+        .unwrap_or(0.0),
     };
 
-    let fulldate;
-    if ss_date.len() == 4 {
-      fulldate = format!("{}-01-01 00:00:00 +00:00", ss_date);
-    } else if ss_date.len() == 10 {
-      if &ss_date == "0000-00-00" {
-        fulldate = "1970-01-01 00:00:00 +00:00".to_string();
-      } else {
-        fulldate = format!("{} 00:00:00 +00:00", ss_date);
-      }
+    let fulldate = if ss_date.len() == 4 {
+      format!("{}-01-01 00:00:00 +00:00", ss_date)
+    } else if ss_date.len() == 10 && ss_date != "0000-00-00" {
+      format!("{} 00:00:00 +00:00", ss_date)
     } else {
-      fulldate = "1970-01-01 00:00:00 +00:00".to_string();
-    }
+      "1970-01-01 00:00:00 +00:00".to_string()
+    };
     let dt = DateTime::parse_from_str(&fulldate, "%Y-%m-%d %H:%M:%S %z").unwrap();
 
-    let region = match jeu {
-      Some(x) => match &x.rom {
-        Some(y) => match &y.regions {
-          Some(z) => z.regions_shortname.first().cloned().unwrap_or_default(),
-          None => "".to_string(),
-        },
-        None => "".to_string(),
-      },
-      None => "".to_string(),
-    };
+    let region = jeu
+      .as_ref()
+      .and_then(|x| x.rom.as_ref())
+      .and_then(|y| y.regions.as_ref())
+      .and_then(|z| z.regions_shortname.first())
+      .cloned()
+      .unwrap_or_default();
+
+    let developer = jeu
+      .as_ref()
+      .and_then(|x| x.developpeur.as_ref())
+      .map(|d| d.text.clone())
+      .unwrap_or_else(|| "Unknown".to_string());
+
+    let publisher = jeu
+      .as_ref()
+      .and_then(|x| x.editeur.as_ref())
+      .map(|e| e.text.clone())
+      .unwrap_or_else(|| "Unknown".to_string());
 
     Game {
       path: format!("./{}", path),
@@ -90,32 +84,10 @@ impl Game {
       desc,
       rating,
       releasedate: dt.format("%Y%m%dT%H%M%S").to_string(),
-      developer: match jeu {
-        Some(x) => x
-          .developpeur
-          .as_ref()
-          .unwrap_or(&GenericIdText {
-            id: "0".to_string(),
-            text: "Unknown".to_string(),
-          })
-          .text
-          .clone(),
-        None => "Unknown".to_string(),
-      },
-      publisher: match jeu {
-        Some(x) => x
-          .editeur
-          .as_ref()
-          .unwrap_or(&GenericIdText {
-            id: "0".to_string(),
-            text: "Unknown".to_string(),
-          })
-          .text
-          .clone(),
-        None => "Unknown".to_string(),
-      },
+      developer,
+      publisher,
       genre,
-      players: joueurs,
+      players,
       region,
       image: None,
       thumbnail: None,
