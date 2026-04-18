@@ -239,6 +239,7 @@ fn main() {
             None => job.bar.not_found(),
           }
           job.jeu = ji;
+          job.bar.preparing_pending();
           tx.send(job).unwrap();
         }
       })
@@ -254,7 +255,7 @@ fn main() {
       let system = Arc::clone(&system);
       thread::spawn(move || {
         for mut job in rx {
-          job.bar.packaging();
+          job.bar.preparing();
           let sha1 = job.sha1.clone().unwrap_or_default();
           let mut package =
             Package::new(job.jeu.take(), &job.filename, &job.rom_url, &sha1).unwrap();
@@ -268,6 +269,7 @@ fn main() {
           job.romname = package.name_normalize();
           job.medias = package.medias;
           job.jeu = package.jeu;
+          job.bar.downloading_pending();
           tx.send(job).unwrap();
         }
       })

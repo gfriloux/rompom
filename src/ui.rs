@@ -57,16 +57,10 @@ struct PanelDef {
 /// Add an entry here to get a new column in the TUI automatically.
 const PANELS: &[PanelDef] = &[
   PanelDef {
-    matches: |p| matches!(p, RomPhase::Discovering),
-    past: |p| !matches!(p, RomPhase::Discovering),
+    matches: |p| matches!(p, RomPhase::Discovering | RomPhase::Packaging),
+    past: |p| matches!(p, RomPhase::Downloading | RomPhase::Done { .. }),
     title: "Discovery",
     color: Color::Cyan,
-  },
-  PanelDef {
-    matches: |p| matches!(p, RomPhase::Packaging),
-    past: |p| matches!(p, RomPhase::Downloading | RomPhase::Done { .. }),
-    title: "Packaging",
-    color: Color::Yellow,
   },
   PanelDef {
     matches: |p| matches!(p, RomPhase::Downloading),
@@ -139,13 +133,21 @@ impl RomBar {
   }
 
   // Phase 2 — Packaging
-  pub fn packaging(&self) {
-    self.transition(RomPhase::Packaging, "packaging...");
+  pub fn preparing_pending(&self) {
+    self.transition(RomPhase::Packaging, "waiting");
+  }
+
+  pub fn preparing(&self) {
+    self.set_status("preparing...");
   }
 
   // Phase 3 — ROM download
+  pub fn downloading_pending(&self) {
+    self.transition(RomPhase::Downloading, "waiting");
+  }
+
   pub fn rom_checking(&self) {
-    self.transition(RomPhase::Downloading, "checking...");
+    self.set_status("checking...");
   }
 
   pub fn rom_downloading(&self) {
