@@ -71,7 +71,17 @@ fn main() {
   };
 
   let system = conf.system_find(&system_name);
-  for item in &system.ia_items.clone().unwrap() {
+  let ia_items = match system.ia_items {
+    Some(ref items) => items,
+    None => {
+      eprintln!(
+        "System '{}' has no ia_items configured in rompom.yml",
+        system_name
+      );
+      return;
+    }
+  };
+  for item in ia_items {
     let metadata = Metadata::get(&item.item).unwrap();
 
     for file in &metadata.files {
