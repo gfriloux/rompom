@@ -8,6 +8,7 @@ use super::pkgbuild::Pkgbuild;
 
 use screenscraper::jeuinfo::{JeuInfo, Media};
 
+#[derive(Default)]
 pub struct Medias {
   pub image: Option<Media>,
   pub thumbnail: Option<Media>,
@@ -41,6 +42,10 @@ pub enum Error {
 
 type Result<T, E = Error> = std::result::Result<T, E>;
 
+fn media_region(url: &str) -> &str {
+  url.find("media=").map(|i| &url[i + 6..]).unwrap_or("")
+}
+
 impl Package {
   pub fn name_normalize(&self) -> String {
     self
@@ -63,42 +68,25 @@ impl Package {
       .to_lowercase()
   }
 
-  pub fn new(
-    mut jeu: Option<JeuInfo>,
-    file: &String,
-    url: &String,
-    hash: &String,
-  ) -> Result<Package> {
+  pub fn new(mut jeu: Option<JeuInfo>, file: &str, url: &str, hash: &str) -> Result<Package> {
     let medias = match jeu {
       Some(ref mut x) => Medias {
         image: x.media("sstitle"),
         thumbnail: x.media("box-2D"),
         bezel: x.media("bezel-16-9"),
-        video: match x.media("video-normalized") {
-          Some(x) => Some(x),
-          None => x.media("video"),
-        },
+        video: x.media("video-normalized").or_else(|| x.media("video")),
         marquee: x.media("marquee"),
         screenshot: x.media("ss"),
         wheel: x.media("wheel"),
         manual: x.media("manuel"),
       },
-      None => Medias {
-        image: None,
-        thumbnail: None,
-        bezel: None,
-        video: None,
-        marquee: None,
-        screenshot: None,
-        wheel: None,
-        manual: None,
-      },
+      None => Medias::default(),
     };
     Ok(Package {
       rom: file.to_string(),
       rom_url: url.to_string(),
       hash: hash.to_string(),
-      jeu: jeu.clone(),
+      jeu,
       name: file.to_string(),
       medias,
     })
@@ -108,15 +96,18 @@ impl Package {
     let romname = self.name_normalize();
     let sourcerom = self.rom.replace("'", "'\\''");
     let directory = Path::new(&self.rom).with_extension("");
+    let jeu_id = self.jeu.as_ref().map(|j| j.id.as_str()).unwrap_or("");
+
     let mut pkgbuild = Pkgbuild {
-      pkgname: format!("{}{}", system.basename, romname.clone()),
+      pkgname: format!("{}{}", system.basename, romname),
       romname: romname.clone(),
       pkgver: "1".to_string(),
       pkgrel: 1,
       pkgdesc: game.name.clone(),
-      url: match &self.jeu {
-        Some(x) => format!("https://screenscraper.fr/gameinfos.php?gameid={}", x.id),
-        None => String::new(),
+      url: if jeu_id.is_empty() {
+        String::new()
+      } else {
+        format!("https://screenscraper.fr/gameinfos.php?gameid={}", jeu_id)
       },
       depends: system.depends.clone(),
       source: Vec::new(),
@@ -125,106 +116,112 @@ impl Package {
       package: Vec::new(),
     };
 
-    pkgbuild
-      .source
-      .push(format!("{}::{}", sourcerom, self.rom_url));
-    pkgbuild.sha1sums.push(self.hash.clone());
-
-    pkgbuild.source.push("description.xml".to_string());
-    pkgbuild.sha1sums.push(checksums::hash_file(
-      Path::new(&format!("{}/description.xml", directory.display())),
-      checksums::Algorithm::SHA1,
-    ));
+    pkgbuild.add_source(
+      format!("{}::{}", sourcerom, self.rom_url),
+      self.hash.clone(),
+    );
+    pkgbuild.add_source(
+      "description.xml".to_string(),
+      checksums::hash_file(
+        Path::new(&format!("{}/description.xml", directory.display())),
+        checksums::Algorithm::SHA1,
+      ),
+    );
 
     if let Some(ref x) = self.medias.video {
-      pkgbuild.source.push(format!(
-        "video.mp4::https://screenscraper.fr/medias/{}/{}/video.mp4",
-        system.id,
-        self.jeu.as_ref().unwrap().id
-      ));
-      pkgbuild.sha1sums.push(x.sha1.clone());
+      pkgbuild.add_source(
+        format!(
+          "video.mp4::https://screenscraper.fr/medias/{}/{}/video.mp4",
+          system.id, jeu_id
+        ),
+        x.sha1.clone(),
+      );
     }
 
     if let Some(ref x) = self.medias.bezel {
-      pkgbuild.source.push(format!(
-        "bezel.png::https://screenscraper.fr/medias/{}/{}/bezel-16-9({}).{}",
-        system.id,
-        self.jeu.as_ref().unwrap().id,
-        x.region.as_ref().unwrap_or(&"wor".to_string()),
-        x.format
-      ));
-      pkgbuild.sha1sums.push(x.sha1.clone());
+      pkgbuild.add_source(
+        format!(
+          "bezel.png::https://screenscraper.fr/medias/{}/{}/bezel-16-9({}).{}",
+          system.id,
+          jeu_id,
+          x.region.as_deref().unwrap_or("wor"),
+          x.format
+        ),
+        x.sha1.clone(),
+      );
     }
 
     if let Some(ref x) = self.medias.image {
-      let i = x.url.find("media=").unwrap() + 6;
-      let (_, region) = x.url.split_at(i);
-      pkgbuild.source.push(format!(
-        "image.png::https://screenscraper.fr/medias/{}/{}/{}.{}",
-        system.id,
-        self.jeu.as_ref().unwrap().id,
-        region,
-        x.format
-      ));
-      pkgbuild.sha1sums.push(x.sha1.clone());
+      pkgbuild.add_source(
+        format!(
+          "image.png::https://screenscraper.fr/medias/{}/{}/{}.{}",
+          system.id,
+          jeu_id,
+          media_region(&x.url),
+          x.format
+        ),
+        x.sha1.clone(),
+      );
     }
 
     if let Some(ref x) = self.medias.thumbnail {
-      let i = x.url.find("media=").unwrap() + 6;
-      let (_, region) = x.url.split_at(i);
-      pkgbuild.source.push(format!(
-        "thumbnail.png::https://screenscraper.fr/medias/{}/{}/{}.png",
-        system.id,
-        self.jeu.as_ref().unwrap().id,
-        region
-      ));
-      pkgbuild.sha1sums.push(x.sha1.clone());
+      pkgbuild.add_source(
+        format!(
+          "thumbnail.png::https://screenscraper.fr/medias/{}/{}/{}.png",
+          system.id,
+          jeu_id,
+          media_region(&x.url)
+        ),
+        x.sha1.clone(),
+      );
     }
 
     if let Some(ref x) = self.medias.marquee {
-      pkgbuild.source.push(format!(
-        "marquee.png::https://screenscraper.fr/medias/{}/{}/marquee.{}",
-        system.id,
-        self.jeu.as_ref().unwrap().id,
-        x.format
-      ));
-      pkgbuild.sha1sums.push(x.sha1.clone());
+      pkgbuild.add_source(
+        format!(
+          "marquee.png::https://screenscraper.fr/medias/{}/{}/marquee.{}",
+          system.id, jeu_id, x.format
+        ),
+        x.sha1.clone(),
+      );
     }
 
     if let Some(ref x) = self.medias.screenshot {
-      pkgbuild.source.push(format!(
-        "screenshot.png::https://screenscraper.fr/medias/{}/{}/ss({}).{}",
-        system.id,
-        self.jeu.as_ref().unwrap().id,
-        x.region.as_ref().unwrap_or(&"wor".to_string()),
-        x.format
-      ));
-      pkgbuild.sha1sums.push(x.sha1.clone());
+      pkgbuild.add_source(
+        format!(
+          "screenshot.png::https://screenscraper.fr/medias/{}/{}/ss({}).{}",
+          system.id,
+          jeu_id,
+          x.region.as_deref().unwrap_or("wor"),
+          x.format
+        ),
+        x.sha1.clone(),
+      );
     }
 
     if let Some(ref x) = self.medias.wheel {
-      let i = x.url.find("media=").unwrap() + 6;
-      let (_, region) = x.url.split_at(i);
-      pkgbuild.source.push(format!(
-        "wheel.png::https://screenscraper.fr/medias/{}/{}/{}.{}",
-        system.id,
-        self.jeu.as_ref().unwrap().id,
-        region,
-        x.format
-      ));
-      pkgbuild.sha1sums.push(x.sha1.clone());
+      pkgbuild.add_source(
+        format!(
+          "wheel.png::https://screenscraper.fr/medias/{}/{}/{}.{}",
+          system.id,
+          jeu_id,
+          media_region(&x.url),
+          x.format
+        ),
+        x.sha1.clone(),
+      );
     }
 
     if let Some(ref x) = self.medias.manual {
-      let i = x.url.find("media=").unwrap() + 6;
-      let (_, region) = x.url.split_at(i);
-      pkgbuild.source.push(format!(
-        "manual.pdf::https://screenscraper.fr/medias/{}/{}/{}.pdf",
-        system.id,
-        self.jeu.as_ref().unwrap().id,
-        region
-      ));
-      pkgbuild.sha1sums.push(x.sha1.clone());
+      pkgbuild.add_source(
+        format!(
+          "manual.pdf::https://screenscraper.fr/medias/{}/{}/{}.pdf",
+          system.id,
+          jeu_id,
+          media_region(&x.url)
+        ),
+        x.sha1.clone(),
+      );
     }
 
     match system.id {
@@ -344,7 +341,6 @@ impl Package {
     };
 
     pkgbuild.write(&directory).context(WritePkgbuildSnafu)?;
-
     Ok(())
   }
 
@@ -355,27 +351,21 @@ impl Package {
     if let Some(x) = &self.medias.thumbnail {
       game.image = Some(format!("./data/{}/thumbnail.{}", romname, x.format));
     }
-
     if let Some(x) = &self.medias.image {
       game.thumbnail = Some(format!("./data/{}/image.{}", romname, x.format));
     }
-
-    if let Some(_x) = &self.medias.video {
+    if self.medias.video.is_some() {
       game.video = Some(format!("./data/{}/video.mp4", romname));
     }
-
     if let Some(x) = &self.medias.marquee {
       game.marquee = Some(format!("./data/{}/marquee.{}", romname, x.format));
     }
-
     if let Some(x) = &self.medias.screenshot {
       game.screenshot = Some(format!("./data/{}/screenshot.{}", romname, x.format));
     }
-
     if let Some(x) = &self.medias.wheel {
       game.wheel = Some(format!("./data/{}/wheel.{}", romname, x.format));
     }
-
     if self.medias.manual.is_some() {
       game.manual = Some(format!("./data/{}/manual.pdf", romname));
     }

@@ -28,6 +28,11 @@ pub struct Pkgbuild {
 }
 
 impl Pkgbuild {
+  pub fn add_source(&mut self, url: String, sha1: String) {
+    self.source.push(url);
+    self.sha1sums.push(sha1);
+  }
+
   pub fn write(&self, directory: &Path) -> Result<()> {
     let path = format!("{}/PKGBUILD", directory.display());
     println!("Writing {}", path);

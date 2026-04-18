@@ -51,7 +51,7 @@ fn process_rom(conf: &Conf, system: &System, metadata: &Metadata, file: &Metadat
   let urls = metadata.file_urls(&file.name).unwrap();
   let sha1 = file.sha1.clone().unwrap_or_default();
 
-  let mut package = Package::new(ji, &filename.to_string(), urls.first().unwrap(), &sha1).unwrap();
+  let mut package = Package::new(ji, filename, urls.first().unwrap(), &sha1).unwrap();
   package.build(system).unwrap();
 
   let directory = Path::new(filename).with_extension("");
