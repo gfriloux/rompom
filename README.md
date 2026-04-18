@@ -79,6 +79,20 @@ Each system entry:
 
 ## Changelog
 
+### v0.8.1
+
+- **TUI fixes** — two visual correctness fixes:
+  - ROMs now show `waiting` in the target panel as soon as they are enqueued,
+    not only when a worker actually picks them up. The Downloads panel now reflects
+    the full queue, not just the 4 active slots.
+  - The Prepare panel (PKGBUILD generation) was merged into Discovery — the phase
+    is too fast to warrant its own column. ROMs in that sub-phase now appear in
+    Discovery with status `preparing...`.
+
+**Migration from v0.8.0:** none.
+
+---
+
 ### v0.8.0
 
 - **Reworked TUI** — replaced the flat spinner list with a proper panel-based interface
