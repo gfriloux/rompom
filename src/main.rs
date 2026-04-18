@@ -98,10 +98,11 @@ fn main() {
         file.sha1.clone(),
       );
       let ji: Option<JeuInfo> = res.ok();
+      let urls = metadata.file_urls(&file.name).unwrap();
       let mut package = Package::new(
         ji,
         &filename.to_string(),
-        &metadata.fileurl_get(&file.name).unwrap(),
+        urls.first().unwrap(),
         &file.sha1.clone().unwrap_or("".to_string()),
       )
       .unwrap();

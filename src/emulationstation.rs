@@ -80,8 +80,8 @@ impl Game {
     let dt = DateTime::parse_from_str(&fulldate, "%Y-%m-%d %H:%M:%S %z").unwrap();
     let region = match jeu {
       Some(x) => match &x.rom {
-        Some(y) => match &y.romregions {
-          Some(z) => z.to_string(),
+        Some(y) => match &y.regions {
+          Some(z) => z.regions_shortname.first().cloned().unwrap_or_default(),
           None => "".to_string(),
         },
         None => "".to_string(),
