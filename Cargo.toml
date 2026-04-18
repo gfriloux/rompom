@@ -2,7 +2,7 @@
 edition = "2021"
 authors = ["Guillaume Friloux <guillaume@friloux.me>"]
 name = "rompom"
-version = "0.6.0"
+version = "0.7.0"
 
 [dependencies]
 screenscraper = { git = "https://github.com/gfriloux/screenscraper", tag = "v0.4.0" }
@@ -22,6 +22,7 @@ snafu = "*"
 reqwest = { version = "*", features = ["blocking"] }
 openssl = { version = '*', features = ["vendored"] }
 glob = "0.3.1"
+crossbeam-channel = "0.5"
 
 
 [target.x86_64-unknown-linux-gnu]

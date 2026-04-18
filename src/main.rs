@@ -6,8 +6,9 @@ mod ui;
 
 use getopts::Options;
 use glob::Pattern;
-use std::{env, path::Path, sync::Arc};
+use std::{env, path::Path, sync::Arc, thread};
 
+use crossbeam_channel as channel;
 use internet_archive::download::{Download, DownloadMethod};
 use internet_archive::metadata::Metadata;
 use screenscraper::{
@@ -17,20 +18,15 @@ use screenscraper::{
 
 use crate::conf::Conf;
 use crate::package::{Medias, Package};
-use crate::ui::Ui;
+use crate::ui::{RomBar, Ui};
+
+const N_PACK_WORKERS: usize = 4;
+const N_DL_WORKERS: usize = 4;
+const SS_REGIONS: &[&str] = &["fr", "eu", "en", "us", "wor", "jp", "ss"];
 
 fn print_usage(program: &str, opts: Options) {
   let brief = format!("Usage: {} -s SYSTEM", program);
   print!("{}", opts.usage(&brief));
-}
-
-fn game_label(jeu: &Option<JeuInfo>, filename: &str) -> String {
-  let v = ["fr", "eu", "en", "us", "wor", "jp", "ss"];
-  jeu
-    .as_ref()
-    .map(|j| j.find_name(&v))
-    .filter(|n| !n.is_empty() && n != "Unknown")
-    .unwrap_or_else(|| filename.to_string())
 }
 
 fn media_filename(kind: &str, format: &str) -> String {
@@ -47,7 +43,20 @@ fn download_media_if_needed(ss: &ScreenScraper, media: &Media, dest: &Path) {
   }
 }
 
+// Données brutes collectées avant de connaître le total (pas de bar encore)
+struct FileEntry {
+  metadata: Arc<Metadata>,
+  file_name: String,
+  filename: String,
+  crc32: Option<String>,
+  md5: Option<String>,
+  sha1: Option<String>,
+  size: u64,
+  rom_url: String,
+}
+
 struct RomJob {
+  bar: RomBar,
   metadata: Arc<Metadata>,
   file_name: String,
   filename: String,
@@ -81,9 +90,7 @@ fn main() {
 
   let matches = match opts.parse(&args[1..]) {
     Ok(m) => m,
-    Err(f) => {
-      panic!("{}", f.to_string())
-    }
+    Err(f) => panic!("{}", f.to_string()),
   };
 
   if matches.opt_present("h") {
@@ -120,8 +127,8 @@ fn main() {
 
   let ui = Ui::new();
 
-  // Collecte — construit la liste de jobs
-  let mut jobs: Vec<RomJob> = Vec::new();
+  // Collecte — on ne connaît pas encore le total, pas de bars
+  let mut entries: Vec<FileEntry> = Vec::new();
   for item in &ia_items {
     ui.fetching_metadata(&item.item);
     let metadata = Arc::new(Metadata::get(&item.item).unwrap());
@@ -142,7 +149,7 @@ fn main() {
         .into_iter()
         .next()
         .unwrap_or_default();
-      jobs.push(RomJob {
+      entries.push(FileEntry {
         metadata: Arc::clone(&metadata),
         file_name: file.name.clone(),
         filename,
@@ -154,18 +161,33 @@ fn main() {
           .as_deref()
           .and_then(|s| s.parse().ok())
           .unwrap_or(0),
-        jeu: None,
         rom_url,
-        medias: Medias::default(),
-        romname: String::new(),
       });
     }
   }
 
-  let total = jobs.len();
+  // Total connu — création des bars et des jobs
+  let total = entries.len();
+  let jobs: Vec<RomJob> = entries
+    .into_iter()
+    .enumerate()
+    .map(|(i, e)| RomJob {
+      bar: ui.new_rom_bar(i + 1, total, &e.filename),
+      metadata: e.metadata,
+      file_name: e.file_name,
+      filename: e.filename,
+      crc32: e.crc32,
+      md5: e.md5,
+      sha1: e.sha1,
+      size: e.size,
+      jeu: None,
+      rom_url: e.rom_url,
+      medias: Medias::default(),
+      romname: String::new(),
+    })
+    .collect();
 
-  // Phase 1 — Découverte (ScreenScraper)
-  ui.phase_discovery(total);
+  // Pipeline
   let ss = ScreenScraper::new(
     &conf.screenscraper.user.login,
     &conf.screenscraper.user.password,
@@ -174,94 +196,150 @@ fn main() {
   )
   .unwrap();
 
-  for (i, job) in jobs.iter_mut().enumerate() {
-    let progress = ui.rom_discovery(i + 1, total, &job.filename);
-    let ji = ss
-      .jeuinfo(
-        system.id,
-        &job.filename,
-        job.size,
-        job.crc32.clone(),
-        job.md5.clone(),
-        job.sha1.clone(),
-      )
-      .ok();
-    match &ji {
-      Some(j) => {
-        progress.screenscraper_found(&j.find_name(&["fr", "eu", "en", "us", "wor", "jp", "ss"]))
-      }
-      None => progress.screenscraper_not_found(),
-    }
-    job.jeu = ji;
+  let n_disc = ss
+    .user_info
+    .as_ref()
+    .and_then(|u| u.maxthreads.parse::<usize>().ok())
+    .unwrap_or(1);
+
+  let ss = Arc::new(ss);
+  let system = Arc::new(system);
+
+  let (disc_tx, disc_rx) = channel::unbounded::<RomJob>();
+  let (pack_tx, pack_rx) = channel::unbounded::<RomJob>();
+  let (dl_tx, dl_rx) = channel::unbounded::<RomJob>();
+
+  for job in jobs {
+    disc_tx.send(job).unwrap();
   }
+  drop(disc_tx);
 
-  // Phase 2 — Packaging
-  ui.phase_packaging(total);
-  for (i, job) in jobs.iter_mut().enumerate() {
-    let label = game_label(&job.jeu, &job.filename);
-    let progress = ui.packaging_progress(i + 1, total, &label);
-    let sha1 = job.sha1.clone().unwrap_or_default();
-    let mut package = Package::new(job.jeu.take(), &job.filename, &job.rom_url, &sha1).unwrap();
-    match package.build(&system) {
-      Ok(()) => progress.done(),
-      Err(_) => progress.error(),
-    }
-    job.romname = package.name_normalize();
-    job.medias = package.medias;
-    job.jeu = package.jeu;
+  // Workers discovery
+  let disc_handles: Vec<_> = (0..n_disc)
+    .map(|_| {
+      let rx = disc_rx.clone();
+      let tx = pack_tx.clone();
+      let ss = Arc::clone(&ss);
+      let system = Arc::clone(&system);
+      thread::spawn(move || {
+        for mut job in rx {
+          job.bar.discovering();
+          let ji = ss
+            .jeuinfo(
+              system.id,
+              &job.filename,
+              job.size,
+              job.crc32.clone(),
+              job.md5.clone(),
+              job.sha1.clone(),
+            )
+            .ok();
+          match &ji {
+            Some(j) => job.bar.found(&j.find_name(SS_REGIONS)),
+            None => job.bar.not_found(),
+          }
+          job.jeu = ji;
+          tx.send(job).unwrap();
+        }
+      })
+    })
+    .collect();
+  drop(pack_tx);
+
+  // Workers packaging
+  let pack_handles: Vec<_> = (0..N_PACK_WORKERS)
+    .map(|_| {
+      let rx = pack_rx.clone();
+      let tx = dl_tx.clone();
+      let system = Arc::clone(&system);
+      thread::spawn(move || {
+        for mut job in rx {
+          job.bar.packaging();
+          let sha1 = job.sha1.clone().unwrap_or_default();
+          let mut package =
+            Package::new(job.jeu.take(), &job.filename, &job.rom_url, &sha1).unwrap();
+          match package.build(&system) {
+            Ok(()) => {}
+            Err(_) => {
+              job.bar.finish_error();
+              continue;
+            }
+          }
+          job.romname = package.name_normalize();
+          job.medias = package.medias;
+          job.jeu = package.jeu;
+          tx.send(job).unwrap();
+        }
+      })
+    })
+    .collect();
+  drop(dl_tx);
+
+  // Workers download
+  let dl_handles: Vec<_> = (0..N_DL_WORKERS)
+    .map(|_| {
+      let rx = dl_rx.clone();
+      let ss = Arc::clone(&ss);
+      thread::spawn(move || {
+        for job in rx {
+          let directory = Path::new(&job.filename).with_extension("");
+          let dest = directory.join(&job.filename);
+          let download = Download::new(&job.metadata, &job.file_name).unwrap();
+
+          if dest.exists() {
+            job.bar.rom_checking();
+            match download.verify_sha1(&dest) {
+              Ok(()) => job.bar.rom_skipped(),
+              Err(_) => {
+                job.bar.rom_redownloading();
+                download.fetch(&dest, DownloadMethod::Https).unwrap();
+                download.verify_sha1(&dest).unwrap();
+                job.bar.rom_done();
+              }
+            }
+          } else {
+            job.bar.rom_downloading();
+            download.fetch(&dest, DownloadMethod::Https).unwrap();
+            download.verify_sha1(&dest).unwrap();
+            job.bar.rom_done();
+          }
+
+          let d = &directory;
+          for (kind, maybe_media) in [
+            ("video", job.medias.video.as_ref()),
+            ("image", job.medias.image.as_ref()),
+            ("thumbnail", job.medias.thumbnail.as_ref()),
+            ("bezel", job.medias.bezel.as_ref()),
+            ("marquee", job.medias.marquee.as_ref()),
+            ("screenshot", job.medias.screenshot.as_ref()),
+            ("wheel", job.medias.wheel.as_ref()),
+            ("manual", job.medias.manual.as_ref()),
+          ] {
+            match maybe_media {
+              Some(m) => {
+                job.bar.start_media(kind);
+                let dest = d.join(media_filename(kind, &m.format));
+                download_media_if_needed(&ss, m, &dest);
+                job.bar.media_done(kind);
+              }
+              None => job.bar.media_unavailable(kind),
+            }
+          }
+
+          job.bar.finish();
+        }
+      })
+    })
+    .collect();
+
+  // Attente de fin dans l'ordre du pipeline
+  for h in disc_handles {
+    h.join().unwrap();
   }
-
-  // Phase 3 — Downloads
-  ui.phase_downloads(total);
-  for (i, job) in jobs.iter().enumerate() {
-    let label = game_label(&job.jeu, &job.filename);
-    let progress = ui.download_progress(i + 1, total, &label);
-    let directory = Path::new(&job.filename).with_extension("");
-
-    // ROM
-    let dest = directory.join(&job.filename);
-    let download = Download::new(&job.metadata, &job.file_name).unwrap();
-    if dest.exists() {
-      progress.rom_checking();
-      match download.verify_sha1(&dest) {
-        Ok(()) => progress.rom_skipped(),
-        Err(_) => {
-          progress.rom_redownloading();
-          download.fetch(&dest, DownloadMethod::Https).unwrap();
-          download.verify_sha1(&dest).unwrap();
-          progress.rom_done();
-        }
-      }
-    } else {
-      progress.rom_downloading();
-      download.fetch(&dest, DownloadMethod::Https).unwrap();
-      download.verify_sha1(&dest).unwrap();
-      progress.rom_done();
-    }
-
-    // Médias
-    let d = &directory;
-    for (kind, maybe_media) in [
-      ("video", job.medias.video.as_ref()),
-      ("image", job.medias.image.as_ref()),
-      ("thumbnail", job.medias.thumbnail.as_ref()),
-      ("bezel", job.medias.bezel.as_ref()),
-      ("marquee", job.medias.marquee.as_ref()),
-      ("screenshot", job.medias.screenshot.as_ref()),
-      ("wheel", job.medias.wheel.as_ref()),
-      ("manual", job.medias.manual.as_ref()),
-    ] {
-      match maybe_media {
-        Some(m) => {
-          progress.start_media(kind);
-          let dest = d.join(media_filename(kind, &m.format));
-          download_media_if_needed(&ss, m, &dest);
-          progress.media_done(kind);
-        }
-        None => progress.media_unavailable(kind),
-      }
-    }
-
-    progress.finish();
+  for h in pack_handles {
+    h.join().unwrap();
+  }
+  for h in dl_handles {
+    h.join().unwrap();
   }
 }
