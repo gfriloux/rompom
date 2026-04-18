@@ -2,3 +2,4 @@
 .envrc
 Cargo.lock
 target
+.pre-commit-config.yaml
