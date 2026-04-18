@@ -79,6 +79,18 @@ Each system entry:
 
 ## Changelog
 
+### v0.7.0
+
+- **Parallel pipeline** — discovery, packaging, and downloads now run concurrently.
+  As soon as a ROM is discovered, it moves to packaging; as soon as it is packaged,
+  it moves to download — without waiting for the rest of the queue.
+  Discovery parallelism is automatically capped to the `maxthreads` limit of your
+  ScreenScraper account.
+
+**Migration from v0.6.0:** none — configuration file is unchanged.
+
+---
+
 ### v0.6.0
 
 - **Terminal UI** — progress is now displayed with spinners, one per ROM.
