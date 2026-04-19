@@ -6,6 +6,9 @@ screenscraper:
     login:
     password:
 
+lang:
+  - en
+
 systems:
   - 
     name: neogeo

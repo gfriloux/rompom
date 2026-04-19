@@ -25,13 +25,19 @@ pub struct Game {
 }
 
 impl Game {
-  pub fn from_jeuinfo(jeu: &Option<JeuInfo>, path: &str) -> Game {
-    let v = ["fr", "eu", "en", "us", "wor", "jp", "ss"];
+  pub fn from_jeuinfo(jeu: &Option<JeuInfo>, path: &str, lang: &[&str]) -> Game {
+    let region_fav = &["wor", "eu", "us", "fr", "jp", "ss"];
 
-    let name = jeu.as_ref().map(|x| x.find_name(&v)).unwrap_or_default();
-    let desc = jeu.as_ref().map(|x| x.find_desc(&v)).unwrap_or_default();
-    let ss_date = jeu.as_ref().map(|x| x.find_date(&v)).unwrap_or_default();
-    let genre = jeu.as_ref().map(|x| x.find_genre(&v)).unwrap_or_default();
+    let name = jeu
+      .as_ref()
+      .map(|x| x.find_name(region_fav))
+      .unwrap_or_default();
+    let desc = jeu.as_ref().map(|x| x.find_desc(lang)).unwrap_or_default();
+    let ss_date = jeu
+      .as_ref()
+      .map(|x| x.find_date(region_fav))
+      .unwrap_or_default();
+    let genre = jeu.as_ref().map(|x| x.find_genre(lang)).unwrap_or_default();
 
     let players = jeu
       .as_ref()

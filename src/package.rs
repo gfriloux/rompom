@@ -343,9 +343,9 @@ impl Package {
     pkgbuild.write(&directory).context(WritePkgbuildSnafu)
   }
 
-  pub fn build(&mut self, system: &System) -> Result<()> {
+  pub fn build(&mut self, system: &System, lang: &[&str]) -> Result<()> {
     let romname = self.name_normalize();
-    let mut game = Game::from_jeuinfo(&self.jeu, &self.rom);
+    let mut game = Game::from_jeuinfo(&self.jeu, &self.rom, lang);
 
     if let Some(x) = &self.medias.thumbnail {
       game.image = Some(format!("./data/{}/thumbnail.{}", romname, x.format));

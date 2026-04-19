@@ -23,7 +23,7 @@ use crate::ui::{RomBar, Ui};
 
 const N_PACK_WORKERS: usize = 4;
 const N_DL_WORKERS: usize = 4;
-const SS_REGIONS: &[&str] = &["fr", "eu", "en", "us", "wor", "jp", "ss"];
+const NAME_REGIONS: &[&str] = &["wor", "eu", "us", "fr", "jp", "ss"];
 
 fn print_usage(program: &str, opts: Options) {
   let brief = format!("Usage: {} -s SYSTEM", program);
@@ -84,9 +84,12 @@ fn main() {
     }
   };
 
-  let conf = Conf::load(&format!("{}/rompom.yml", confdir.display())).unwrap();
-
   opts.optopt("s", "system", "System to search for", "SYSTEM");
+  opts.optflag(
+    "",
+    "update-config",
+    "interactively update rompom.yml with missing fields",
+  );
   opts.optflag("h", "help", "print this help menu");
 
   let matches = match opts.parse(&args[1..]) {
@@ -98,6 +101,23 @@ fn main() {
     print_usage(&program, opts);
     return;
   }
+
+  if matches.opt_present("update-config") {
+    let conf_path = format!("{}/rompom.yml", confdir.display());
+    if let Err(e) = conf::Conf::update(&conf_path) {
+      eprintln!("Error: {}", e);
+      std::process::exit(1);
+    }
+    return;
+  }
+
+  let conf = match Conf::load(&format!("{}/rompom.yml", confdir.display())) {
+    Ok(c) => c,
+    Err(e) => {
+      eprintln!("Error: {}", e);
+      std::process::exit(1);
+    }
+  };
 
   let system_name = match matches.opt_str("s") {
     Some(x) => x,
@@ -205,6 +225,7 @@ fn main() {
 
   let ss = Arc::new(ss);
   let system = Arc::new(system);
+  let lang = Arc::new(conf.lang);
 
   let (disc_tx, disc_rx) = channel::unbounded::<RomJob>();
   let (pack_tx, pack_rx) = channel::unbounded::<RomJob>();
@@ -236,7 +257,7 @@ fn main() {
             )
             .ok();
           match &ji {
-            Some(j) => job.bar.found(&j.find_name(SS_REGIONS)),
+            Some(j) => job.bar.found(&j.find_name(NAME_REGIONS)),
             None => job.bar.not_found(),
           }
           job.jeu = ji;
@@ -254,13 +275,15 @@ fn main() {
       let rx = pack_rx.clone();
       let tx = dl_tx.clone();
       let system = Arc::clone(&system);
+      let lang = Arc::clone(&lang);
       thread::spawn(move || {
+        let lang_refs: Vec<&str> = lang.iter().map(|s| s.as_str()).collect();
         for mut job in rx {
           job.bar.preparing();
           let sha1 = job.sha1.clone().unwrap_or_default();
           let mut package =
             Package::new(job.jeu.take(), &job.filename, &job.rom_url, &sha1).unwrap();
-          match package.build(&system) {
+          match package.build(&system, &lang_refs) {
             Ok(()) => {}
             Err(_) => {
               job.bar.finish_error();
