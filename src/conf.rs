@@ -37,27 +37,66 @@ pub struct ScreenScraper {
   pub user: Auth,
 }
 
+/// Ancien format ia_items — utilisé uniquement pour détecter et migrer la conf
 #[derive(Deserialize, Clone, Debug)]
-pub struct Item {
+#[allow(dead_code)]
+struct ItemOld {
+  item: String,
+  filter: String,
+}
+
+/// Entrée Internet Archive (nouveau format, filter en liste)
+#[derive(Deserialize, Clone, Debug)]
+pub struct IaItem {
   pub item: String,
-  pub filter: String,
+  pub filter: Vec<String>,
 }
 
 #[derive(Deserialize, Clone, Debug)]
+#[allow(dead_code)]
+pub struct FolderSource {
+  pub path: String,
+  pub filter: Vec<String>,
+}
+
+#[derive(Deserialize, Clone, Debug)]
+pub enum Source {
+  #[serde(rename = "internet_archive")]
+  InternetArchive(Vec<IaItem>),
+  #[serde(rename = "folder")]
+  #[allow(dead_code)]
+  Folder(FolderSource),
+}
+
+/// Système brut — accepte l'ancien champ ia_items pour détecter la migration nécessaire
+#[derive(Deserialize, Clone, Debug)]
+struct SystemRaw {
+  pub name: String,
+  pub id: u32,
+  pub basename: String,
+  pub depends: Option<String>,
+  pub dir: String,
+  pub ia_items: Option<Vec<ItemOld>>,
+  #[serde(default)]
+  #[serde(with = "serde_yaml::with::singleton_map_recursive")]
+  pub source: Option<Source>,
+}
+
+#[derive(Clone, Debug)]
 pub struct System {
   pub name: String,
   pub id: u32,
   pub basename: String,
   pub depends: Option<String>,
   pub dir: String,
-  pub ia_items: Option<Vec<Item>>,
+  pub source: Option<Source>,
 }
 
 #[derive(Deserialize, Debug)]
 struct ConfRaw {
   pub screenscraper: ScreenScraper,
   pub lang: Option<Vec<String>>,
-  pub systems: Vec<System>,
+  pub systems: Vec<SystemRaw>,
 }
 
 #[derive(Debug)]
@@ -207,10 +246,27 @@ impl Conf {
       _ => return Err(Error::ConfigNeedsUpdate),
     };
 
+    if raw.systems.iter().any(|s| s.ia_items.is_some()) {
+      return Err(Error::ConfigNeedsUpdate);
+    }
+
+    let systems = raw
+      .systems
+      .into_iter()
+      .map(|s| System {
+        name: s.name,
+        id: s.id,
+        basename: s.basename,
+        depends: s.depends,
+        dir: s.dir,
+        source: s.source,
+      })
+      .collect();
+
     Ok(Conf {
       screenscraper: raw.screenscraper,
       lang,
-      systems: raw.systems,
+      systems,
     })
   }
 
@@ -219,51 +275,111 @@ impl Conf {
     let raw: ConfRaw = serde_yaml::from_str(data.as_str()).context(ParseConfigurationSnafu)?;
 
     let lang_missing = raw.lang.as_ref().is_none_or(|l| l.is_empty());
+    let ia_items_present = raw.systems.iter().any(|s| s.ia_items.is_some());
 
-    if !lang_missing {
+    if !lang_missing && !ia_items_present {
       println!("Configuration is already up to date.");
       return Ok(());
     }
 
-    let chosen = match order_languages_tui() {
-      Some(langs) => langs,
-      None => {
-        eprintln!("No language selected. Aborting.");
-        std::process::exit(1);
-      }
-    };
+    // Migration 1 : lang manquant → TUI de sélection
+    let data = if lang_missing {
+      let chosen = match order_languages_tui() {
+        Some(langs) => langs,
+        None => {
+          eprintln!("No language selected. Aborting.");
+          std::process::exit(1);
+        }
+      };
 
-    let lang_yaml = chosen
-      .iter()
-      .map(|c| format!("  - {}", c))
-      .collect::<Vec<_>>()
-      .join("\n");
-    let lang_block = format!("lang:\n{}\n\n", lang_yaml);
+      let lang_yaml = chosen
+        .iter()
+        .map(|c| format!("  - {}", c))
+        .collect::<Vec<_>>()
+        .join("\n");
+      let lang_block = format!("lang:\n{}\n\n", lang_yaml);
 
-    let updated = if data.contains("\nlang:") || data.starts_with("lang:") {
-      let re_start = data.find("lang:").unwrap();
-      let rest = &data[re_start + 5..];
-      let re_end = rest
-        .find("\n\n")
-        .or_else(|| rest.find("\nsystems:"))
-        .map(|i| re_start + 5 + i)
-        .unwrap_or(data.len());
-      format!(
-        "{}{}{}",
-        &data[..re_start],
-        lang_block,
-        &data[re_end..].trim_start_matches('\n')
-      )
+      let updated = if data.contains("\nlang:") || data.starts_with("lang:") {
+        let re_start = data.find("lang:").unwrap();
+        let rest = &data[re_start + 5..];
+        let re_end = rest
+          .find("\n\n")
+          .or_else(|| rest.find("\nsystems:"))
+          .map(|i| re_start + 5 + i)
+          .unwrap_or(data.len());
+        format!(
+          "{}{}{}",
+          &data[..re_start],
+          lang_block,
+          &data[re_end..].trim_start_matches('\n')
+        )
+      } else {
+        data.replacen("systems:", &format!("{}systems:", lang_block), 1)
+      };
+
+      fs::write(file, &updated).context(WriteConfigurationSnafu { path: file })?;
+      println!(
+        "Configuration updated: {} (lang: {})",
+        file,
+        chosen.join(", ")
+      );
+      updated
     } else {
-      data.replacen("systems:", &format!("{}systems:", lang_block), 1)
+      data
     };
 
-    fs::write(file, updated).context(WriteConfigurationSnafu { path: file })?;
-    println!(
-      "Configuration updated: {} (lang: {})",
-      file,
-      chosen.join(", ")
-    );
+    // Migration 2 : ia_items → source.internet_archive
+    if ia_items_present {
+      let mut value: serde_yaml::Value =
+        serde_yaml::from_str(&data).context(ParseConfigurationSnafu)?;
+
+      if let Some(systems) = value.get_mut("systems").and_then(|s| s.as_sequence_mut()) {
+        for system in systems.iter_mut() {
+          let ia_items = match system.get("ia_items") {
+            Some(v) => v.clone(),
+            None => continue,
+          };
+
+          let new_items: Vec<serde_yaml::Value> = ia_items
+            .as_sequence()
+            .unwrap_or(&vec![])
+            .iter()
+            .map(|item| {
+              let mut new_item = serde_yaml::Mapping::new();
+              new_item.insert(
+                serde_yaml::Value::String("item".to_string()),
+                item["item"].clone(),
+              );
+              let filter = item["filter"].as_str().unwrap_or("*");
+              new_item.insert(
+                serde_yaml::Value::String("filter".to_string()),
+                serde_yaml::Value::Sequence(vec![serde_yaml::Value::String(filter.to_string())]),
+              );
+              serde_yaml::Value::Mapping(new_item)
+            })
+            .collect();
+
+          let mut source_map = serde_yaml::Mapping::new();
+          source_map.insert(
+            serde_yaml::Value::String("internet_archive".to_string()),
+            serde_yaml::Value::Sequence(new_items),
+          );
+
+          if let Some(map) = system.as_mapping_mut() {
+            map.remove("ia_items");
+            map.insert(
+              serde_yaml::Value::String("source".to_string()),
+              serde_yaml::Value::Mapping(source_map),
+            );
+          }
+        }
+      }
+
+      let updated = serde_yaml::to_string(&value).context(ParseConfigurationSnafu)?;
+      fs::write(file, updated).context(WriteConfigurationSnafu { path: file })?;
+      println!("Configuration updated: ia_items migrated to source.internet_archive");
+    }
+
     Ok(())
   }
 

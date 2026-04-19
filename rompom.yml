@@ -16,11 +16,16 @@ systems:
     basename: neogeo-rom-
     depends: bios-neogeo
     dir: neogeo
-  - 
+  -
     name: snes
     id: 4
     basename: snes-rom-
     dir: snes
+    source:
+      internet_archive:
+        - item: No-Intro_Nintendo-Super-NES
+          filter:
+            - "*.zip"
   - 
     name: nes
     id: 3

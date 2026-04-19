@@ -16,7 +16,7 @@ use screenscraper::{
   ScreenScraper,
 };
 
-use crate::conf::Conf;
+use crate::conf::{Conf, Source};
 use crate::package::{Medias, Package};
 use crate::ui::{RomBar, Ui};
 
@@ -134,11 +134,18 @@ fn main() {
     }
   };
 
-  let ia_items = match system.ia_items {
-    Some(ref items) => items.clone(),
+  let ia_items = match &system.source {
+    Some(Source::InternetArchive(items)) => items.clone(),
+    Some(Source::Folder(_)) => {
+      eprintln!(
+        "System '{}': folder source not yet implemented",
+        system_name
+      );
+      return;
+    }
     None => {
       eprintln!(
-        "System '{}' has no ia_items configured in rompom.yml",
+        "System '{}' has no source configured in rompom.yml",
         system_name
       );
       return;
@@ -155,7 +162,10 @@ fn main() {
 
     for file in metadata.files.iter().filter(|f| {
       let filename = Path::new(&f.name).file_name().unwrap().to_str().unwrap();
-      Pattern::new(&item.filter).unwrap().matches(filename)
+      item
+        .filter
+        .iter()
+        .any(|pat| Pattern::new(pat).unwrap().matches(filename))
     }) {
       let filename = Path::new(&file.name)
         .file_name()
