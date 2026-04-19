@@ -15,7 +15,7 @@ getopts = "*"
 ratatui = "0.29"
 crossterm = "0.28"
 serde = { version = "1.0", features = ["derive"] }
-serde-xml-rs = "*"
+quick-xml = { version = "*", features = ["serialize"] }
 serde_derive = "*"
 serde_json = "*"
 serde_yaml = "*"

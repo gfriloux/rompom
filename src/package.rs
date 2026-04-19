@@ -1,5 +1,5 @@
 use minijinja::{context, Environment};
-use serde_xml_rs::to_string;
+use serde::Serialize;
 use snafu::{ResultExt, Snafu};
 use std::{fs::create_dir_all, path::Path};
 
@@ -95,6 +95,16 @@ impl Package {
       name: file.to_string(),
       medias,
     })
+  }
+
+  fn write_description_xml(&self, game: &Game, directory: &Path) -> Result<()> {
+    let mut xml = String::new();
+    let mut ser = quick_xml::se::Serializer::new(&mut xml);
+    ser.indent(' ', 2);
+    game.serialize(ser).unwrap();
+
+    let path = format!("{}/description.xml", directory.display());
+    std::fs::write(&path, xml).context(WriteResultSnafu { filename: path })
   }
 
   fn write_launcher(&self, system: &System, game: &mut Game, romname: &str) -> Result<()> {
@@ -294,11 +304,7 @@ impl Package {
     let directory = Path::new(&self.rom).with_extension("");
     create_dir_all(&directory).ok();
 
-    let s = to_string(&game).unwrap();
-    let file = format!("{}/description.xml", directory.display());
-    std::fs::write(file, s.replace("Game>", "game>")).context(WriteResultSnafu {
-      filename: "./description.xml".to_string(),
-    })?;
+    self.write_description_xml(&game, &directory)?;
 
     self.build_pkgbuild(system, &game)?;
     Ok(())

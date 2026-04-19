@@ -1,9 +1,10 @@
 use chrono::prelude::*;
-use serde_derive::{Deserialize, Serialize};
+use serde_derive::Serialize;
 
 use screenscraper::jeuinfo::JeuInfo;
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Debug)]
+#[serde(rename = "game")]
 pub struct Game {
   pub path: String,
   pub name: String,
@@ -15,12 +16,19 @@ pub struct Game {
   pub genre: String,
   pub players: String,
   pub region: String,
+  #[serde(skip_serializing_if = "Option::is_none")]
   pub image: Option<String>,
+  #[serde(skip_serializing_if = "Option::is_none")]
   pub thumbnail: Option<String>,
+  #[serde(skip_serializing_if = "Option::is_none")]
   pub video: Option<String>,
+  #[serde(skip_serializing_if = "Option::is_none")]
   pub marquee: Option<String>,
+  #[serde(skip_serializing_if = "Option::is_none")]
   pub screenshot: Option<String>,
+  #[serde(skip_serializing_if = "Option::is_none")]
   pub wheel: Option<String>,
+  #[serde(skip_serializing_if = "Option::is_none")]
   pub manual: Option<String>,
 }
 
