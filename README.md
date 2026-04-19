@@ -2,8 +2,8 @@
 
 CLI tool that automates ROM packaging for Batocera/EmulationStation systems.
 
-Given a system name, rompom fetches ROM lists from Internet Archive, enriches them with
-metadata from ScreenScraper, and produces ready-to-build packages.
+Given a system name, rompom collects ROMs (from Internet Archive or a local folder), enriches
+them with metadata from ScreenScraper, and produces ready-to-build packages.
 
 ## What it does
 
@@ -39,7 +39,7 @@ rompom -s atomiswave
 Copy `rompom.yml` from the repo root to `~/.config/rompom.yml` and fill in:
 
 - ScreenScraper credentials (`screenscraper.dev` and `screenscraper.user`)
-- For each system, an `ia_items` list pointing to Internet Archive item identifiers
+- For each system, a `source` block (Internet Archive or local folder)
 
 ```yaml
 screenscraper:
@@ -50,15 +50,32 @@ screenscraper:
     login: myuserlogin
     password: myuserpassword
 
+lang:
+  - fr
+  - en
+
 systems:
   - name: atomiswave
     id: 53
     basename: atomiswave-rom-
     depends: bios-atomiswave
     dir: atomiswave
-    ia_items:
-      - item: atomiswave_complete
-        filter: "*.zip"
+    source:
+      internet_archive:
+        - item: atomiswave_complete
+          filter:
+            - "*.zip"
+
+  - name: snes
+    id: 4
+    basename: snes-rom-
+    dir: snes
+    source:
+      folder:
+        path: /path/to/local/snes/roms
+        filter:
+          - "*.zip"
+          - "*.sfc"
 ```
 
 Each system entry:
@@ -70,7 +87,9 @@ Each system entry:
 | `basename` | Prefix for the generated package name                   |
 | `depends`  | Optional Batocera package dependency (e.g. a BIOS)      |
 | `dir`      | ROM directory name on the Batocera filesystem           |
-| `ia_items` | List of Internet Archive items + glob filter            |
+| `source`   | ROM source: `internet_archive` (list of IA items) or `folder` (local path) |
+
+`filter` is a list of glob patterns applied to filenames (case-sensitive).
 
 ## Dependencies
 
@@ -78,6 +97,31 @@ Each system entry:
 - [internetarchive](https://github.com/gfriloux/internetarchive) — archive.org metadata + download
 
 ## Changelog
+
+### v0.11.0
+
+- **Local folder source** — systems can now load ROMs from a local directory instead of
+  Internet Archive. Use `source.folder` with a `path` and one or more glob `filter` patterns.
+  SHA1/MD5/CRC32 checksums are computed per-ROM in the discovery workers (not during collection),
+  so the full ROM list appears immediately in the TUI.
+- **`filter` is now a list** — both `internet_archive` and `folder` sources accept multiple
+  glob patterns (e.g. `["*.zip", "*.7z"]`).
+- **Config format change: `ia_items` → `source`** — the per-system `ia_items` field has been
+  replaced by a `source` block. Run `rompom --update-config` to migrate automatically.
+
+**Migration from v0.10.x — BREAKING:**
+
+The `ia_items` field is no longer valid. If your `rompom.yml` still uses it, rompom will
+refuse to start and tell you to run:
+
+```
+rompom --update-config
+```
+
+This migrates each `ia_items` entry to the new `source.internet_archive` format in place,
+including converting `filter: "*.zip"` (string) to `filter: ["*.zip"]` (list).
+
+---
 
 ### v0.10.0
 
