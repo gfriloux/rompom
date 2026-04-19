@@ -87,6 +87,8 @@ Each system entry:
 - **Media region follows the ROM** — media assets (screenshot, image, bezel, etc.) are now
   selected based on the ROM's own region rather than a fixed `fr`-first preference.
   A US ROM will get US assets; only if none exist does it fall back to `wor`, then `ss`.
+- **Media icon legend** — the bottom line of the Completed panel now shows a compact legend
+  (`󰕧 video  󰋩 image  …`) so icons are self-explanatory without leaving the TUI.
 
 **Internal refactors (no user-visible behavior change):**
 
