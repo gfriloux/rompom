@@ -98,6 +98,20 @@ Each system entry:
 
 ## Changelog
 
+### v0.12.0
+
+- **Interactive identification modal** — when a ROM cannot be identified automatically during
+  discovery, rompom opens an interactive TUI modal instead of silently skipping it:
+  - Lists up to 30 `jeuRecherche` candidates (name + year) for the user to pick from
+  - `↑`/`↓` to navigate, `Enter` to confirm, `Esc` to cancel (ROM is skipped)
+  - `i` switches to manual entry: type a ScreenScraper game ID, press `Enter` to preview
+    the game name, then confirm or go back
+  - Multiple unidentified ROMs queue up; the modal processes them one at a time
+
+**Dependency:** requires `screenscraper` ≥ v0.6.0 (`jeu_recherche`, `jeuinfo_by_gameid`).
+
+---
+
 ### v0.11.0
 
 - **Local folder source** — systems can now load ROMs from a local directory instead of
