@@ -95,6 +95,7 @@ impl Package {
   pub fn build_pkgbuild(&mut self, system: &System, game: &Game) -> Result<()> {
     let romname = self.name_normalize();
     let sourcerom = self.rom.replace("'", "'\\''");
+    let rom_escaped = self.rom.replace("$", "\\$");
     let directory = Path::new(&self.rom).with_extension("");
     let jeu_id = self.jeu.as_ref().map(|j| j.id.as_str()).unwrap_or("");
 
@@ -226,117 +227,62 @@ impl Package {
 
     match system.id {
       20 => {
-        pkgbuild.build.push("  IFS=$'\\n'".to_string());
-        pkgbuild.build.push("  cuefile=$(ls *.cue)".to_string());
-        pkgbuild
-          .build
-          .push("  sed -i \"s@FILE \\\"@FILE \\\"data/$_romname/@g\" ${cuefile}".to_string());
-
-        pkgbuild.package.push("  IFS=$'\\n'".to_string());
-        pkgbuild
-          .package
-          .push("  mkdir -m 0700 -p \"$pkgdir/userdata/roms/segacd/data/$_romname/\"".to_string());
-        pkgbuild.package.push("  cuefile=$(ls *.cue)".to_string());
-        pkgbuild.package.push(
-          "  install -Dm600 ${cuefile} \"$pkgdir\"/userdata/roms/segacd/${cuefile}".to_string(),
+        pkgbuild.push_build_block(
+          "  IFS=$'\\n'
+  cuefile=$(ls *.cue)
+  sed -i \"s@FILE \\\"@FILE \\\"data/$_romname/@g\" ${cuefile}",
         );
-        pkgbuild
-          .package
-          .push("  for file in $(ls *.bin); do".to_string());
-        pkgbuild.package.push(
-          "    install -Dm600 {,\"$pkgdir\"/userdata/roms/segacd/data/$_romname/}${file}"
-            .to_string(),
-        );
-        pkgbuild.package.push("  done".to_string());
-        pkgbuild.package.push(format!(
-          "  sed -i \"s|{}|$cuefile|\" description.xml",
-          self.rom.replace("$", "\\$")
+        pkgbuild.push_package_block(&format!(
+          "  IFS=$'\\n'
+  mkdir -m 0700 -p \"$pkgdir/userdata/roms/segacd/data/$_romname/\"
+  cuefile=$(ls *.cue)
+  install -Dm600 ${{cuefile}} \"$pkgdir\"/userdata/roms/segacd/${{cuefile}}
+  for file in $(ls *.bin); do
+    install -Dm600 {{,\"$pkgdir\"/userdata/roms/segacd/data/$_romname/}}${{file}}
+  done
+  sed -i \"s|{rom}|$cuefile|\" description.xml
+  for file in $(ls *.mp4 *.png *.xml *.pdf, *.jpg); do
+    install -Dm600 {{,\"$pkgdir\"/userdata/roms/{dir}/data/$_romname/}}$file
+  done",
+          rom = rom_escaped,
+          dir = system.dir,
         ));
-        pkgbuild
-          .package
-          .push("  for file in $(ls *.mp4 *.png *.xml *.pdf, *.jpg); do".to_string());
-        pkgbuild.package.push(format!(
-          "    install -Dm600 {{,\"$pkgdir\"/userdata/roms/{}/data/$_romname/}}$file",
-          system.dir
-        ));
-        pkgbuild.package.push("  done".to_string());
       }
       22 | 57 => {
-        pkgbuild.build.push("  IFS=$'\\n'".to_string());
-        pkgbuild
-          .build
-          .push("  for file in $(ls *.chd); do".to_string());
-        pkgbuild
-          .build
-          .push("    echo \".data/$_romname/${file}\" >>${_romname}.m3u".to_string());
-        pkgbuild.build.push("  done".to_string());
-
-        pkgbuild.package.push(format!(
-          "  mkdir -m 0700 -p \"$pkgdir/userdata/roms/{}/data/$_romname/\" \\",
-          system.dir
-        ));
-        pkgbuild
-          .package
-          .push("                   \"$pkgdir/userdata/system/pacman/batoexec/\"".to_string());
-        pkgbuild.package.push(format!(
-          "  mkdir -p 0700 -p \"$pkgdir/userdata/roms/{}/data/$_romname/\" \"$pkgdir/userdata/roms/{}/.data/$_romname\"",
-          system.dir, system.dir
-        ));
-        pkgbuild.package.push(format!(
-          "  install -m 0600 *.chd \"$pkgdir/userdata/roms/{}/.data/$_romname/\"",
-          system.dir
-        ));
-        pkgbuild.package.push(format!(
-          "  install -m 0600 \"${{_romname}}.m3u\" \"$pkgdir/userdata/roms/{}/\"",
-          system.dir
-        ));
-        pkgbuild
-          .package
-          .push("  for file in $(ls *.mp4 *.png *.xml *.pdf, *.jpg); do".to_string());
-        pkgbuild.package.push(format!(
-          "    install -Dm600 {{,\"$pkgdir\"/userdata/roms/{}/data/$_romname/}}$file",
-          system.dir
-        ));
-        pkgbuild.package.push("  done".to_string());
-        pkgbuild.package.push(format!(
-          "   echo \"gamelist = {}\" >  \"$pkgdir\"/userdata/system/pacman/batoexec/${{pkgname[0]}}",
-          system.dir
-        ));
-        pkgbuild.package.push(
-          "   cat description.xml          >> \"$pkgdir\"/userdata/system/pacman/batoexec/${pkgname[0]}".to_string(),
+        pkgbuild.push_build_block(
+          "  IFS=$'\\n'
+  for file in $(ls *.chd); do
+    echo \".data/$_romname/${file}\" >>${_romname}.m3u
+  done",
         );
+        pkgbuild.push_package_block(&format!(
+          "  mkdir -m 0700 -p \"$pkgdir/userdata/roms/{dir}/data/$_romname/\" \\
+                   \"$pkgdir/userdata/system/pacman/batoexec/\"
+  mkdir -p 0700 -p \"$pkgdir/userdata/roms/{dir}/data/$_romname/\" \"$pkgdir/userdata/roms/{dir}/.data/$_romname\"
+  install -m 0600 *.chd \"$pkgdir/userdata/roms/{dir}/.data/$_romname/\"
+  install -m 0600 \"${{_romname}}.m3u\" \"$pkgdir/userdata/roms/{dir}/\"
+  for file in $(ls *.mp4 *.png *.xml *.pdf, *.jpg); do
+    install -Dm600 {{,\"$pkgdir\"/userdata/roms/{dir}/data/$_romname/}}$file
+  done
+   echo \"gamelist = {dir}\" >  \"$pkgdir\"/userdata/system/pacman/batoexec/${{pkgname[0]}}
+   cat description.xml          >> \"$pkgdir\"/userdata/system/pacman/batoexec/${{pkgname[0]}}",
+          dir = system.dir,
+        ));
       }
       _ => {
-        pkgbuild.build.push("  true".to_string());
-
-        pkgbuild.package.push(format!(
-          "  mkdir -m 0700 -p \"$pkgdir/userdata/roms/{}/data/$_romname/\" \\",
-          system.dir
+        pkgbuild.push_build_block("  true");
+        pkgbuild.push_package_block(&format!(
+          "  mkdir -m 0700 -p \"$pkgdir/userdata/roms/{dir}/data/$_romname/\" \\
+                   \"$pkgdir/userdata/system/pacman/batoexec/\"
+  install -Dm600 \"{rom}\" \"$pkgdir\"/userdata/roms/{dir}/\"{rom}\"
+  for file in $(ls *.mp4 *.png *.jpg *.xml *.pdf); do
+    install -Dm600 {{,\"$pkgdir\"/userdata/roms/{dir}/data/$_romname/}}$file
+  done
+   echo \"gamelist = {dir}\" >  \"$pkgdir\"/userdata/system/pacman/batoexec/${{pkgname[0]}}
+   cat description.xml          >> \"$pkgdir\"/userdata/system/pacman/batoexec/${{pkgname[0]}}",
+          dir = system.dir,
+          rom = rom_escaped,
         ));
-        pkgbuild
-          .package
-          .push("                   \"$pkgdir/userdata/system/pacman/batoexec/\"".to_string());
-        pkgbuild.package.push(format!(
-          "  install -Dm600 \"{}\" \"$pkgdir\"/userdata/roms/{}/\"{}\"",
-          self.rom.replace("$", "\\$"),
-          system.dir,
-          self.rom.replace("$", "\\$")
-        ));
-        pkgbuild
-          .package
-          .push("  for file in $(ls *.mp4 *.png *.jpg *.xml *.pdf); do".to_string());
-        pkgbuild.package.push(format!(
-          "    install -Dm600 {{,\"$pkgdir\"/userdata/roms/{}/data/$_romname/}}$file",
-          system.dir
-        ));
-        pkgbuild.package.push("  done".to_string());
-        pkgbuild.package.push(format!(
-          "   echo \"gamelist = {}\" >  \"$pkgdir\"/userdata/system/pacman/batoexec/${{pkgname[0]}}",
-          system.dir
-        ));
-        pkgbuild.package.push(
-          "   cat description.xml          >> \"$pkgdir\"/userdata/system/pacman/batoexec/${pkgname[0]}".to_string(),
-        );
       }
     };
 

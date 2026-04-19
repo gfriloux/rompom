@@ -33,6 +33,14 @@ impl Pkgbuild {
     self.sha1sums.push(sha1);
   }
 
+  pub fn push_build_block(&mut self, block: &str) {
+    self.build.extend(block.lines().map(str::to_string));
+  }
+
+  pub fn push_package_block(&mut self, block: &str) {
+    self.package.extend(block.lines().map(str::to_string));
+  }
+
   pub fn write(&self, directory: &Path) -> Result<()> {
     let path = format!("{}/PKGBUILD", directory.display());
     let mut f = File::create(&path).context(WriteSnafu { path: path.clone() })?;
