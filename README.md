@@ -98,6 +98,39 @@ Each system entry:
 
 ## Changelog
 
+### v0.13.0
+
+- **Incremental update support** — re-running rompom on an already-processed system now
+  skips unchanged ROMs and media instead of redoing all work from scratch.
+  A state file `<system>.state.yml` is written next to the game folders after each run,
+  recording for each ROM: ScreenScraper game ID, ROM SHA1, and per-media SHA1s.
+
+  On subsequent runs:
+  - **Faster discovery** — ROMs already identified use `jeuinfo_by_gameid` (direct lookup
+    by cached ID) instead of the slower checksum-based `jeuinfo` call.
+  - **ROM skip** — if the ROM's SHA1 is unchanged, the copy or download is skipped entirely.
+  - **Media skip** — media files already on disk with a matching SHA1 are not re-downloaded.
+  - **Package skip** — if neither the ROM nor any media changed, the `PKGBUILD` and
+    `description.xml` are not rewritten.
+  - **`pkgver` bump** — when a package *is* updated (new or changed media, ROM changed),
+    the existing `pkgver` is read from the `PKGBUILD` and incremented by 1 automatically.
+    First-time packages start at `pkgver=1`.
+
+- **SHA1 fast-skip for folder sources** — for local folder sources, if a ROM file's
+  modification time and size are unchanged since the last run, its SHA1 is reused from
+  the state file without reading the file. This significantly reduces processing time
+  when re-running on a folder of large ROM files.
+
+- **UI: unchanged vs updated** — the Completed panel now distinguishes:
+  - `=` (gray) — package is fully unchanged, nothing was rewritten or re-downloaded
+  - `✓` (green) — package is new or was updated
+  The end-of-run summary also reports `updated` and `unchanged` counts separately.
+
+**Migration from v0.12.x:** none — configuration file is unchanged.
+The state file is created automatically on the first run after upgrading.
+
+---
+
 ### v0.12.0
 
 - **Interactive identification modal** — when a ROM cannot be identified automatically during
