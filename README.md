@@ -88,6 +88,17 @@ Each system entry:
   selected based on the ROM's own region rather than a fixed `fr`-first preference.
   A US ROM will get US assets; only if none exist does it fall back to `wor`, then `ss`.
 
+**Internal refactors (no user-visible behavior change):**
+
+- **Template-based PKGBUILD generation** — PKGBUILD files are now generated via MiniJinja
+  templates (`assets/templates/pkgbuild/`). System-specific build/package sections live in
+  dedicated `.jinja` files instead of inline Rust strings, making them easier to read and modify.
+- **Template-based launchers** — the OpenBOR launcher script is generated from
+  `assets/templates/launcher/openbor.jinja` instead of being built by hand in Rust.
+- **description.xml via quick-xml** — the `Game` struct is now serialized using
+  `quick_xml::se::Serializer` (serde), replacing the previous manual string construction.
+- **Naming convention** — `find_system` and `normalize_name` aligned with Rust verb-noun convention.
+
 **Migration from v0.9.x — BREAKING:**
 
 The `lang` field is now required. If your `rompom.yml` does not have it, rompom will refuse
