@@ -79,6 +79,28 @@ Each system entry:
 
 ## Changelog
 
+### v0.10.0
+
+- **Description language preference** — a new required `lang` field in `rompom.yml` controls
+  the language used for game descriptions and genres (e.g. `[fr, en]` tries French first,
+  falls back to English).
+- **Media region follows the ROM** — media assets (screenshot, image, bezel, etc.) are now
+  selected based on the ROM's own region rather than a fixed `fr`-first preference.
+  A US ROM will get US assets; only if none exist does it fall back to `wor`, then `ss`.
+
+**Migration from v0.9.x — BREAKING:**
+
+The `lang` field is now required. If your `rompom.yml` does not have it, rompom will refuse
+to start and tell you to run:
+
+```
+rompom --update-config
+```
+
+This command interactively asks for your language preference and updates `rompom.yml` in place.
+
+---
+
 ### v0.9.0
 
 - **Media icons in Completed log** — each finished ROM now shows a Nerd Font icon per
