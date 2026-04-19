@@ -24,7 +24,7 @@ use screenscraper::{
 
 use crate::conf::{Conf, Source};
 use crate::package::{Medias, Package};
-use crate::ui::{RomBar, Ui};
+use crate::ui::{ModalCandidate, ModalRequest, ModalResponse, RomBar, Ui};
 
 const N_PACK_WORKERS: usize = 4;
 const N_DL_WORKERS: usize = 4;
@@ -33,6 +33,24 @@ const NAME_REGIONS: &[&str] = &["wor", "eu", "us", "fr", "jp", "ss"];
 fn print_usage(program: &str, opts: Options) {
   let brief = format!("Usage: {} -s SYSTEM", program);
   print!("{}", opts.usage(&brief));
+}
+
+/// Strips extension and region/revision tags from a ROM filename to produce
+/// a clean title suitable for a ScreenScraper name search.
+///
+/// `"Sonic The Hedgehog (USA) [!].zip"` → `"Sonic The Hedgehog"`
+fn search_name(filename: &str) -> String {
+  let stem = Path::new(filename)
+    .file_stem()
+    .and_then(|s| s.to_str())
+    .unwrap_or(filename);
+  stem
+    .split('(')
+    .next()
+    .and_then(|s| s.split('[').next())
+    .unwrap_or(stem)
+    .trim()
+    .to_string()
 }
 
 fn media_filename(kind: &str, format: &str) -> String {
@@ -76,6 +94,67 @@ struct RomJob {
   medias: Medias,
   romname: String,
   local_path: Option<PathBuf>,
+}
+
+/// Called by a discovery worker when `jeuinfo` returns nothing.
+///
+/// Runs `jeu_recherche` by ROM name, opens a modal so the user can pick the
+/// right game (or enter an SS game ID manually), then fetches and returns the
+/// resolved `JeuInfo`. Returns `None` if the user cancels or lookup fails.
+fn resolve_via_modal(
+  ss: &Arc<ScreenScraper>,
+  system: &crate::conf::System,
+  job: &RomJob,
+  modal_tx: &crossbeam_channel::Sender<ModalRequest>,
+) -> Option<screenscraper::jeuinfo::JeuInfo> {
+  let candidates = ss
+    .jeu_recherche(Some(system.id), &search_name(&job.filename))
+    .unwrap_or_default();
+
+  let display: Vec<ModalCandidate> = candidates
+    .iter()
+    .map(|j| {
+      let date = j.find_date(&["wor", "eu", "us", "fr"]);
+      ModalCandidate {
+        name: j.find_name(NAME_REGIONS),
+        game_id: j.id.clone(),
+        year: if date == "Unknown" || date.len() < 4 {
+          None
+        } else {
+          Some(date[..4].to_string())
+        },
+      }
+    })
+    .collect();
+
+  let (resp_tx, resp_rx) = crossbeam_channel::bounded(1);
+  let ss_preview = Arc::clone(ss);
+  let preview_system_id = system.id;
+  modal_tx
+    .send(ModalRequest {
+      filename: job.filename.clone(),
+      sha1: job.sha1.clone(),
+      candidates: display,
+      response: resp_tx,
+      fetch_by_id: Box::new(move |game_id| {
+        ss_preview
+          .jeuinfo_by_gameid(preview_system_id, game_id)
+          .ok()
+          .map(|j| j.find_name(NAME_REGIONS).to_string())
+      }),
+    })
+    .ok()?;
+
+  job.bar.waiting_for_user();
+
+  match resp_rx.recv().ok()? {
+    ModalResponse::SelectedId(id) => candidates.into_iter().find(|j| j.id == id),
+    ModalResponse::ManualId(raw) => raw
+      .parse::<u32>()
+      .ok()
+      .and_then(|game_id| ss.jeuinfo_by_gameid(system.id, game_id).ok()),
+    ModalResponse::Cancelled => None,
+  }
 }
 
 fn main() {
@@ -266,11 +345,9 @@ fn main() {
   )
   .unwrap();
 
-  let n_disc = ss
-    .user_info
-    .as_ref()
-    .and_then(|u| u.maxthreads.parse::<usize>().ok())
-    .unwrap_or(1);
+  let n_disc = ss.user_info.maxthreads as usize;
+
+  let modal_tx = ui.modal_sender();
 
   let ss = Arc::new(ss);
   let system = Arc::new(system);
@@ -292,6 +369,7 @@ fn main() {
       let tx = pack_tx.clone();
       let ss = Arc::clone(&ss);
       let system = Arc::clone(&system);
+      let modal_tx = modal_tx.clone();
       thread::spawn(move || {
         for mut job in rx {
           job.bar.discovering();
@@ -310,6 +388,15 @@ fn main() {
               job.sha1.clone(),
             )
             .ok();
+
+          let ji = match ji {
+            Some(j) => {
+              job.bar.found(&j.find_name(NAME_REGIONS));
+              Some(j)
+            }
+            None => resolve_via_modal(&ss, &system, &job, &modal_tx),
+          };
+
           match &ji {
             Some(j) => job.bar.found(&j.find_name(NAME_REGIONS)),
             None => job.bar.not_found(),
