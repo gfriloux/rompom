@@ -1,3 +1,4 @@
+use minijinja::{context, Environment};
 use serde_xml_rs::to_string;
 use snafu::{ResultExt, Snafu};
 use std::{fs::create_dir_all, path::Path};
@@ -44,6 +45,12 @@ type Result<T, E = Error> = std::result::Result<T, E>;
 
 fn media_region(url: &str) -> &str {
   url.find("media=").map(|i| &url[i + 6..]).unwrap_or("")
+}
+
+fn render_template(src: &str, ctx: &minijinja::Value) -> String {
+  let mut env = Environment::new();
+  env.add_template("t", src).unwrap();
+  env.get_template("t").unwrap().render(ctx).unwrap()
 }
 
 impl Package {
@@ -225,66 +232,27 @@ impl Package {
       );
     }
 
-    match system.id {
-      20 => {
-        pkgbuild.push_build_block(
-          "  IFS=$'\\n'
-  cuefile=$(ls *.cue)
-  sed -i \"s@FILE \\\"@FILE \\\"data/$_romname/@g\" ${cuefile}",
-        );
-        pkgbuild.push_package_block(&format!(
-          "  IFS=$'\\n'
-  mkdir -m 0700 -p \"$pkgdir/userdata/roms/segacd/data/$_romname/\"
-  cuefile=$(ls *.cue)
-  install -Dm600 ${{cuefile}} \"$pkgdir\"/userdata/roms/segacd/${{cuefile}}
-  for file in $(ls *.bin); do
-    install -Dm600 {{,\"$pkgdir\"/userdata/roms/segacd/data/$_romname/}}${{file}}
-  done
-  sed -i \"s|{rom}|$cuefile|\" description.xml
-  for file in $(ls *.mp4 *.png *.xml *.pdf, *.jpg); do
-    install -Dm600 {{,\"$pkgdir\"/userdata/roms/{dir}/data/$_romname/}}$file
-  done",
-          rom = rom_escaped,
-          dir = system.dir,
-        ));
-      }
-      22 | 57 => {
-        pkgbuild.push_build_block(
-          "  IFS=$'\\n'
-  for file in $(ls *.chd); do
-    echo \".data/$_romname/${file}\" >>${_romname}.m3u
-  done",
-        );
-        pkgbuild.push_package_block(&format!(
-          "  mkdir -m 0700 -p \"$pkgdir/userdata/roms/{dir}/data/$_romname/\" \\
-                   \"$pkgdir/userdata/system/pacman/batoexec/\"
-  mkdir -p 0700 -p \"$pkgdir/userdata/roms/{dir}/data/$_romname/\" \"$pkgdir/userdata/roms/{dir}/.data/$_romname\"
-  install -m 0600 *.chd \"$pkgdir/userdata/roms/{dir}/.data/$_romname/\"
-  install -m 0600 \"${{_romname}}.m3u\" \"$pkgdir/userdata/roms/{dir}/\"
-  for file in $(ls *.mp4 *.png *.xml *.pdf, *.jpg); do
-    install -Dm600 {{,\"$pkgdir\"/userdata/roms/{dir}/data/$_romname/}}$file
-  done
-   echo \"gamelist = {dir}\" >  \"$pkgdir\"/userdata/system/pacman/batoexec/${{pkgname[0]}}
-   cat description.xml          >> \"$pkgdir\"/userdata/system/pacman/batoexec/${{pkgname[0]}}",
-          dir = system.dir,
-        ));
-      }
-      _ => {
-        pkgbuild.push_build_block("  true");
-        pkgbuild.push_package_block(&format!(
-          "  mkdir -m 0700 -p \"$pkgdir/userdata/roms/{dir}/data/$_romname/\" \\
-                   \"$pkgdir/userdata/system/pacman/batoexec/\"
-  install -Dm600 \"{rom}\" \"$pkgdir\"/userdata/roms/{dir}/\"{rom}\"
-  for file in $(ls *.mp4 *.png *.jpg *.xml *.pdf); do
-    install -Dm600 {{,\"$pkgdir\"/userdata/roms/{dir}/data/$_romname/}}$file
-  done
-   echo \"gamelist = {dir}\" >  \"$pkgdir\"/userdata/system/pacman/batoexec/${{pkgname[0]}}
-   cat description.xml          >> \"$pkgdir\"/userdata/system/pacman/batoexec/${{pkgname[0]}}",
-          dir = system.dir,
-          rom = rom_escaped,
-        ));
-      }
+    let ctx = context! { dir => system.dir, rom => rom_escaped };
+    let (build_src, package_src) = match system.id {
+      20 => (
+        include_str!("../assets/templates/pkgbuild/segacd-build.jinja"),
+        include_str!("../assets/templates/pkgbuild/segacd-package.jinja"),
+      ),
+      22 => (
+        include_str!("../assets/templates/pkgbuild/psx-build.jinja"),
+        include_str!("../assets/templates/pkgbuild/psx-package.jinja"),
+      ),
+      57 => (
+        include_str!("../assets/templates/pkgbuild/ps2-build.jinja"),
+        include_str!("../assets/templates/pkgbuild/ps2-package.jinja"),
+      ),
+      _ => (
+        include_str!("../assets/templates/pkgbuild/default-build.jinja"),
+        include_str!("../assets/templates/pkgbuild/default-package.jinja"),
+      ),
     };
+    pkgbuild.push_build_block(&render_template(build_src, &ctx));
+    pkgbuild.push_package_block(&render_template(package_src, &ctx));
 
     pkgbuild.write(&directory).context(WritePkgbuildSnafu)
   }
