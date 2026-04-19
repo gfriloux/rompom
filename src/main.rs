@@ -126,7 +126,7 @@ fn main() {
     }
   };
 
-  let system = match conf.system_find(&system_name) {
+  let system = match conf.find_system(&system_name) {
     Some(s) => s,
     None => {
       eprintln!("System '{}' not found in rompom.yml", system_name);
@@ -289,7 +289,7 @@ fn main() {
               continue;
             }
           }
-          job.romname = package.name_normalize();
+          job.romname = package.normalize_name();
           job.medias = package.medias;
           job.jeu = package.jeu;
           job.bar.downloading_pending();

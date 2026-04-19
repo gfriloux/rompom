@@ -52,7 +52,7 @@ fn render_template(src: &str, ctx: &minijinja::Value) -> String {
 }
 
 impl Package {
-  pub fn name_normalize(&self) -> String {
+  pub fn normalize_name(&self) -> String {
     self
       .name
       .replace("(", "")
@@ -131,7 +131,7 @@ impl Package {
   }
 
   pub fn build_pkgbuild(&mut self, system: &System, game: &Game) -> Result<()> {
-    let romname = self.name_normalize();
+    let romname = self.normalize_name();
     let sourcerom = self.rom.replace("'", "'\\''");
     let rom_escaped = self.rom.replace("$", "\\$");
     let directory = Path::new(&self.rom).with_extension("");
@@ -274,7 +274,7 @@ impl Package {
   }
 
   pub fn build(&mut self, system: &System, lang: &[&str]) -> Result<()> {
-    let romname = self.name_normalize();
+    let romname = self.normalize_name();
     let mut game = Game::from_jeuinfo(&self.jeu, &self.rom, lang);
 
     if let Some(x) = &self.medias.thumbnail {

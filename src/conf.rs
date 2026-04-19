@@ -267,7 +267,7 @@ impl Conf {
     Ok(())
   }
 
-  pub fn system_find(&self, name: &str) -> Option<System> {
+  pub fn find_system(&self, name: &str) -> Option<System> {
     self.systems.iter().find(|s| s.name == name).cloned()
   }
 }
