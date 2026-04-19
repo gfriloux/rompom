@@ -2,7 +2,7 @@
 edition = "2021"
 authors = ["Guillaume Friloux <guillaume@friloux.me>"]
 name = "rompom"
-version = "0.11.0"
+version = "0.12.0"
 
 [dependencies]
 screenscraper = { git = "https://github.com/gfriloux/screenscraper", tag = "v0.6.0" }
