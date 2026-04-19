@@ -97,6 +97,29 @@ impl Package {
     })
   }
 
+  fn write_launcher(&self, system: &System, game: &mut Game, romname: &str) -> Result<()> {
+    match system.id {
+      214 => {
+        let ctx = context! {
+          rom => self.rom.replace("'", "'\\''"),
+        };
+        let launcher = render_template(
+          include_str!("../assets/templates/launcher/openbor.jinja"),
+          &ctx,
+        );
+        std::fs::write("./launcher", launcher).context(WriteResultSnafu {
+          filename: "./launcher".to_string(),
+        })?;
+        game.path = format!("./{}.sh", game.name);
+      }
+      22 | 57 => {
+        game.path = format!("./{}.m3u", romname);
+      }
+      _ => {}
+    }
+    Ok(())
+  }
+
   pub fn build_pkgbuild(&mut self, system: &System, game: &Game) -> Result<()> {
     let romname = self.name_normalize();
     let sourcerom = self.rom.replace("'", "'\\''");
@@ -266,23 +289,7 @@ impl Package {
       game.manual = Some(format!("./data/{}/manual.pdf", romname));
     }
 
-    match system.id {
-      214 => {
-        let mut s = String::new();
-        s.push_str("DIR=\"$(dirname \"$(readlink -f \"$0\")\")\"\n");
-        s.push_str("cd ${DIR}/.data/\n\n");
-        s.push_str("export LD_LIBRARY_PATH=\"${DIR}/.data/lib/\"\n");
-        s.push_str(&format!("./OpenBOR '{}'", self.rom.replace("'", "'\\''")));
-        std::fs::write("./launcher", &s).context(WriteResultSnafu {
-          filename: "./launcher".to_string(),
-        })?;
-        game.path = format!("./{}.sh", game.name);
-      }
-      22 | 57 => {
-        game.path = format!("./{}.m3u", romname);
-      }
-      _ => {}
-    }
+    self.write_launcher(system, &mut game, &romname)?;
 
     let directory = Path::new(&self.rom).with_extension("");
     create_dir_all(&directory).ok();

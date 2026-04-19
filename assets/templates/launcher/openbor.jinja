@@ -1,0 +1,5 @@
+DIR="$(dirname "$(readlink -f "$0")")"
+cd ${DIR}/.data/
+
+export LD_LIBRARY_PATH="${DIR}/.data/lib/"
+./OpenBOR '{{ rom }}'
