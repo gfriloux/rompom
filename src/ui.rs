@@ -377,7 +377,11 @@ fn render_completed(frame: &mut Frame, area: Rect, state: &AppState) {
 
   let chunks = Layout::default()
     .direction(Direction::Vertical)
-    .constraints([Constraint::Length(1), Constraint::Min(0)])
+    .constraints([
+      Constraint::Length(1),
+      Constraint::Min(0),
+      Constraint::Length(1),
+    ])
     .split(inner);
 
   let ratio = if state.total > 0 {
@@ -403,6 +407,22 @@ fn render_completed(frame: &mut Frame, area: Rect, state: &AppState) {
   };
 
   frame.render_widget(List::new(items), chunks[1]);
+
+  let legend_spans: Vec<Span> = MEDIA_ICONS
+    .iter()
+    .flat_map(|&(kind, icon)| {
+      [
+        Span::styled(format!("{} ", icon), Style::default().fg(Color::DarkGray)),
+        Span::styled(
+          format!("{}  ", kind),
+          Style::default()
+            .fg(Color::DarkGray)
+            .add_modifier(Modifier::ITALIC),
+        ),
+      ]
+    })
+    .collect();
+  frame.render_widget(Line::from(legend_spans), chunks[2]);
 }
 
 fn completed_item(entry: &CompletedEntry) -> ListItem<'static> {
