@@ -5,6 +5,13 @@ use std::collections::HashMap;
 pub struct RomStateEntry {
   pub ss_game_id: Option<String>,
   pub rom_sha1: String,
+  /// Timestamp de modification du fichier ROM (secondes Unix). 0 = non renseigné.
+  /// Utilisé pour le fast-skip SHA1 sur les sources folder.
+  #[serde(default)]
+  pub rom_mtime: u64,
+  /// Taille du fichier ROM en octets. 0 = non renseigné.
+  #[serde(default)]
+  pub rom_size: u64,
   pub medias: HashMap<String, Option<String>>,
 }
 

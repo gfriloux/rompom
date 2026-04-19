@@ -403,9 +403,36 @@ fn main() {
         for mut job in rx {
           job.bar.discovering();
           if let Some(ref local_path) = job.local_path {
-            job.sha1 = Some(hash_file(local_path, Algorithm::SHA1).to_lowercase());
-            job.md5 = Some(hash_file(local_path, Algorithm::MD5).to_lowercase());
-            job.crc32 = Some(hash_file(local_path, Algorithm::CRC32).to_lowercase());
+            // Fast-skip : si date+taille inchangées, le SHA1 est identique
+            let cached_sha1 = {
+              let s = state.lock().unwrap();
+              s.roms.get(&job.filename).and_then(|entry| {
+                if entry.rom_mtime == 0 {
+                  return None; // Pas de données mtime → calcul complet
+                }
+                let meta = fs::metadata(local_path).ok()?;
+                let mtime = meta
+                  .modified()
+                  .ok()
+                  .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                  .map(|d| d.as_secs())?;
+                if mtime == entry.rom_mtime && meta.len() == entry.rom_size {
+                  Some(entry.rom_sha1.clone())
+                } else {
+                  None
+                }
+              })
+            };
+
+            if let Some(sha1) = cached_sha1 {
+              // Mtime + taille identiques : SHA1 inchangé, MD5/CRC32 inutiles
+              // (jeuinfo_by_gameid ne les requiert pas)
+              job.sha1 = Some(sha1);
+            } else {
+              job.sha1 = Some(hash_file(local_path, Algorithm::SHA1).to_lowercase());
+              job.md5 = Some(hash_file(local_path, Algorithm::MD5).to_lowercase());
+              job.crc32 = Some(hash_file(local_path, Algorithm::CRC32).to_lowercase());
+            }
           }
 
           // Consulter le state : ROM connue et sha1 inchangé ?
@@ -626,9 +653,26 @@ fn main() {
             job.medias.manual.as_ref().map(|m| m.sha1.clone()),
           );
 
+          let (rom_mtime, rom_size) = match &job.local_path {
+            Some(local_path) => {
+              let meta = fs::metadata(local_path).ok();
+              let mtime = meta
+                .as_ref()
+                .and_then(|m| m.modified().ok())
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+              let size = meta.as_ref().map(|m| m.len()).unwrap_or(0);
+              (mtime, size)
+            }
+            None => (0, job.size), // Source IA : pas de mtime local
+          };
+
           let entry = RomStateEntry {
             ss_game_id: job.jeu.as_ref().map(|j| j.id.clone()),
             rom_sha1: job.sha1.unwrap_or_default(),
+            rom_mtime,
+            rom_size,
             medias,
           };
           state.lock().unwrap().insert(job.filename, entry);
