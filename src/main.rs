@@ -4,9 +4,15 @@ mod package;
 mod summary;
 mod ui;
 
+use checksums::{hash_file, Algorithm};
 use getopts::Options;
 use glob::Pattern;
-use std::{env, path::Path, sync::Arc, thread};
+use std::{
+  env, fs,
+  path::{Path, PathBuf},
+  sync::Arc,
+  thread,
+};
 
 use crossbeam_channel as channel;
 use internet_archive::download::{Download, DownloadMethod};
@@ -45,7 +51,7 @@ fn download_media_if_needed(ss: &ScreenScraper, media: &Media, dest: &Path) {
 
 // Données brutes collectées avant de connaître le total (pas de bar encore)
 struct FileEntry {
-  metadata: Arc<Metadata>,
+  metadata: Option<Arc<Metadata>>, // None pour les sources folder
   file_name: String,
   filename: String,
   crc32: Option<String>,
@@ -53,11 +59,12 @@ struct FileEntry {
   sha1: Option<String>,
   size: u64,
   rom_url: String,
+  local_path: Option<PathBuf>, // Some pour les sources folder
 }
 
 struct RomJob {
   bar: RomBar,
-  metadata: Arc<Metadata>,
+  metadata: Option<Arc<Metadata>>,
   file_name: String,
   filename: String,
   crc32: Option<String>,
@@ -68,6 +75,7 @@ struct RomJob {
   rom_url: String,
   medias: Medias,
   romname: String,
+  local_path: Option<PathBuf>,
 }
 
 fn main() {
@@ -134,15 +142,8 @@ fn main() {
     }
   };
 
-  let ia_items = match &system.source {
-    Some(Source::InternetArchive(items)) => items.clone(),
-    Some(Source::Folder(_)) => {
-      eprintln!(
-        "System '{}': folder source not yet implemented",
-        system_name
-      );
-      return;
-    }
+  let source = match system.source.clone() {
+    Some(s) => s,
     None => {
       eprintln!(
         "System '{}' has no source configured in rompom.yml",
@@ -156,43 +157,81 @@ fn main() {
 
   // Collecte — on ne connaît pas encore le total, pas de bars
   let mut entries: Vec<FileEntry> = Vec::new();
-  for item in &ia_items {
-    ui.fetching_metadata(&item.item);
-    let metadata = Arc::new(Metadata::get(&item.item).unwrap());
 
-    for file in metadata.files.iter().filter(|f| {
-      let filename = Path::new(&f.name).file_name().unwrap().to_str().unwrap();
-      item
-        .filter
-        .iter()
-        .any(|pat| Pattern::new(pat).unwrap().matches(filename))
-    }) {
-      let filename = Path::new(&file.name)
-        .file_name()
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .to_string();
-      let rom_url = metadata
-        .file_urls(&file.name)
-        .unwrap()
-        .into_iter()
-        .next()
-        .unwrap_or_default();
-      entries.push(FileEntry {
-        metadata: Arc::clone(&metadata),
-        file_name: file.name.clone(),
-        filename,
-        crc32: file.crc32.clone(),
-        md5: file.md5.clone(),
-        sha1: file.sha1.clone(),
-        size: file
-          .size
-          .as_deref()
-          .and_then(|s| s.parse().ok())
-          .unwrap_or(0),
-        rom_url,
-      });
+  match &source {
+    Source::InternetArchive(ia_items) => {
+      for item in ia_items {
+        ui.fetching_metadata(&item.item);
+        let metadata = Arc::new(Metadata::get(&item.item).unwrap());
+
+        for file in metadata.files.iter().filter(|f| {
+          let filename = Path::new(&f.name).file_name().unwrap().to_str().unwrap();
+          item
+            .filter
+            .iter()
+            .any(|pat| Pattern::new(pat).unwrap().matches(filename))
+        }) {
+          let filename = Path::new(&file.name)
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string();
+          let rom_url = metadata
+            .file_urls(&file.name)
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap_or_default();
+          entries.push(FileEntry {
+            metadata: Some(Arc::clone(&metadata)),
+            file_name: file.name.clone(),
+            filename,
+            crc32: file.crc32.clone(),
+            md5: file.md5.clone(),
+            sha1: file.sha1.clone(),
+            size: file
+              .size
+              .as_deref()
+              .and_then(|s| s.parse().ok())
+              .unwrap_or(0),
+            rom_url,
+            local_path: None,
+          });
+        }
+      }
+    }
+
+    Source::Folder(folder) => {
+      ui.fetching_metadata(&folder.path);
+      let dir = Path::new(&folder.path);
+      for entry in fs::read_dir(dir).unwrap() {
+        let entry = entry.unwrap();
+        let path = entry.path();
+        if !path.is_file() {
+          continue;
+        }
+        let filename = path.file_name().unwrap().to_str().unwrap().to_string();
+        if !folder
+          .filter
+          .iter()
+          .any(|pat| Pattern::new(pat).unwrap().matches(&filename))
+        {
+          continue;
+        }
+        let size = entry.metadata().unwrap().len();
+        entries.push(FileEntry {
+          metadata: None,
+          file_name: path.to_str().unwrap().to_string(),
+          filename,
+          crc32: None,
+          md5: None,
+          sha1: None,
+          size,
+          rom_url: String::new(),
+          local_path: Some(path),
+        });
+      }
     }
   }
 
@@ -214,6 +253,7 @@ fn main() {
       rom_url: e.rom_url,
       medias: Medias::default(),
       romname: String::new(),
+      local_path: e.local_path,
     })
     .collect();
 
@@ -255,6 +295,11 @@ fn main() {
       thread::spawn(move || {
         for mut job in rx {
           job.bar.discovering();
+          if let Some(ref local_path) = job.local_path {
+            job.sha1 = Some(hash_file(local_path, Algorithm::SHA1).to_lowercase());
+            job.md5 = Some(hash_file(local_path, Algorithm::MD5).to_lowercase());
+            job.crc32 = Some(hash_file(local_path, Algorithm::CRC32).to_lowercase());
+          }
           let ji = ss
             .jeuinfo(
               system.id,
@@ -319,24 +364,47 @@ fn main() {
         for job in rx {
           let directory = Path::new(&job.filename).with_extension("");
           let dest = directory.join(&job.filename);
-          let download = Download::new(&job.metadata, &job.file_name).unwrap();
 
-          if dest.exists() {
-            job.bar.rom_checking();
-            match download.verify_sha1(&dest) {
-              Ok(()) => job.bar.rom_skipped(),
-              Err(_) => {
+          if let Some(ref local_path) = job.local_path {
+            // Source folder : copie du fichier local
+            let expected_sha1 = job.sha1.as_deref().unwrap_or("");
+            if dest.exists() {
+              job.bar.rom_checking();
+              let actual = hash_file(&dest, Algorithm::SHA1).to_lowercase();
+              if actual == expected_sha1 {
+                job.bar.rom_skipped();
+              } else {
                 job.bar.rom_redownloading();
-                download.fetch(&dest, DownloadMethod::Https).unwrap();
-                download.verify_sha1(&dest).unwrap();
+                fs::create_dir_all(&directory).unwrap();
+                fs::copy(local_path, &dest).unwrap();
                 job.bar.rom_done();
               }
+            } else {
+              job.bar.rom_downloading();
+              fs::create_dir_all(&directory).unwrap();
+              fs::copy(local_path, &dest).unwrap();
+              job.bar.rom_done();
             }
           } else {
-            job.bar.rom_downloading();
-            download.fetch(&dest, DownloadMethod::Https).unwrap();
-            download.verify_sha1(&dest).unwrap();
-            job.bar.rom_done();
+            // Source Internet Archive : téléchargement
+            let download = Download::new(job.metadata.as_ref().unwrap(), &job.file_name).unwrap();
+            if dest.exists() {
+              job.bar.rom_checking();
+              match download.verify_sha1(&dest) {
+                Ok(()) => job.bar.rom_skipped(),
+                Err(_) => {
+                  job.bar.rom_redownloading();
+                  download.fetch(&dest, DownloadMethod::Https).unwrap();
+                  download.verify_sha1(&dest).unwrap();
+                  job.bar.rom_done();
+                }
+              }
+            } else {
+              job.bar.rom_downloading();
+              download.fetch(&dest, DownloadMethod::Https).unwrap();
+              download.verify_sha1(&dest).unwrap();
+              job.bar.rom_done();
+            }
           }
 
           let d = &directory;
