@@ -1,0 +1,11 @@
+  IFS=$'\n'
+  mkdir -m 0700 -p "$pkgdir/userdata/roms/segacd/data/$_romname/"
+  cuefile=$(ls *.cue)
+  install -Dm600 ${cuefile} "$pkgdir"/userdata/roms/segacd/${cuefile}
+  for file in $(ls *.bin); do
+    install -Dm600 {,"$pkgdir"/userdata/roms/segacd/data/$_romname/}${file}
+  done
+  sed -i "s|{{ rom }}|$cuefile|" description.xml
+  for file in $(ls *.mp4 *.png *.xml *.pdf, *.jpg); do
+    install -Dm600 {,"$pkgdir"/userdata/roms/{{ dir }}/data/$_romname/}$file
+  done

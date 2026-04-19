@@ -1,0 +1,4 @@
+  IFS=$'\n'
+  for file in $(ls *.chd); do
+    echo ".data/$_romname/${file}" >>${_romname}.m3u
+  done

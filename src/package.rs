@@ -5,8 +5,6 @@ use std::{fs::create_dir_all, path::Path};
 
 use super::conf::System;
 use super::emulationstation::Game;
-use super::pkgbuild::Pkgbuild;
-
 use screenscraper::jeuinfo::{JeuInfo, Media};
 
 #[derive(Default)]
@@ -37,8 +35,6 @@ pub enum Error {
     source: std::io::Error,
     filename: String,
   },
-  #[snafu(display("Failed to write PKGBUILD: {}", source))]
-  WritePkgbuild { source: super::pkgbuild::Error },
 }
 
 type Result<T, E = Error> = std::result::Result<T, E>;
@@ -49,6 +45,8 @@ fn media_region(url: &str) -> &str {
 
 fn render_template(src: &str, ctx: &minijinja::Value) -> String {
   let mut env = Environment::new();
+  env.set_trim_blocks(true);
+  env.set_lstrip_blocks(true);
   env.add_template("t", src).unwrap();
   env.get_template("t").unwrap().render(ctx).unwrap()
 }
@@ -106,133 +104,94 @@ impl Package {
     let directory = Path::new(&self.rom).with_extension("");
     let jeu_id = self.jeu.as_ref().map(|j| j.id.as_str()).unwrap_or("");
 
-    let mut pkgbuild = Pkgbuild {
-      pkgname: format!("{}{}", system.basename, romname),
-      romname: romname.clone(),
-      pkgver: "1".to_string(),
-      pkgrel: 1,
-      pkgdesc: game.name.clone(),
-      url: if jeu_id.is_empty() {
-        String::new()
-      } else {
-        format!("https://screenscraper.fr/gameinfos.php?gameid={}", jeu_id)
-      },
-      depends: system.depends.clone(),
-      source: Vec::new(),
-      sha1sums: Vec::new(),
-      build: Vec::new(),
-      package: Vec::new(),
-    };
+    // Sources & checksums
+    let mut sources: Vec<String> = Vec::new();
+    let mut sha1sums: Vec<String> = Vec::new();
 
-    pkgbuild.add_source(
-      format!("{}::{}", sourcerom, self.rom_url),
-      self.hash.clone(),
-    );
-    pkgbuild.add_source(
-      "description.xml".to_string(),
-      checksums::hash_file(
-        Path::new(&format!("{}/description.xml", directory.display())),
-        checksums::Algorithm::SHA1,
-      ),
-    );
+    sources.push(format!("{}::{}", sourcerom, self.rom_url));
+    sha1sums.push(self.hash.clone());
+
+    sources.push("description.xml".to_string());
+    sha1sums.push(checksums::hash_file(
+      Path::new(&format!("{}/description.xml", directory.display())),
+      checksums::Algorithm::SHA1,
+    ));
 
     if let Some(ref x) = self.medias.video {
-      pkgbuild.add_source(
-        format!(
-          "video.mp4::https://screenscraper.fr/medias/{}/{}/video.mp4",
-          system.id, jeu_id
-        ),
-        x.sha1.clone(),
-      );
+      sources.push(format!(
+        "video.mp4::https://screenscraper.fr/medias/{}/{}/video.mp4",
+        system.id, jeu_id
+      ));
+      sha1sums.push(x.sha1.clone());
     }
-
     if let Some(ref x) = self.medias.bezel {
-      pkgbuild.add_source(
-        format!(
-          "bezel.png::https://screenscraper.fr/medias/{}/{}/bezel-16-9({}).{}",
-          system.id,
-          jeu_id,
-          x.region.as_deref().unwrap_or("wor"),
-          x.format
-        ),
-        x.sha1.clone(),
-      );
+      sources.push(format!(
+        "bezel.png::https://screenscraper.fr/medias/{}/{}/bezel-16-9({}).{}",
+        system.id,
+        jeu_id,
+        x.region.as_deref().unwrap_or("wor"),
+        x.format
+      ));
+      sha1sums.push(x.sha1.clone());
     }
-
     if let Some(ref x) = self.medias.image {
-      pkgbuild.add_source(
-        format!(
-          "image.png::https://screenscraper.fr/medias/{}/{}/{}.{}",
-          system.id,
-          jeu_id,
-          media_region(&x.url),
-          x.format
-        ),
-        x.sha1.clone(),
-      );
+      sources.push(format!(
+        "image.png::https://screenscraper.fr/medias/{}/{}/{}.{}",
+        system.id,
+        jeu_id,
+        media_region(&x.url),
+        x.format
+      ));
+      sha1sums.push(x.sha1.clone());
     }
-
     if let Some(ref x) = self.medias.thumbnail {
-      pkgbuild.add_source(
-        format!(
-          "thumbnail.png::https://screenscraper.fr/medias/{}/{}/{}.png",
-          system.id,
-          jeu_id,
-          media_region(&x.url)
-        ),
-        x.sha1.clone(),
-      );
+      sources.push(format!(
+        "thumbnail.png::https://screenscraper.fr/medias/{}/{}/{}.png",
+        system.id,
+        jeu_id,
+        media_region(&x.url)
+      ));
+      sha1sums.push(x.sha1.clone());
     }
-
     if let Some(ref x) = self.medias.marquee {
-      pkgbuild.add_source(
-        format!(
-          "marquee.png::https://screenscraper.fr/medias/{}/{}/marquee.{}",
-          system.id, jeu_id, x.format
-        ),
-        x.sha1.clone(),
-      );
+      sources.push(format!(
+        "marquee.png::https://screenscraper.fr/medias/{}/{}/marquee.{}",
+        system.id, jeu_id, x.format
+      ));
+      sha1sums.push(x.sha1.clone());
     }
-
     if let Some(ref x) = self.medias.screenshot {
-      pkgbuild.add_source(
-        format!(
-          "screenshot.png::https://screenscraper.fr/medias/{}/{}/ss({}).{}",
-          system.id,
-          jeu_id,
-          x.region.as_deref().unwrap_or("wor"),
-          x.format
-        ),
-        x.sha1.clone(),
-      );
+      sources.push(format!(
+        "screenshot.png::https://screenscraper.fr/medias/{}/{}/ss({}).{}",
+        system.id,
+        jeu_id,
+        x.region.as_deref().unwrap_or("wor"),
+        x.format
+      ));
+      sha1sums.push(x.sha1.clone());
     }
-
     if let Some(ref x) = self.medias.wheel {
-      pkgbuild.add_source(
-        format!(
-          "wheel.png::https://screenscraper.fr/medias/{}/{}/{}.{}",
-          system.id,
-          jeu_id,
-          media_region(&x.url),
-          x.format
-        ),
-        x.sha1.clone(),
-      );
+      sources.push(format!(
+        "wheel.png::https://screenscraper.fr/medias/{}/{}/{}.{}",
+        system.id,
+        jeu_id,
+        media_region(&x.url),
+        x.format
+      ));
+      sha1sums.push(x.sha1.clone());
     }
-
     if let Some(ref x) = self.medias.manual {
-      pkgbuild.add_source(
-        format!(
-          "manual.pdf::https://screenscraper.fr/medias/{}/{}/{}.pdf",
-          system.id,
-          jeu_id,
-          media_region(&x.url)
-        ),
-        x.sha1.clone(),
-      );
+      sources.push(format!(
+        "manual.pdf::https://screenscraper.fr/medias/{}/{}/{}.pdf",
+        system.id,
+        jeu_id,
+        media_region(&x.url)
+      ));
+      sha1sums.push(x.sha1.clone());
     }
 
-    let ctx = context! { dir => system.dir, rom => rom_escaped };
+    // System-specific build/package sections
+    let sys_ctx = context! { dir => system.dir, rom => rom_escaped };
     let (build_src, package_src) = match system.id {
       20 => (
         include_str!("../assets/templates/pkgbuild/segacd-build.jinja"),
@@ -251,10 +210,34 @@ impl Package {
         include_str!("../assets/templates/pkgbuild/default-package.jinja"),
       ),
     };
-    pkgbuild.push_build_block(&render_template(build_src, &ctx));
-    pkgbuild.push_package_block(&render_template(package_src, &ctx));
+    let build_section = render_template(build_src, &sys_ctx);
+    let package_section = render_template(package_src, &sys_ctx);
 
-    pkgbuild.write(&directory).context(WritePkgbuildSnafu)
+    // Main PKGBUILD
+    let url = if jeu_id.is_empty() {
+      String::new()
+    } else {
+      format!("https://screenscraper.fr/gameinfos.php?gameid={}", jeu_id)
+    };
+    let ctx = context! {
+      pkgname => format!("{}{}", system.basename, romname),
+      romname => romname,
+      pkgver => "1",
+      pkgrel => 1_u32,
+      pkgdesc => &game.name,
+      url => url,
+      depends => system.depends.as_deref().unwrap_or(""),
+      sources => sources,
+      sha1sums => sha1sums,
+      build_section => build_section,
+      package_section => package_section,
+    };
+    let pkgbuild = render_template(
+      include_str!("../assets/templates/pkgbuild/pkgbuild.jinja"),
+      &ctx,
+    );
+    let path = format!("{}/PKGBUILD", directory.display());
+    std::fs::write(&path, pkgbuild).context(WriteResultSnafu { filename: path })
   }
 
   pub fn build(&mut self, system: &System, lang: &[&str]) -> Result<()> {

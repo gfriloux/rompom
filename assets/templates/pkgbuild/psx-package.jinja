@@ -1,0 +1,10 @@
+  mkdir -m 0700 -p "$pkgdir/userdata/roms/{{ dir }}/data/$_romname/" \
+                   "$pkgdir/userdata/system/pacman/batoexec/"
+  mkdir -p 0700 -p "$pkgdir/userdata/roms/{{ dir }}/data/$_romname/" "$pkgdir/userdata/roms/{{ dir }}/.data/$_romname"
+  install -m 0600 *.chd "$pkgdir/userdata/roms/{{ dir }}/.data/$_romname/"
+  install -m 0600 "${_romname}.m3u" "$pkgdir/userdata/roms/{{ dir }}/"
+  for file in $(ls *.mp4 *.png *.xml *.pdf, *.jpg); do
+    install -Dm600 {,"$pkgdir"/userdata/roms/{{ dir }}/data/$_romname/}$file
+  done
+   echo "gamelist = {{ dir }}" >  "$pkgdir"/userdata/system/pacman/batoexec/${pkgname[0]}
+   cat description.xml          >> "$pkgdir"/userdata/system/pacman/batoexec/${pkgname[0]}

@@ -1,0 +1,31 @@
+pkgname=('{{ pkgname }}')
+_romname="{{ romname }}"
+pkgver={{ pkgver }}
+pkgrel={{ pkgrel }}
+pkgdesc="{{ pkgdesc }}"
+arch=('any')
+url="{{ url }}"
+license=('All rights reserved')
+{% if depends %}
+depends=('{{ depends }}')
+{% endif %}
+source=(
+{% for src in sources %}
+  '{{ src }}'
+{% endfor %}
+)
+sha1sums=(
+{% for sha in sha1sums %}
+  '{{ sha }}'
+{% endfor %}
+)
+
+build()
+{
+{{ build_section }}
+}
+
+package()
+{
+{{ package_section }}
+}

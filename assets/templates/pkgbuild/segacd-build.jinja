@@ -1,0 +1,3 @@
+  IFS=$'\n'
+  cuefile=$(ls *.cue)
+  sed -i "s@FILE \"@FILE \"data/$_romname/@g" ${cuefile}

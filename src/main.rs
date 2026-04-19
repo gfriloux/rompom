@@ -1,7 +1,6 @@
 mod conf;
 mod emulationstation;
 mod package;
-mod pkgbuild;
 mod summary;
 mod ui;
 
