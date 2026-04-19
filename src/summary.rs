@@ -2,6 +2,7 @@
 pub struct Summary {
   pub total: usize,
   pub success: usize,
+  pub unchanged: usize,
   pub errors: usize,
   /// (kind, icon, roms_with_this_media) — canonical order from MEDIA_ICONS.
   pub media_stats: Vec<(&'static str, &'static str, usize)>,
@@ -10,7 +11,8 @@ pub struct Summary {
 impl Summary {
   pub fn print(&self) {
     println!("\nrompom — {} ROMs\n", self.total);
-    println!("  ✓  {:>4}  completed", self.success);
+    println!("  ✓  {:>4}  updated", self.success - self.unchanged);
+    println!("  =  {:>4}  unchanged", self.unchanged);
     println!("  ✗  {:>4}  errors\n", self.errors);
 
     if self.success > 0 {

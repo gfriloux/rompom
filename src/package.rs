@@ -51,6 +51,22 @@ fn render_template(src: &str, ctx: &minijinja::Value) -> String {
   env.get_template("t").unwrap().render(ctx).unwrap()
 }
 
+/// Lit le `pkgver` depuis un PKGBUILD existant. Retourne 0 si le fichier
+/// n'existe pas ou ne contient pas de `pkgver=N` valide.
+/// L'appelant incrémente de 1 pour obtenir le prochain pkgver.
+pub fn read_pkgver(directory: &Path) -> u32 {
+  let path = directory.join("PKGBUILD");
+  std::fs::read_to_string(&path)
+    .unwrap_or_default()
+    .lines()
+    .find_map(|line| {
+      line
+        .strip_prefix("pkgver=")
+        .and_then(|v| v.trim().parse::<u32>().ok())
+    })
+    .unwrap_or(0)
+}
+
 impl Package {
   pub fn normalize_name(&self) -> String {
     self
@@ -130,7 +146,7 @@ impl Package {
     Ok(())
   }
 
-  pub fn build_pkgbuild(&mut self, system: &System, game: &Game) -> Result<()> {
+  pub fn build_pkgbuild(&mut self, system: &System, game: &Game, pkgver: u32) -> Result<()> {
     let romname = self.normalize_name();
     let sourcerom = self.rom.replace("'", "'\\''");
     let rom_escaped = self.rom.replace("$", "\\$");
@@ -255,7 +271,7 @@ impl Package {
     let ctx = context! {
       pkgname => format!("{}{}", system.basename, romname),
       romname => romname,
-      pkgver => "1",
+      pkgver => pkgver,
       pkgrel => 1_u32,
       pkgdesc => &game.name,
       url => url,
@@ -273,7 +289,7 @@ impl Package {
     std::fs::write(&path, pkgbuild).context(WriteResultSnafu { filename: path })
   }
 
-  pub fn build(&mut self, system: &System, lang: &[&str]) -> Result<()> {
+  pub fn build(&mut self, system: &System, lang: &[&str], pkgver: u32) -> Result<()> {
     let romname = self.normalize_name();
     let mut game = Game::from_jeuinfo(&self.jeu, &self.rom, lang);
 
@@ -306,7 +322,7 @@ impl Package {
 
     self.write_description_xml(&game, &directory)?;
 
-    self.build_pkgbuild(system, &game)?;
+    self.build_pkgbuild(system, &game, pkgver)?;
     Ok(())
   }
 }

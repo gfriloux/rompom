@@ -1,6 +1,7 @@
 mod conf;
 mod emulationstation;
 mod package;
+mod state;
 mod summary;
 mod ui;
 
@@ -8,9 +9,10 @@ use checksums::{hash_file, Algorithm};
 use getopts::Options;
 use glob::Pattern;
 use std::{
+  collections::HashMap,
   env, fs,
   path::{Path, PathBuf},
-  sync::Arc,
+  sync::{Arc, Mutex},
   thread,
 };
 
@@ -23,7 +25,8 @@ use screenscraper::{
 };
 
 use crate::conf::{Conf, Source};
-use crate::package::{Medias, Package};
+use crate::package::{read_pkgver, Medias, Package};
+use crate::state::{RomStateEntry, SystemState};
 use crate::ui::{ModalCandidate, ModalRequest, ModalResponse, RomBar, Ui};
 
 const N_PACK_WORKERS: usize = 4;
@@ -80,6 +83,24 @@ struct FileEntry {
   local_path: Option<PathBuf>, // Some pour les sources folder
 }
 
+/// Retourne true si au moins un média a un sha1 différent (ou présence différente)
+/// entre le résultat SS actuel et l'état sauvegardé.
+fn media_sha1_changed(medias: &Medias, prev: &HashMap<String, Option<String>>) -> bool {
+  let check = |kind: &str, media: Option<&screenscraper::jeuinfo::Media>| -> bool {
+    let new_sha1 = media.map(|m| m.sha1.as_str());
+    let prev_sha1 = prev.get(kind).and_then(|v| v.as_deref());
+    new_sha1 != prev_sha1
+  };
+  check("video", medias.video.as_ref())
+    || check("image", medias.image.as_ref())
+    || check("thumbnail", medias.thumbnail.as_ref())
+    || check("bezel", medias.bezel.as_ref())
+    || check("marquee", medias.marquee.as_ref())
+    || check("screenshot", medias.screenshot.as_ref())
+    || check("wheel", medias.wheel.as_ref())
+    || check("manual", medias.manual.as_ref())
+}
+
 struct RomJob {
   bar: RomBar,
   metadata: Option<Arc<Metadata>>,
@@ -94,6 +115,8 @@ struct RomJob {
   medias: Medias,
   romname: String,
   local_path: Option<PathBuf>,
+  rom_unchanged: bool,
+  package_unchanged: bool,
 }
 
 /// Called by a discovery worker when `jeuinfo` returns nothing.
@@ -333,6 +356,8 @@ fn main() {
       medias: Medias::default(),
       romname: String::new(),
       local_path: e.local_path,
+      rom_unchanged: false,
+      package_unchanged: false,
     })
     .collect();
 
@@ -348,6 +373,9 @@ fn main() {
   let n_disc = ss.user_info.maxthreads as usize;
 
   let modal_tx = ui.modal_sender();
+
+  let state_path = format!("{}.state.yml", system_name);
+  let state = Arc::new(Mutex::new(SystemState::load(&state_path)));
 
   let ss = Arc::new(ss);
   let system = Arc::new(system);
@@ -370,6 +398,7 @@ fn main() {
       let ss = Arc::clone(&ss);
       let system = Arc::clone(&system);
       let modal_tx = modal_tx.clone();
+      let state = Arc::clone(&state);
       thread::spawn(move || {
         for mut job in rx {
           job.bar.discovering();
@@ -378,8 +407,30 @@ fn main() {
             job.md5 = Some(hash_file(local_path, Algorithm::MD5).to_lowercase());
             job.crc32 = Some(hash_file(local_path, Algorithm::CRC32).to_lowercase());
           }
-          let ji = ss
-            .jeuinfo(
+
+          // Consulter le state : ROM connue et sha1 inchangé ?
+          let (rom_unchanged, cached_game_id) = {
+            let s = state.lock().unwrap();
+            match s.roms.get(&job.filename) {
+              Some(entry) => {
+                let current_sha1 = job.sha1.as_deref().unwrap_or("");
+                let unchanged = !current_sha1.is_empty() && entry.rom_sha1 == current_sha1;
+                let game_id = entry
+                  .ss_game_id
+                  .as_deref()
+                  .and_then(|id| id.parse::<u32>().ok());
+                (unchanged, game_id)
+              }
+              None => (false, None),
+            }
+          };
+          job.rom_unchanged = rom_unchanged;
+
+          // Lookup SS : par game_id si connu, sinon par checksum
+          let ji = if let Some(gid) = cached_game_id {
+            ss.jeuinfo_by_gameid(system.id, gid).ok()
+          } else {
+            ss.jeuinfo(
               system.id,
               &job.filename,
               job.size,
@@ -387,7 +438,8 @@ fn main() {
               job.md5.clone(),
               job.sha1.clone(),
             )
-            .ok();
+            .ok()
+          };
 
           let ji = match ji {
             Some(j) => {
@@ -417,6 +469,7 @@ fn main() {
       let tx = dl_tx.clone();
       let system = Arc::clone(&system);
       let lang = Arc::clone(&lang);
+      let state = Arc::clone(&state);
       thread::spawn(move || {
         let lang_refs: Vec<&str> = lang.iter().map(|s| s.as_str()).collect();
         for mut job in rx {
@@ -424,13 +477,29 @@ fn main() {
           let sha1 = job.sha1.clone().unwrap_or_default();
           let mut package =
             Package::new(job.jeu.take(), &job.filename, &job.rom_url, &sha1).unwrap();
-          match package.build(&system, &lang_refs) {
-            Ok(()) => {}
-            Err(_) => {
-              job.bar.finish_error();
-              continue;
+
+          // Delta check : comparer les sha1 médias SS vs état sauvegardé
+          let package_changed = {
+            let s = state.lock().unwrap();
+            match s.roms.get(&job.filename) {
+              None => true, // Premier run, pas d'état précédent
+              Some(prev) => !job.rom_unchanged || media_sha1_changed(&package.medias, &prev.medias),
+            }
+          };
+          job.package_unchanged = !package_changed;
+
+          if package_changed {
+            let dir = Path::new(&job.filename).with_extension("");
+            let pkgver = read_pkgver(&dir) + 1;
+            match package.build(&system, &lang_refs, pkgver) {
+              Ok(()) => {}
+              Err(_) => {
+                job.bar.finish_error();
+                continue;
+              }
             }
           }
+
           job.romname = package.normalize_name();
           job.medias = package.medias;
           job.jeu = package.jeu;
@@ -447,12 +516,17 @@ fn main() {
     .map(|_| {
       let rx = dl_rx.clone();
       let ss = Arc::clone(&ss);
+      let state = Arc::clone(&state);
       thread::spawn(move || {
         for job in rx {
           let directory = Path::new(&job.filename).with_extension("");
           let dest = directory.join(&job.filename);
 
-          if let Some(ref local_path) = job.local_path {
+          if job.rom_unchanged {
+            // SHA1 vérifié lors de la discovery : ROM identique, rien à faire
+            fs::create_dir_all(&directory).unwrap();
+            job.bar.rom_skipped();
+          } else if let Some(ref local_path) = job.local_path {
             // Source folder : copie du fichier local
             let expected_sha1 = job.sha1.as_deref().unwrap_or("");
             if dest.exists() {
@@ -516,7 +590,48 @@ fn main() {
             }
           }
 
-          job.bar.finish();
+          job.bar.finish(job.package_unchanged);
+
+          let mut medias = HashMap::new();
+          medias.insert(
+            "video".to_string(),
+            job.medias.video.as_ref().map(|m| m.sha1.clone()),
+          );
+          medias.insert(
+            "image".to_string(),
+            job.medias.image.as_ref().map(|m| m.sha1.clone()),
+          );
+          medias.insert(
+            "thumbnail".to_string(),
+            job.medias.thumbnail.as_ref().map(|m| m.sha1.clone()),
+          );
+          medias.insert(
+            "bezel".to_string(),
+            job.medias.bezel.as_ref().map(|m| m.sha1.clone()),
+          );
+          medias.insert(
+            "marquee".to_string(),
+            job.medias.marquee.as_ref().map(|m| m.sha1.clone()),
+          );
+          medias.insert(
+            "screenshot".to_string(),
+            job.medias.screenshot.as_ref().map(|m| m.sha1.clone()),
+          );
+          medias.insert(
+            "wheel".to_string(),
+            job.medias.wheel.as_ref().map(|m| m.sha1.clone()),
+          );
+          medias.insert(
+            "manual".to_string(),
+            job.medias.manual.as_ref().map(|m| m.sha1.clone()),
+          );
+
+          let entry = RomStateEntry {
+            ss_game_id: job.jeu.as_ref().map(|j| j.id.clone()),
+            rom_sha1: job.sha1.unwrap_or_default(),
+            medias,
+          };
+          state.lock().unwrap().insert(job.filename, entry);
         }
       })
     })
@@ -532,6 +647,8 @@ fn main() {
   for h in dl_handles {
     h.join().unwrap();
   }
+
+  state.lock().unwrap().save(&state_path);
 
   let summary = ui.summary();
   drop(ui);

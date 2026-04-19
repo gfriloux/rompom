@@ -161,6 +161,7 @@ struct RomEntry {
 pub(crate) struct CompletedEntry {
   pub(crate) label: String,
   pub(crate) success: bool,
+  pub(crate) unchanged: bool,
   pub(crate) media_found: Vec<String>,
   pub(crate) media_missing: Vec<String>,
 }
@@ -282,12 +283,13 @@ impl RomBar {
   }
 
   // End
-  pub fn finish(&self) {
+  pub fn finish(&self, unchanged: bool) {
     let mut s = self.state.lock().unwrap();
     let entry = &s.roms[self.index];
     let completed = CompletedEntry {
       label: entry.label.clone(),
       success: true,
+      unchanged,
       media_found: entry.media_found.clone(),
       media_missing: entry.media_missing.clone(),
     };
@@ -301,6 +303,7 @@ impl RomBar {
     let completed = CompletedEntry {
       label: entry.label.clone(),
       success: false,
+      unchanged: false,
       media_found: entry.media_found.clone(),
       media_missing: entry.media_missing.clone(),
     };
@@ -396,6 +399,7 @@ impl Ui {
   pub fn summary(&self) -> Summary {
     let s = self.state.lock().unwrap();
     let success = s.completed.iter().filter(|e| e.success).count();
+    let unchanged = s.completed.iter().filter(|e| e.unchanged).count();
     let errors = s.completed.iter().filter(|e| !e.success).count();
     let media_stats = MEDIA_ICONS
       .iter()
@@ -411,6 +415,7 @@ impl Ui {
     Summary {
       total: s.total,
       success,
+      unchanged,
       errors,
       media_stats,
     }
@@ -660,10 +665,12 @@ fn render_completed(frame: &mut Frame, area: Rect, state: &AppState) {
 }
 
 fn completed_item(entry: &CompletedEntry) -> ListItem<'static> {
-  let (check, label_color) = if entry.success {
-    ("✓  ", Color::Green)
+  let (check, label_color, label_modifier) = if !entry.success {
+    ("✗  ", Color::Red, Modifier::BOLD)
+  } else if entry.unchanged {
+    ("=  ", Color::DarkGray, Modifier::empty())
   } else {
-    ("✗  ", Color::Red)
+    ("✓  ", Color::Green, Modifier::BOLD)
   };
 
   let mut spans = vec![
@@ -672,7 +679,7 @@ fn completed_item(entry: &CompletedEntry) -> ListItem<'static> {
       entry.label.clone(),
       Style::default()
         .fg(label_color)
-        .add_modifier(Modifier::BOLD),
+        .add_modifier(label_modifier),
     ),
     Span::raw("  "),
   ];
