@@ -1,189 +1,54 @@
 mod conf;
 mod emulationstation;
 mod package;
+mod queue;
+mod rom;
 mod state;
 mod summary;
 mod ui;
+mod worker;
 
-use checksums::{hash_file, Algorithm};
-use getopts::Options;
-use glob::Pattern;
 use std::{
   collections::HashMap,
   env, fs,
-  path::{Path, PathBuf},
-  sync::{Arc, Mutex},
+  io::{self, Write as _},
+  path::Path,
+  sync::{
+    atomic::{AtomicBool, AtomicUsize, Ordering},
+    Arc, Mutex,
+  },
   thread,
 };
 
-use crossbeam_channel as channel;
-use internet_archive::download::{Download, DownloadMethod};
+use glob::Pattern;
 use internet_archive::metadata::Metadata;
-use screenscraper::{
-  jeuinfo::{JeuInfo, Media},
-  ScreenScraper,
-};
+use screenscraper::ScreenScraper;
 
 use crate::conf::{Conf, Source};
-use crate::package::{read_pkgver, Medias, Package};
-use crate::state::{RomStateEntry, SystemState};
-use crate::ui::{ModalCandidate, ModalRequest, ModalResponse, RomBar, Ui};
+use crate::queue::{Semaphore, TaskQueue};
+use crate::rom::{FolderSource, IaSource, Rom, RomSource, RomSourceData, StepKind, StepStatus};
+use crate::state::SystemState;
+use crate::ui::Ui;
+use crate::worker::WorkerContext;
 
-const N_PACK_WORKERS: usize = 4;
-const N_DL_WORKERS: usize = 4;
-const NAME_REGIONS: &[&str] = &["wor", "eu", "us", "fr", "jp", "ss"];
+// ── Constants ──────────────────────────────────────────────────────────────
 
-fn print_usage(program: &str, opts: Options) {
+/// Extra main-pool workers beyond the SS-semaphore limit.
+/// Keeps downloads and packaging running while SS slots are saturated.
+const N_EXTRA_MAIN_WORKERS: usize = 8;
+const N_BLOCKING_WORKERS: usize = 2;
+
+fn print_usage(program: &str, opts: getopts::Options) {
   let brief = format!("Usage: {} -s SYSTEM", program);
   print!("{}", opts.usage(&brief));
 }
 
-/// Strips extension and region/revision tags from a ROM filename to produce
-/// a clean title suitable for a ScreenScraper name search.
-///
-/// `"Sonic The Hedgehog (USA) [!].zip"` → `"Sonic The Hedgehog"`
-fn search_name(filename: &str) -> String {
-  let stem = Path::new(filename)
-    .file_stem()
-    .and_then(|s| s.to_str())
-    .unwrap_or(filename);
-  stem
-    .split('(')
-    .next()
-    .and_then(|s| s.split('[').next())
-    .unwrap_or(stem)
-    .trim()
-    .to_string()
-}
-
-fn media_filename(kind: &str, format: &str) -> String {
-  match kind {
-    "video" => "video.mp4".to_string(),
-    "manual" => "manual.pdf".to_string(),
-    _ => format!("{}.{}", kind, format),
-  }
-}
-
-fn download_media_if_needed(ss: &ScreenScraper, media: &Media, dest: &Path) {
-  if !dest.exists() || ss.media_download(media).verify_sha1(dest).is_err() {
-    ss.media_download(media).fetch(dest).unwrap();
-  }
-}
-
-// Données brutes collectées avant de connaître le total (pas de bar encore)
-struct FileEntry {
-  metadata: Option<Arc<Metadata>>, // None pour les sources folder
-  file_name: String,
-  filename: String,
-  crc32: Option<String>,
-  md5: Option<String>,
-  sha1: Option<String>,
-  size: u64,
-  rom_url: String,
-  local_path: Option<PathBuf>, // Some pour les sources folder
-}
-
-/// Retourne true si au moins un média a un sha1 différent (ou présence différente)
-/// entre le résultat SS actuel et l'état sauvegardé.
-fn media_sha1_changed(medias: &Medias, prev: &HashMap<String, Option<String>>) -> bool {
-  let check = |kind: &str, media: Option<&screenscraper::jeuinfo::Media>| -> bool {
-    let new_sha1 = media.map(|m| m.sha1.as_str());
-    let prev_sha1 = prev.get(kind).and_then(|v| v.as_deref());
-    new_sha1 != prev_sha1
-  };
-  check("video", medias.video.as_ref())
-    || check("image", medias.image.as_ref())
-    || check("thumbnail", medias.thumbnail.as_ref())
-    || check("bezel", medias.bezel.as_ref())
-    || check("marquee", medias.marquee.as_ref())
-    || check("screenshot", medias.screenshot.as_ref())
-    || check("wheel", medias.wheel.as_ref())
-    || check("manual", medias.manual.as_ref())
-}
-
-struct RomJob {
-  bar: RomBar,
-  metadata: Option<Arc<Metadata>>,
-  file_name: String,
-  filename: String,
-  crc32: Option<String>,
-  md5: Option<String>,
-  sha1: Option<String>,
-  size: u64,
-  jeu: Option<JeuInfo>,
-  rom_url: String,
-  medias: Medias,
-  romname: String,
-  local_path: Option<PathBuf>,
-  rom_unchanged: bool,
-  package_unchanged: bool,
-}
-
-/// Called by a discovery worker when `jeuinfo` returns nothing.
-///
-/// Runs `jeu_recherche` by ROM name, opens a modal so the user can pick the
-/// right game (or enter an SS game ID manually), then fetches and returns the
-/// resolved `JeuInfo`. Returns `None` if the user cancels or lookup fails.
-fn resolve_via_modal(
-  ss: &Arc<ScreenScraper>,
-  system: &crate::conf::System,
-  job: &RomJob,
-  modal_tx: &crossbeam_channel::Sender<ModalRequest>,
-) -> Option<screenscraper::jeuinfo::JeuInfo> {
-  let candidates = ss
-    .jeu_recherche(Some(system.id), &search_name(&job.filename))
-    .unwrap_or_default();
-
-  let display: Vec<ModalCandidate> = candidates
-    .iter()
-    .map(|j| {
-      let date = j.find_date(&["wor", "eu", "us", "fr"]);
-      ModalCandidate {
-        name: j.find_name(NAME_REGIONS),
-        game_id: j.id.clone(),
-        year: if date == "Unknown" || date.len() < 4 {
-          None
-        } else {
-          Some(date[..4].to_string())
-        },
-      }
-    })
-    .collect();
-
-  let (resp_tx, resp_rx) = crossbeam_channel::bounded(1);
-  let ss_preview = Arc::clone(ss);
-  let preview_system_id = system.id;
-  modal_tx
-    .send(ModalRequest {
-      filename: job.filename.clone(),
-      sha1: job.sha1.clone(),
-      candidates: display,
-      response: resp_tx,
-      fetch_by_id: Box::new(move |game_id| {
-        ss_preview
-          .jeuinfo_by_gameid(preview_system_id, game_id)
-          .ok()
-          .map(|j| j.find_name(NAME_REGIONS).to_string())
-      }),
-    })
-    .ok()?;
-
-  job.bar.waiting_for_user();
-
-  match resp_rx.recv().ok()? {
-    ModalResponse::SelectedId(id) => candidates.into_iter().find(|j| j.id == id),
-    ModalResponse::ManualId(raw) => raw
-      .parse::<u32>()
-      .ok()
-      .and_then(|game_id| ss.jeuinfo_by_gameid(system.id, game_id).ok()),
-    ModalResponse::Cancelled => None,
-  }
-}
+// ── main ──────────────────────────────────────────────────────────────────
 
 fn main() {
   let args: Vec<String> = env::args().collect();
-  let mut opts = Options::new();
   let program = args[0].clone();
+  let mut opts = getopts::Options::new();
 
   let confdir = match dirs::config_dir() {
     Some(x) => x,
@@ -203,7 +68,7 @@ fn main() {
 
   let matches = match opts.parse(&args[1..]) {
     Ok(m) => m,
-    Err(f) => panic!("{}", f.to_string()),
+    Err(f) => panic!("{}", f),
   };
 
   if matches.opt_present("h") {
@@ -255,10 +120,49 @@ fn main() {
     }
   };
 
-  let ui = Ui::new();
+  // ── Resume check ──────────────────────────────────────────────────────
 
-  // Collecte — on ne connaît pas encore le total, pas de bars
-  let mut entries: Vec<FileEntry> = Vec::new();
+  let run_path = format!("{}.run.yml", system_name);
+  let resumed_state: Option<worker::RunState> = if Path::new(&run_path).exists() {
+    match worker::load_run_state(&run_path) {
+      Ok(s) => {
+        let done = s
+          .roms
+          .iter()
+          .filter(|r| r.step_statuses.iter().all(|st| st.is_complete()))
+          .count();
+        print!(
+          "Found interrupted run ({}/{} done). Resume? [Y/n]: ",
+          done,
+          s.roms.len()
+        );
+        io::stdout().flush().unwrap();
+        let mut answer = String::new();
+        io::stdin().read_line(&mut answer).unwrap();
+        match answer.trim().to_lowercase().as_str() {
+          "" | "y" | "yes" => Some(s),
+          _ => {
+            fs::remove_file(&run_path).ok();
+            None
+          }
+        }
+      }
+      Err(e) => {
+        eprintln!("Warning: could not load {}: {}", run_path, e);
+        None
+      }
+    }
+  } else {
+    None
+  };
+
+  // ── Collection ────────────────────────────────────────────────────────
+  //
+  // Collect RomSourceData for all matching files first (total unknown),
+  // then create bars and Rom structs once the total is known.
+
+  let ui = Ui::new();
+  let mut sources: Vec<RomSourceData> = Vec::new();
 
   match &source {
     Source::InternetArchive(ia_items) => {
@@ -285,20 +189,21 @@ fn main() {
             .into_iter()
             .next()
             .unwrap_or_default();
-          entries.push(FileEntry {
-            metadata: Some(Arc::clone(&metadata)),
+          sources.push(RomSourceData {
             file_name: file.name.clone(),
             filename,
-            crc32: file.crc32.clone(),
-            md5: file.md5.clone(),
-            sha1: file.sha1.clone(),
-            size: file
-              .size
-              .as_deref()
-              .and_then(|s| s.parse().ok())
-              .unwrap_or(0),
-            rom_url,
-            local_path: None,
+            source: RomSource::InternetArchive(IaSource {
+              rom_url,
+              crc32: file.crc32.clone(),
+              md5: file.md5.clone(),
+              sha1: file.sha1.clone(),
+              size: file
+                .size
+                .as_deref()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0),
+              metadata: Arc::clone(&metadata),
+            }),
           });
         }
       }
@@ -321,47 +226,49 @@ fn main() {
         {
           continue;
         }
-        let size = entry.metadata().unwrap().len();
-        entries.push(FileEntry {
-          metadata: None,
+        sources.push(RomSourceData {
           file_name: path.to_str().unwrap().to_string(),
           filename,
-          crc32: None,
-          md5: None,
-          sha1: None,
-          size,
-          rom_url: String::new(),
-          local_path: Some(path),
+          source: RomSource::Folder(FolderSource { local_path: path }),
         });
       }
     }
   }
 
-  // Total connu — création des bars et des jobs
-  let total = entries.len();
-  let jobs: Vec<RomJob> = entries
+  // ── RomSourceData → Arc<Mutex<Rom>> ──────────────────────────────────
+
+  let total = sources.len();
+  let roms: Vec<Arc<Mutex<Rom>>> = sources
     .into_iter()
     .enumerate()
-    .map(|(i, e)| RomJob {
-      bar: ui.new_rom_bar(i + 1, total, &e.filename),
-      metadata: e.metadata,
-      file_name: e.file_name,
-      filename: e.filename,
-      crc32: e.crc32,
-      md5: e.md5,
-      sha1: e.sha1,
-      size: e.size,
-      jeu: None,
-      rom_url: e.rom_url,
-      medias: Medias::default(),
-      romname: String::new(),
-      local_path: e.local_path,
-      rom_unchanged: false,
-      package_unchanged: false,
+    .map(|(i, source)| {
+      let bar = ui.new_rom_bar(i + 1, total, &source.filename);
+      if matches!(&source.source, RomSource::Folder(_)) {
+        Rom::new_folder(source, bar)
+      } else {
+        Rom::new_ia(source, bar)
+      }
     })
     .collect();
 
-  // Pipeline
+  // Apply run state from a previous interrupted run.
+  if let Some(ref run_state) = resumed_state {
+    for rom_arc in &roms {
+      let mut rom = rom_arc.lock().unwrap();
+      if let Some(entry) = run_state
+        .roms
+        .iter()
+        .find(|r| r.filename == rom.source.filename)
+      {
+        worker::apply_run_state(&mut rom, entry);
+      }
+    }
+  }
+
+  let all_roms = Arc::new(roms);
+
+  // ── Pipeline setup ────────────────────────────────────────────────────
+
   let ss = ScreenScraper::new(
     &conf.screenscraper.user.login,
     &conf.screenscraper.user.password,
@@ -371,330 +278,165 @@ fn main() {
   .unwrap();
 
   let n_disc = ss.user_info.maxthreads as usize;
-
   let modal_tx = ui.modal_sender();
-
   let state_path = format!("{}.state.yml", system_name);
   let state = Arc::new(Mutex::new(SystemState::load(&state_path)));
-
   let ss = Arc::new(ss);
   let system = Arc::new(system);
   let lang = Arc::new(conf.lang);
+  let queue = TaskQueue::new();
 
-  let (disc_tx, disc_rx) = channel::unbounded::<RomJob>();
-  let (pack_tx, pack_rx) = channel::unbounded::<RomJob>();
-  let (dl_tx, dl_rx) = channel::unbounded::<RomJob>();
-
-  for job in jobs {
-    disc_tx.send(job).unwrap();
-  }
-  drop(disc_tx);
-
-  // Workers discovery
-  let disc_handles: Vec<_> = (0..n_disc)
-    .map(|_| {
-      let rx = disc_rx.clone();
-      let tx = pack_tx.clone();
-      let ss = Arc::clone(&ss);
-      let system = Arc::clone(&system);
-      let modal_tx = modal_tx.clone();
-      let state = Arc::clone(&state);
-      thread::spawn(move || {
-        for mut job in rx {
-          job.bar.discovering();
-          if let Some(ref local_path) = job.local_path {
-            // Fast-skip : si date+taille inchangées, le SHA1 est identique
-            let cached_sha1 = {
-              let s = state.lock().unwrap();
-              s.roms.get(&job.filename).and_then(|entry| {
-                if entry.rom_mtime == 0 {
-                  return None; // Pas de données mtime → calcul complet
-                }
-                let meta = fs::metadata(local_path).ok()?;
-                let mtime = meta
-                  .modified()
-                  .ok()
-                  .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                  .map(|d| d.as_secs())?;
-                if mtime == entry.rom_mtime && meta.len() == entry.rom_size {
-                  Some(entry.rom_sha1.clone())
-                } else {
-                  None
-                }
-              })
-            };
-
-            if let Some(sha1) = cached_sha1 {
-              // Mtime + taille identiques : SHA1 inchangé, MD5/CRC32 inutiles
-              // (jeuinfo_by_gameid ne les requiert pas)
-              job.sha1 = Some(sha1);
-            } else {
-              job.sha1 = Some(hash_file(local_path, Algorithm::SHA1).to_lowercase());
-              job.md5 = Some(hash_file(local_path, Algorithm::MD5).to_lowercase());
-              job.crc32 = Some(hash_file(local_path, Algorithm::CRC32).to_lowercase());
-            }
-          }
-
-          // Consulter le state : ROM connue et sha1 inchangé ?
-          let (rom_unchanged, cached_game_id) = {
-            let s = state.lock().unwrap();
-            match s.roms.get(&job.filename) {
-              Some(entry) => {
-                let current_sha1 = job.sha1.as_deref().unwrap_or("");
-                let unchanged = !current_sha1.is_empty() && entry.rom_sha1 == current_sha1;
-                let game_id = entry
-                  .ss_game_id
-                  .as_deref()
-                  .and_then(|id| id.parse::<u32>().ok());
-                (unchanged, game_id)
-              }
-              None => (false, None),
-            }
-          };
-          job.rom_unchanged = rom_unchanged;
-
-          // Lookup SS : par game_id si connu, sinon par checksum
-          let ji = if let Some(gid) = cached_game_id {
-            ss.jeuinfo_by_gameid(system.id, gid).ok()
-          } else {
-            ss.jeuinfo(
-              system.id,
-              &job.filename,
-              job.size,
-              job.crc32.clone(),
-              job.md5.clone(),
-              job.sha1.clone(),
-            )
-            .ok()
-          };
-
-          let ji = match ji {
-            Some(j) => {
-              job.bar.found(&j.find_name(NAME_REGIONS));
-              Some(j)
-            }
-            None => resolve_via_modal(&ss, &system, &job, &modal_tx),
-          };
-
-          match &ji {
-            Some(j) => job.bar.found(&j.find_name(NAME_REGIONS)),
-            None => job.bar.not_found(),
-          }
-          job.jeu = ji;
-          job.bar.preparing_pending();
-          tx.send(job).unwrap();
-        }
-      })
+  // Count ROMs whose SaveState step still needs to run.
+  let remaining_count = all_roms
+    .iter()
+    .filter(|rom_arc| {
+      let rom = rom_arc.lock().unwrap();
+      let last = rom.pipeline.len() - 1;
+      !matches!(
+        rom.pipeline[last].status,
+        StepStatus::Done | StepStatus::Skipped | StepStatus::Failed(_)
+      )
     })
-    .collect();
-  drop(pack_tx);
+    .count();
 
-  // Workers packaging
-  let pack_handles: Vec<_> = (0..N_PACK_WORKERS)
-    .map(|_| {
-      let rx = pack_rx.clone();
-      let tx = dl_tx.clone();
-      let system = Arc::clone(&system);
-      let lang = Arc::clone(&lang);
-      let state = Arc::clone(&state);
-      thread::spawn(move || {
-        let lang_refs: Vec<&str> = lang.iter().map(|s| s.as_str()).collect();
-        for mut job in rx {
-          job.bar.preparing();
-          let sha1 = job.sha1.clone().unwrap_or_default();
-          let mut package =
-            Package::new(job.jeu.take(), &job.filename, &job.rom_url, &sha1).unwrap();
+  let interrupted = Arc::new(AtomicBool::new(false));
 
-          // Delta check : comparer les sha1 médias SS vs état sauvegardé
-          let package_changed = {
-            let s = state.lock().unwrap();
-            match s.roms.get(&job.filename) {
-              None => true, // Premier run, pas d'état précédent
-              Some(prev) => !job.rom_unchanged || media_sha1_changed(&package.medias, &prev.medias),
-            }
-          };
-          job.package_unchanged = !package_changed;
+  // ── Ctrl-C handler ────────────────────────────────────────────────────
 
-          if package_changed {
-            let dir = Path::new(&job.filename).with_extension("");
-            let pkgver = read_pkgver(&dir) + 1;
-            match package.build(&system, &lang_refs, pkgver) {
-              Ok(()) => {}
-              Err(_) => {
-                job.bar.finish_error();
-                continue;
-              }
-            }
-          }
-
-          job.romname = package.normalize_name();
-          job.medias = package.medias;
-          job.jeu = package.jeu;
-          job.bar.downloading_pending();
-          tx.send(job).unwrap();
-        }
-      })
+  {
+    let queue = Arc::clone(&queue);
+    let interrupted = Arc::clone(&interrupted);
+    ctrlc::set_handler(move || {
+      // Second Ctrl-C: hard exit.
+      if interrupted.swap(true, Ordering::SeqCst) {
+        std::process::exit(1);
+      }
+      eprintln!("\nInterrupted — waiting for active steps to finish...");
+      queue.shutdown();
     })
-    .collect();
-  drop(dl_tx);
-
-  // Workers download
-  let dl_handles: Vec<_> = (0..N_DL_WORKERS)
-    .map(|_| {
-      let rx = dl_rx.clone();
-      let ss = Arc::clone(&ss);
-      let state = Arc::clone(&state);
-      thread::spawn(move || {
-        for job in rx {
-          let directory = Path::new(&job.filename).with_extension("");
-          let dest = directory.join(&job.filename);
-
-          if job.rom_unchanged {
-            // SHA1 vérifié lors de la discovery : ROM identique, rien à faire
-            fs::create_dir_all(&directory).unwrap();
-            job.bar.rom_skipped();
-          } else if let Some(ref local_path) = job.local_path {
-            // Source folder : copie du fichier local
-            let expected_sha1 = job.sha1.as_deref().unwrap_or("");
-            if dest.exists() {
-              job.bar.rom_checking();
-              let actual = hash_file(&dest, Algorithm::SHA1).to_lowercase();
-              if actual == expected_sha1 {
-                job.bar.rom_skipped();
-              } else {
-                job.bar.rom_redownloading();
-                fs::create_dir_all(&directory).unwrap();
-                fs::copy(local_path, &dest).unwrap();
-                job.bar.rom_done();
-              }
-            } else {
-              job.bar.rom_downloading();
-              fs::create_dir_all(&directory).unwrap();
-              fs::copy(local_path, &dest).unwrap();
-              job.bar.rom_done();
-            }
-          } else {
-            // Source Internet Archive : téléchargement
-            let download = Download::new(job.metadata.as_ref().unwrap(), &job.file_name).unwrap();
-            if dest.exists() {
-              job.bar.rom_checking();
-              match download.verify_sha1(&dest) {
-                Ok(()) => job.bar.rom_skipped(),
-                Err(_) => {
-                  job.bar.rom_redownloading();
-                  download.fetch(&dest, DownloadMethod::Https).unwrap();
-                  download.verify_sha1(&dest).unwrap();
-                  job.bar.rom_done();
-                }
-              }
-            } else {
-              job.bar.rom_downloading();
-              download.fetch(&dest, DownloadMethod::Https).unwrap();
-              download.verify_sha1(&dest).unwrap();
-              job.bar.rom_done();
-            }
-          }
-
-          let d = &directory;
-          for (kind, maybe_media) in [
-            ("video", job.medias.video.as_ref()),
-            ("image", job.medias.image.as_ref()),
-            ("thumbnail", job.medias.thumbnail.as_ref()),
-            ("bezel", job.medias.bezel.as_ref()),
-            ("marquee", job.medias.marquee.as_ref()),
-            ("screenshot", job.medias.screenshot.as_ref()),
-            ("wheel", job.medias.wheel.as_ref()),
-            ("manual", job.medias.manual.as_ref()),
-          ] {
-            match maybe_media {
-              Some(m) => {
-                job.bar.start_media(kind);
-                let dest = d.join(media_filename(kind, &m.format));
-                download_media_if_needed(&ss, m, &dest);
-                job.bar.media_done(kind);
-              }
-              None => job.bar.media_unavailable(kind),
-            }
-          }
-
-          job.bar.finish(job.package_unchanged);
-
-          let mut medias = HashMap::new();
-          medias.insert(
-            "video".to_string(),
-            job.medias.video.as_ref().map(|m| m.sha1.clone()),
-          );
-          medias.insert(
-            "image".to_string(),
-            job.medias.image.as_ref().map(|m| m.sha1.clone()),
-          );
-          medias.insert(
-            "thumbnail".to_string(),
-            job.medias.thumbnail.as_ref().map(|m| m.sha1.clone()),
-          );
-          medias.insert(
-            "bezel".to_string(),
-            job.medias.bezel.as_ref().map(|m| m.sha1.clone()),
-          );
-          medias.insert(
-            "marquee".to_string(),
-            job.medias.marquee.as_ref().map(|m| m.sha1.clone()),
-          );
-          medias.insert(
-            "screenshot".to_string(),
-            job.medias.screenshot.as_ref().map(|m| m.sha1.clone()),
-          );
-          medias.insert(
-            "wheel".to_string(),
-            job.medias.wheel.as_ref().map(|m| m.sha1.clone()),
-          );
-          medias.insert(
-            "manual".to_string(),
-            job.medias.manual.as_ref().map(|m| m.sha1.clone()),
-          );
-
-          let (rom_mtime, rom_size) = match &job.local_path {
-            Some(local_path) => {
-              let meta = fs::metadata(local_path).ok();
-              let mtime = meta
-                .as_ref()
-                .and_then(|m| m.modified().ok())
-                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                .map(|d| d.as_secs())
-                .unwrap_or(0);
-              let size = meta.as_ref().map(|m| m.len()).unwrap_or(0);
-              (mtime, size)
-            }
-            None => (0, job.size), // Source IA : pas de mtime local
-          };
-
-          let entry = RomStateEntry {
-            ss_game_id: job.jeu.as_ref().map(|j| j.id.clone()),
-            rom_sha1: job.sha1.unwrap_or_default(),
-            rom_mtime,
-            rom_size,
-            medias,
-          };
-          state.lock().unwrap().insert(job.filename, entry);
-        }
-      })
-    })
-    .collect();
-
-  // Attente de fin dans l'ordre du pipeline
-  for h in disc_handles {
-    h.join().unwrap();
+    .expect("Error setting Ctrl-C handler");
   }
-  for h in pack_handles {
-    h.join().unwrap();
+
+  // All ROMs already done (full resume with no pending work).
+  if remaining_count == 0 {
+    fs::remove_file(&run_path).ok();
+    let summary = ui.summary();
+    drop(ui);
+    summary.print();
+    return;
   }
-  for h in dl_handles {
+
+  let ctx = Arc::new(WorkerContext {
+    queue: Arc::clone(&queue),
+    ss: Arc::clone(&ss),
+    system: Arc::clone(&system),
+    lang: Arc::clone(&lang),
+    state: Arc::clone(&state),
+    modal_tx,
+    ss_sem: Semaphore::new(n_disc),
+    modal_sem: Semaphore::new(1),
+    remaining: Arc::new(AtomicUsize::new(remaining_count)),
+    interrupted: Arc::clone(&interrupted),
+  });
+
+  // Enqueue all steps that are Pending with wait_for == 0.
+  // For a fresh run: always step 0 for each ROM.
+  // For a resumed run: whatever steps are ready after applying saved statuses.
+  for rom_arc in all_roms.iter() {
+    let rom = rom_arc.lock().unwrap();
+    let ready: Vec<usize> = rom
+      .pipeline
+      .iter()
+      .enumerate()
+      .filter(|(_, step)| step.status == StepStatus::Pending && step.wait_for_count() == 0)
+      .map(|(i, _)| i)
+      .collect();
+    drop(rom);
+    for idx in ready {
+      queue.push(Arc::clone(rom_arc), idx);
+    }
+  }
+
+  // ── Launch workers ────────────────────────────────────────────────────
+
+  let n_main = n_disc + N_EXTRA_MAIN_WORKERS;
+  let mut handles: Vec<thread::JoinHandle<()>> = Vec::with_capacity(n_main + N_BLOCKING_WORKERS);
+
+  for _ in 0..n_main {
+    let ctx = Arc::clone(&ctx);
+    handles.push(thread::spawn(move || worker::worker_loop_main(ctx)));
+  }
+  for _ in 0..N_BLOCKING_WORKERS {
+    let ctx = Arc::clone(&ctx);
+    handles.push(thread::spawn(move || worker::worker_loop_blocking(ctx)));
+  }
+
+  for h in handles {
     h.join().unwrap();
   }
 
-  state.lock().unwrap().save(&state_path);
+  // ── Post-join ─────────────────────────────────────────────────────────
 
-  let summary = ui.summary();
+  // Flush accumulated ROM state to disk (partial on interrupt, complete otherwise).
+  if let Err(e) = state.lock().unwrap().save_with_rotation(&state_path) {
+    eprintln!("Warning: could not save state: {}", e);
+  }
+
+  if interrupted.load(Ordering::SeqCst) {
+    let run_state = worker::collect_run_state(&all_roms);
+    match worker::save_run_state(&system_name, &run_state) {
+      Ok(()) => eprintln!(
+        "Run state saved to {}.run.yml — resume with: rompom -s {}",
+        system_name, system_name
+      ),
+      Err(e) => eprintln!("Warning: could not save run state: {}", e),
+    }
+    drop(ui);
+    return;
+  }
+
+  // Clean up leftover run file from a previous interrupted run.
+  fs::remove_file(&run_path).ok();
+
+  // ── Step telemetry ─────────────────────────────────────────────────
+
+  let mut duration_buckets: HashMap<StepKind, Vec<std::time::Duration>> = HashMap::new();
+  for rom_arc in all_roms.iter() {
+    let rom = rom_arc.lock().unwrap();
+    for step in &rom.pipeline {
+      if let (Some(start), Some(end)) = (step.started_at, step.finished_at) {
+        let dur = end.checked_duration_since(start).unwrap_or_default();
+        duration_buckets
+          .entry(step.kind.clone())
+          .or_default()
+          .push(dur);
+      }
+    }
+  }
+
+  let step_avg_durations: Vec<(&'static str, std::time::Duration)> = [
+    (StepKind::ComputeHashes, "ComputeHashes"),
+    (StepKind::LookupSS, "LookupSS"),
+    (StepKind::WaitModal, "WaitModal"),
+    (StepKind::BuildPackage, "BuildPackage"),
+    (StepKind::CopyRom, "CopyRom"),
+    (StepKind::DownloadRom, "DownloadRom"),
+    (StepKind::DownloadMedias, "DownloadMedias"),
+    (StepKind::SaveState, "SaveState"),
+  ]
+  .into_iter()
+  .filter_map(|(kind, label)| {
+    let durations = duration_buckets.get(&kind)?;
+    if durations.is_empty() {
+      return None;
+    }
+    let avg = durations.iter().sum::<std::time::Duration>() / durations.len() as u32;
+    Some((label, avg))
+  })
+  .collect();
+
+  let mut summary = ui.summary();
+  summary.step_avg_durations = step_avg_durations;
   drop(ui);
   summary.print();
 }

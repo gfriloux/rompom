@@ -418,6 +418,7 @@ impl Ui {
       unchanged,
       errors,
       media_stats,
+      step_avg_durations: Vec::new(),
     }
   }
 }

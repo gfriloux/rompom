@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 /// End-of-run statistics printed after the TUI exits.
 pub struct Summary {
   pub total: usize,
@@ -6,6 +8,9 @@ pub struct Summary {
   pub errors: usize,
   /// (kind, icon, roms_with_this_media) — canonical order from MEDIA_ICONS.
   pub media_stats: Vec<(&'static str, &'static str, usize)>,
+  /// Average wall-clock time per step kind, in canonical pipeline order.
+  /// Only populated for step kinds that actually ran at least once.
+  pub step_avg_durations: Vec<(&'static str, Duration)>,
 }
 
 impl Summary {
@@ -25,8 +30,16 @@ impl Summary {
           icon, kind, bar, found, self.success, pct
         );
       }
+      println!();
     }
-    println!();
+
+    if !self.step_avg_durations.is_empty() {
+      println!("Step timings (avg)");
+      for &(label, dur) in &self.step_avg_durations {
+        println!("  {:<20}  {:.2}s", label, dur.as_secs_f64());
+      }
+      println!();
+    }
   }
 }
 
