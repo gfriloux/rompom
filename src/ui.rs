@@ -154,6 +154,7 @@ struct RomEntry {
   status: String,
   phase: RomPhase,
   media_found: Vec<String>,
+  media_unchanged: Vec<String>,
   media_missing: Vec<String>,
 }
 
@@ -163,6 +164,7 @@ pub(crate) struct CompletedEntry {
   pub(crate) success: bool,
   pub(crate) unchanged: bool,
   pub(crate) media_found: Vec<String>,
+  pub(crate) media_unchanged: Vec<String>,
   pub(crate) media_missing: Vec<String>,
 }
 
@@ -276,6 +278,12 @@ impl RomBar {
     s.roms[self.index].media_found.push(kind.to_string());
   }
 
+  pub fn media_skipped(&self, kind: &str) {
+    let mut s = self.state.lock().unwrap();
+    s.roms[self.index].status = format!("{} — unchanged", kind);
+    s.roms[self.index].media_unchanged.push(kind.to_string());
+  }
+
   pub fn media_unavailable(&self, kind: &str) {
     let mut s = self.state.lock().unwrap();
     s.roms[self.index].status = format!("{} — not available", kind);
@@ -291,6 +299,7 @@ impl RomBar {
       success: true,
       unchanged,
       media_found: entry.media_found.clone(),
+      media_unchanged: entry.media_unchanged.clone(),
       media_missing: entry.media_missing.clone(),
     };
     s.roms[self.index].phase = RomPhase::Done { success: true };
@@ -305,6 +314,7 @@ impl RomBar {
       success: false,
       unchanged: false,
       media_found: entry.media_found.clone(),
+      media_unchanged: entry.media_unchanged.clone(),
       media_missing: entry.media_missing.clone(),
     };
     s.roms[self.index].phase = RomPhase::Done { success: false };
@@ -381,6 +391,7 @@ impl Ui {
       status: "queued".to_string(),
       phase: RomPhase::Discovering,
       media_found: Vec::new(),
+      media_unchanged: Vec::new(),
       media_missing: Vec::new(),
     });
     RomBar {
@@ -685,10 +696,15 @@ fn completed_item(entry: &CompletedEntry) -> ListItem<'static> {
     Span::raw("  "),
   ];
 
-  // Media icons in canonical order: green if found, red if missing.
+  // Media icons in canonical order:
+  //   green   = downloaded (new or updated)
+  //   gray    = already up-to-date (unchanged)
+  //   red     = not available on ScreenScraper
   for &(kind, icon) in MEDIA_ICONS {
     let style = if entry.media_found.iter().any(|k| k == kind) {
       Style::default().fg(Color::Green)
+    } else if entry.media_unchanged.iter().any(|k| k == kind) {
+      Style::default().fg(Color::DarkGray)
     } else if entry.media_missing.iter().any(|k| k == kind) {
       Style::default().fg(Color::Red)
     } else {

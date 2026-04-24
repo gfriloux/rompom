@@ -831,14 +831,18 @@ fn handle_download_medias(
         Some(m) => {
           rom_arc.lock().unwrap().bar.start_media(kind);
           let dest = directory.join(media_filename(kind, &m.format));
-          if !dest.exists() || ctx.ss.media_download(m).verify_sha1(&dest).is_err() {
+          let needs_download =
+            !dest.exists() || ctx.ss.media_download(m).verify_sha1(&dest).is_err();
+          if needs_download {
             ctx
               .ss
               .media_download(m)
               .fetch(&dest)
               .map_err(|e| format!("media {}: {}", kind, e))?;
+            rom_arc.lock().unwrap().bar.media_done(kind);
+          } else {
+            rom_arc.lock().unwrap().bar.media_skipped(kind);
           }
-          rom_arc.lock().unwrap().bar.media_done(kind);
         }
         None => {
           rom_arc.lock().unwrap().bar.media_unavailable(kind);
