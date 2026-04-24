@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::{collections::HashMap, path::Path};
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct RomStateEntry {
@@ -28,9 +28,46 @@ impl SystemState {
       .unwrap_or_default()
   }
 
-  pub fn save(&self, path: &str) {
-    let yaml = serde_yaml::to_string(self).unwrap();
-    std::fs::write(path, yaml).unwrap();
+  /// Atomically persist the state using a write-rename pattern.
+  ///
+  /// If the destination file already exists:
+  /// 1. Write new content to `<path>.tmp`.
+  /// 2. Rename existing file to `<path>.old`.
+  /// 3. Rename `<path>.tmp` to `<path>`.
+  ///
+  /// If the `tmp` write fails, the original file is untouched.
+  /// If any subsequent rename fails, the method attempts to restore the
+  /// original from `<path>.old` before returning the error.
+  pub fn save_with_rotation(&self, path: &str) -> std::io::Result<()> {
+    let yaml = serde_yaml::to_string(self).map_err(std::io::Error::other)?;
+
+    if Path::new(path).exists() {
+      let tmp = format!("{}.tmp", path);
+      let old = format!("{}.old", path);
+
+      // Write to tmp first — original is untouched if this fails.
+      std::fs::write(&tmp, &yaml)?;
+
+      // Move original out of the way.
+      if let Err(e) = std::fs::rename(path, &old) {
+        std::fs::remove_file(&tmp).ok();
+        return Err(e);
+      }
+
+      // Promote tmp to final.
+      if let Err(e) = std::fs::rename(&tmp, path) {
+        // Try to restore original.
+        std::fs::rename(&old, path).ok();
+        return Err(e);
+      }
+
+      // Clean up the backup.
+      std::fs::remove_file(&old).ok();
+    } else {
+      std::fs::write(path, yaml)?;
+    }
+
+    Ok(())
   }
 
   pub fn insert(&mut self, filename: String, entry: RomStateEntry) {
