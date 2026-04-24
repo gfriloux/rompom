@@ -64,6 +64,11 @@ fn main() {
     "update-config",
     "interactively update rompom.yml with missing fields",
   );
+  opts.optflag(
+    "",
+    "debug",
+    "write <system>.debug.log with per-ROM pipeline decisions (useful to diagnose false updates)",
+  );
   opts.optflag("h", "help", "print this help menu");
 
   let matches = match opts.parse(&args[1..]) {
@@ -99,6 +104,33 @@ fn main() {
       print_usage(&program, opts);
       return;
     }
+  };
+
+  let debug_log_path: Option<String> = if matches.opt_present("debug") {
+    let path = format!("{}.debug.log", system_name);
+    // Create / truncate the file so each run starts fresh.
+    match fs::OpenOptions::new()
+      .write(true)
+      .create(true)
+      .truncate(true)
+      .open(&path)
+    {
+      Ok(mut f) => {
+        let ts = std::time::SystemTime::now()
+          .duration_since(std::time::UNIX_EPOCH)
+          .map(|d| d.as_secs())
+          .unwrap_or(0);
+        let _ = writeln!(f, "# rompom debug log — {} — unix={}", system_name, ts);
+        let _ = writeln!(f);
+        Some(path)
+      }
+      Err(e) => {
+        eprintln!("Warning: could not create debug log {}: {}", path, e);
+        None
+      }
+    }
+  } else {
+    None
   };
 
   let system = match conf.find_system(&system_name) {
@@ -337,6 +369,7 @@ fn main() {
     modal_sem: Semaphore::new(1),
     remaining: Arc::new(AtomicUsize::new(remaining_count)),
     interrupted: Arc::clone(&interrupted),
+    debug_log_path,
   });
 
   // Enqueue all steps that are Pending with wait_for == 0.

@@ -144,6 +144,9 @@ pub struct WorkerContext {
   pub remaining: Arc<AtomicUsize>,
   /// Set to true by the Ctrl-C handler; workers check it between steps.
   pub interrupted: Arc<AtomicBool>,
+  /// If `Some`, path of the debug log file to append per-ROM decision lines to.
+  /// Enabled by `--debug`; the file is created/truncated in `main` before workers start.
+  pub debug_log_path: Option<String>,
 }
 
 // ── Worker loops ───────────────────────────────────────────────────────────
@@ -296,22 +299,48 @@ fn media_filename(kind: &str, format: &str) -> String {
   }
 }
 
-/// Returns true if at least one media has a different sha1 (or presence)
-/// between the current SS result and the saved state entry.
-fn media_sha1_changed(medias: &Medias, prev: &HashMap<String, Option<String>>) -> bool {
-  let check = |kind: &str, media: Option<&screenscraper::jeuinfo::Media>| -> bool {
+/// Compares current media sha1s (from SS) against the saved state.
+///
+/// Returns `(changed, log_lines)` where `changed` is true if at least one
+/// media sha1 differs, and `log_lines` has one entry per media type with
+/// the comparison result (for `--debug` output).
+fn check_media_changes(
+  medias: &Medias,
+  prev: &HashMap<String, Option<String>>,
+) -> (bool, Vec<String>) {
+  let mut changed = false;
+  let mut lines = Vec::new();
+
+  for (kind, media) in [
+    ("video", medias.video.as_ref()),
+    ("image", medias.image.as_ref()),
+    ("thumbnail", medias.thumbnail.as_ref()),
+    ("bezel", medias.bezel.as_ref()),
+    ("marquee", medias.marquee.as_ref()),
+    ("screenshot", medias.screenshot.as_ref()),
+    ("wheel", medias.wheel.as_ref()),
+    ("manual", medias.manual.as_ref()),
+  ] {
     let new_sha1 = media.map(|m| m.sha1.as_str());
     let prev_sha1 = prev.get(kind).and_then(|v| v.as_deref());
-    new_sha1 != prev_sha1
-  };
-  check("video", medias.video.as_ref())
-    || check("image", medias.image.as_ref())
-    || check("thumbnail", medias.thumbnail.as_ref())
-    || check("bezel", medias.bezel.as_ref())
-    || check("marquee", medias.marquee.as_ref())
-    || check("screenshot", medias.screenshot.as_ref())
-    || check("wheel", medias.wheel.as_ref())
-    || check("manual", medias.manual.as_ref())
+    if new_sha1 != prev_sha1 {
+      changed = true;
+      lines.push(format!(
+        "[BuildPackage] media {:<12}: CHANGED  state={}  ss={}",
+        kind,
+        prev_sha1.unwrap_or("(absent)"),
+        new_sha1.unwrap_or("(absent)")
+      ));
+    } else {
+      lines.push(format!(
+        "[BuildPackage] media {:<12}: ok       ({})",
+        kind,
+        new_sha1.unwrap_or("absent")
+      ));
+    }
+  }
+
+  (changed, lines)
 }
 
 // ── Discovery handlers ─────────────────────────────────────────────────────
@@ -359,10 +388,14 @@ fn handle_compute_hashes(
 
   if let Some((sha1, mtime, size)) = fast_result {
     let mut rom = rom_arc.lock().unwrap();
-    rom.sha1 = Some(sha1);
+    rom.sha1 = Some(sha1.clone());
     rom.mtime = mtime;
     rom.size = size;
     // md5/crc32 stay None — jeuinfo_by_gameid won't need them (cached game_id)
+    rom.debug_log.push(format!(
+      "[ComputeHashes] fast-path: HIT  (mtime={}, size={}, sha1={})",
+      mtime, size, sha1
+    ));
   } else {
     let sha1 = hash_file(&local_path, Algorithm::SHA1).to_lowercase();
     let md5 = hash_file(&local_path, Algorithm::MD5).to_lowercase();
@@ -377,6 +410,10 @@ fn handle_compute_hashes(
     let size = meta.as_ref().map(|m| m.len()).unwrap_or(0);
 
     let mut rom = rom_arc.lock().unwrap();
+    rom.debug_log.push(format!(
+      "[ComputeHashes] fast-path: MISS → computed sha1={} (mtime={}, size={})",
+      sha1, mtime, size
+    ));
     rom.sha1 = Some(sha1);
     rom.md5 = Some(md5);
     rom.crc32 = Some(crc32);
@@ -386,14 +423,38 @@ fn handle_compute_hashes(
 
   // ── Check if ROM is unchanged based on saved state ────────────────────
   let sha1_now: Option<String> = rom_arc.lock().unwrap().sha1.clone();
-  let unchanged = {
+  let (unchanged, state_rom_sha1) = {
     let state = ctx.state.lock().unwrap();
-    state.roms.get(&filename).map(|entry| {
-      let current = sha1_now.as_deref().unwrap_or("");
-      !current.is_empty() && entry.rom_sha1 == current
-    })
+    match state.roms.get(&filename) {
+      None => (None, None),
+      Some(entry) => {
+        let current = sha1_now.as_deref().unwrap_or("");
+        let u = !current.is_empty() && entry.rom_sha1 == current;
+        (Some(u), Some(entry.rom_sha1.clone()))
+      }
+    }
   };
-  rom_arc.lock().unwrap().rom_unchanged = unchanged.unwrap_or(false);
+  {
+    let mut rom = rom_arc.lock().unwrap();
+    rom.rom_unchanged = unchanged.unwrap_or(false);
+    let current = sha1_now.as_deref().unwrap_or("?");
+    let line = match (unchanged, state_rom_sha1.as_deref()) {
+      (None, _) => format!(
+        "[ComputeHashes] rom_unchanged: false — no state entry (current sha1={})",
+        current
+      ),
+      (Some(true), _) => format!("[ComputeHashes] rom_unchanged: true  (sha1={})", current),
+      (Some(false), Some(s)) => format!(
+        "[ComputeHashes] rom_unchanged: false — sha1 mismatch (state={}, current={})",
+        s, current
+      ),
+      (Some(false), None) => format!(
+        "[ComputeHashes] rom_unchanged: false — state sha1 empty (current={})",
+        current
+      ),
+    };
+    rom.debug_log.push(line);
+  }
 
   Ok(StepStatus::Done)
 }
@@ -427,14 +488,36 @@ fn handle_lookup_ss(
 
   // ── For IA sources: determine rom_unchanged here (no ComputeHashes ran) ─
   if is_ia_source {
-    let unchanged = {
+    let (unchanged, state_rom_sha1) = {
       let state = ctx.state.lock().unwrap();
-      state.roms.get(&filename).map(|entry| {
-        let current = sha1.as_deref().unwrap_or("");
-        !current.is_empty() && entry.rom_sha1 == current
-      })
+      match state.roms.get(&filename) {
+        None => (None, None),
+        Some(entry) => {
+          let current = sha1.as_deref().unwrap_or("");
+          let u = !current.is_empty() && entry.rom_sha1 == current;
+          (Some(u), Some(entry.rom_sha1.clone()))
+        }
+      }
     };
-    rom_arc.lock().unwrap().rom_unchanged = unchanged.unwrap_or(false);
+    let mut rom = rom_arc.lock().unwrap();
+    rom.rom_unchanged = unchanged.unwrap_or(false);
+    let current = sha1.as_deref().unwrap_or("?");
+    let line = match (unchanged, state_rom_sha1.as_deref()) {
+      (None, _) => format!(
+        "[LookupSS] rom_unchanged: false — no state entry (current sha1={})",
+        current
+      ),
+      (Some(true), _) => format!("[LookupSS] rom_unchanged: true  (sha1={})", current),
+      (Some(false), Some(s)) => format!(
+        "[LookupSS] rom_unchanged: false — sha1 mismatch (state={}, current={})",
+        s, current
+      ),
+      (Some(false), None) => format!(
+        "[LookupSS] rom_unchanged: false — state sha1 empty (current={})",
+        current
+      ),
+    };
+    rom.debug_log.push(line);
   }
 
   // ── Check state for a cached SS game ID ───────────────────────────────
@@ -652,13 +735,36 @@ fn handle_build_package(
   let mut package = Package::new(jeu, &filename, &rom_url, &sha1).map_err(|e| e.to_string())?;
 
   // ── Delta check: skip build if ROM + all media sha1s are unchanged ─────
-  let package_changed = {
+  let (package_changed, debug_lines) = {
     let state = ctx.state.lock().unwrap();
     match state.roms.get(&filename) {
-      None => true, // first run, no saved state
-      Some(prev) => !rom_unchanged || media_sha1_changed(&package.medias, &prev.medias),
+      None => (
+        true,
+        vec!["[BuildPackage] no state entry → package_changed: true".to_string()],
+      ),
+      Some(prev) => {
+        if !rom_unchanged {
+          let line = format!(
+            "[BuildPackage] rom_unchanged: false → package_changed: true\n  rom sha1: state={}, current={}",
+            prev.rom_sha1, sha1
+          );
+          (true, vec![line])
+        } else {
+          let (media_changed, mut lines) = check_media_changes(&package.medias, &prev.medias);
+          if media_changed {
+            lines.push(
+              "[BuildPackage] → package_changed: true (media sha1 mismatch above)".to_string(),
+            );
+            (true, lines)
+          } else {
+            lines.push("[BuildPackage] → package_unchanged: true".to_string());
+            (false, lines)
+          }
+        }
+      }
     }
   };
+  rom_arc.lock().unwrap().debug_log.extend(debug_lines);
 
   if package_changed {
     let dir = Path::new(&filename).with_extension("");
@@ -887,7 +993,7 @@ fn handle_save_state(
   ctx: &WorkerContext,
 ) -> Result<StepStatus, String> {
   // Collect ROM data while holding the lock, then release before I/O.
-  let (filename, entry, package_unchanged) = {
+  let (filename, entry, package_unchanged, debug_log) = {
     let rom = rom_arc.lock().unwrap();
     let ss_game_id = rom.jeu.as_ref().map(|j| j.id.clone());
     let medias = rom
@@ -906,11 +1012,29 @@ fn handle_save_state(
       rom.source.filename.clone(),
       state_entry,
       rom.package_unchanged,
+      rom.debug_log.clone(),
     )
   };
 
   // Persist in memory — main.rs flushes to disk after all workers finish.
-  ctx.state.lock().unwrap().insert(filename, entry);
+  ctx.state.lock().unwrap().insert(filename.clone(), entry);
+
+  // ── Debug log ─────────────────────────────────────────────────────────────
+  if let Some(ref path) = ctx.debug_log_path {
+    if !debug_log.is_empty() {
+      use std::io::Write as _;
+      match fs::OpenOptions::new().create(true).append(true).open(path) {
+        Ok(mut file) => {
+          let _ = writeln!(file, "=== {} ===", filename);
+          for line in &debug_log {
+            let _ = writeln!(file, "{}", line);
+          }
+          let _ = writeln!(file);
+        }
+        Err(e) => eprintln!("Warning: could not write debug log: {}", e),
+      }
+    }
+  }
 
   {
     let rom = rom_arc.lock().unwrap();

@@ -260,6 +260,9 @@ pub struct Rom {
   pub romname: Option<String>,
   /// True when both ROM and all media sha1s match the saved state → build skipped.
   pub package_unchanged: bool,
+  /// Per-step decision log lines, appended throughout the pipeline.
+  /// Written to `<system>.debug.log` at the end of `SaveState` when `--debug` is set.
+  pub debug_log: Vec<String>,
 }
 
 impl Rom {
@@ -359,6 +362,7 @@ impl Rom {
       medias: None,
       romname: None,
       package_unchanged: false,
+      debug_log: Vec::new(),
     }))
   }
 
@@ -452,6 +456,7 @@ impl Rom {
       medias: None,
       romname: None,
       package_unchanged: false,
+      debug_log: Vec::new(),
     }))
   }
 }
