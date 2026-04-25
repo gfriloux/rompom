@@ -17,5 +17,9 @@
       snowfall = {
         namespace = "rompom";
       };
+
+      alias = {
+        packages.default = "rompom";
+      };
     };
 }
