@@ -86,8 +86,11 @@ pub fn read_pkgver(directory: &Path) -> u32 {
 
 impl Package {
   pub fn normalize_name(&self) -> String {
-    self
-      .name
+    let stem = Path::new(&self.name)
+      .file_stem()
+      .and_then(|s| s.to_str())
+      .unwrap_or(&self.name);
+    stem
       .replace("(", "")
       .replace(")", "")
       .replace(" ", "")
