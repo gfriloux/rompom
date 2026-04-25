@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 
-use crate::rom::{Rom, StepStatus};
+use crate::rom::{Rom, StepKind, StepStatus};
 
 // ── Run state ─────────────────────────────────────────────────────────────
 //
@@ -99,10 +99,67 @@ pub fn apply_run_state(rom: &mut Rom, run_entry: &RunRomEntry) {
     };
     rom.pipeline[idx].status = restored;
 
-    // Completed step: decrement each successor's wait_for.
+    // Only propagate through the DAG if this step was actually reached in the
+    // previous run, i.e. its own wait_for has already reached 0 (all its
+    // predecessors were restored as Done/Skipped earlier in this loop).
+    //
+    // Without this guard, a step that is Skipped by default (WaitModal) but
+    // whose predecessor is still Pending would incorrectly decrement its
+    // successor's wait_for — causing an underflow when the predecessor later
+    // dispatches the same step via do_dispatch during the resumed run.
+    if rom.pipeline[idx].wait_for_count() != 0 {
+      continue;
+    }
+
     let nexts: Vec<usize> = rom.pipeline[idx].next.clone();
     for next_idx in nexts {
       rom.pipeline[next_idx].dec_wait_for();
     }
+  }
+}
+
+/// Update the ROM's UI bar to reflect its restored pipeline state.
+///
+/// Must be called after `apply_run_state`. Places each ROM in the correct
+/// panel so the user sees:
+/// - already-completed ROMs in the Completed panel,
+/// - ROMs waiting for downloads in the Downloads panel,
+/// - ROMs waiting for packaging in the Discovery panel (Packaging sub-phase),
+/// - ROMs still in Discovery unchanged (default "queued" state).
+pub fn restore_bar_for_resumed_rom(rom: &Rom) {
+  let pipeline = &rom.pipeline;
+  let last = pipeline.len() - 1;
+
+  // ROM was fully completed in the previous run.
+  match &pipeline[last].status {
+    StepStatus::Done | StepStatus::Skipped => {
+      rom.bar.finish(false);
+      return;
+    }
+    StepStatus::Failed(_) => {
+      rom.bar.finish_error();
+      return;
+    }
+    _ => {}
+  }
+
+  // Find the first step that still needs to run to infer the current phase.
+  let first_pending = pipeline
+    .iter()
+    .find(|s| s.status == StepStatus::Pending)
+    .map(|s| &s.kind);
+
+  match first_pending {
+    Some(StepKind::BuildPackage) => {
+      rom.bar.preparing_pending();
+    }
+    Some(
+      StepKind::CopyRom | StepKind::DownloadRom | StepKind::DownloadMedias | StepKind::SaveState,
+    ) => {
+      rom.bar.downloading_pending();
+    }
+    // ComputeHashes / LookupSS / WaitModal → still in Discovering phase.
+    // The bar was initialised to "queued / Discovering" in new_rom_bar(); no change needed.
+    _ => {}
   }
 }

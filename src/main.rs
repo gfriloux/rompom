@@ -193,7 +193,9 @@ fn main() {
   // Collect RomSourceData for all matching files first (total unknown),
   // then create bars and Rom structs once the total is known.
 
-  let ui = Ui::new();
+  let interrupted = Arc::new(AtomicBool::new(false));
+  let queue = TaskQueue::new();
+  let ui = Ui::new(Arc::clone(&interrupted), Arc::clone(&queue));
   let mut sources: Vec<RomSourceData> = Vec::new();
 
   match &source {
@@ -293,6 +295,7 @@ fn main() {
         .find(|r| r.filename == rom.source.filename)
       {
         worker::apply_run_state(&mut rom, entry);
+        worker::restore_bar_for_resumed_rom(&rom);
       }
     }
   }
@@ -316,7 +319,6 @@ fn main() {
   let ss = Arc::new(ss);
   let system = Arc::new(system);
   let lang = Arc::new(conf.lang);
-  let queue = TaskQueue::new();
 
   // Count ROMs whose SaveState step still needs to run.
   let remaining_count = all_roms
@@ -330,8 +332,6 @@ fn main() {
       )
     })
     .count();
-
-  let interrupted = Arc::new(AtomicBool::new(false));
 
   // ── Ctrl-C handler ────────────────────────────────────────────────────
 

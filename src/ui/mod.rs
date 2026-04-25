@@ -13,11 +13,13 @@ use std::{
 
 use crossbeam_channel as channel;
 use crossterm::{
+  event::{Event, KeyCode, KeyEventKind, KeyModifiers},
   execute,
   terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::{backend::CrosstermBackend, style::Color, Terminal};
 
+use crate::queue::TaskQueue;
 use crate::summary::Summary;
 
 use modal::show_modal;
@@ -321,7 +323,7 @@ impl RomBar {
 // ── Ui ─────────────────────────────────────────────────────────────────────
 
 impl Ui {
-  pub fn new() -> Self {
+  pub fn new(interrupted: Arc<AtomicBool>, queue: Arc<TaskQueue>) -> Self {
     let state = Arc::new(Mutex::new(AppState {
       roms: Vec::new(),
       total: 0,
@@ -334,6 +336,8 @@ impl Ui {
     let running = Arc::new(AtomicBool::new(true));
     let state_r = Arc::clone(&state);
     let running_r = Arc::clone(&running);
+    let interrupted_r = Arc::clone(&interrupted);
+    let queue_r = Arc::clone(&queue);
 
     let (modal_tx, modal_rx) = channel::unbounded::<ModalRequest>();
 
@@ -354,9 +358,19 @@ impl Ui {
           .unwrap();
 
         if let Ok(req) = modal_rx.try_recv() {
-          show_modal(req, &mut terminal, &state_r);
-        } else {
-          thread::sleep(Duration::from_millis(TICK_MS));
+          show_modal(req, &mut terminal, &state_r, &interrupted_r, &queue_r);
+        } else if crossterm::event::poll(Duration::from_millis(TICK_MS)).unwrap_or(false) {
+          if let Ok(Event::Key(key)) = crossterm::event::read() {
+            if key.kind == KeyEventKind::Press
+              && key.code == KeyCode::Char('c')
+              && key.modifiers.contains(KeyModifiers::CONTROL)
+            {
+              if interrupted_r.swap(true, Ordering::SeqCst) {
+                std::process::exit(1);
+              }
+              queue_r.shutdown();
+            }
+          }
         }
       }
 

@@ -1,14 +1,18 @@
 use std::{
   io,
-  sync::{Arc, Mutex},
+  sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, Mutex,
+  },
   time::Duration,
 };
 
-use crossterm::event::{Event, KeyCode, KeyEventKind};
+use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers};
 use ratatui::{backend::CrosstermBackend, Terminal};
 
 use super::render::render;
 use super::{AppState, ModalDisplayState, ModalMode, ModalRequest, ModalResponse};
+use crate::queue::TaskQueue;
 
 // ── Modal interaction loop ─────────────────────────────────────────────────
 
@@ -21,7 +25,15 @@ pub(super) fn show_modal(
   req: ModalRequest,
   terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
   state: &Arc<Mutex<AppState>>,
+  interrupted: &Arc<AtomicBool>,
+  queue: &Arc<TaskQueue>,
 ) {
+  // If already interrupted (Ctrl-C pressed before we got here), cancel immediately.
+  if interrupted.load(Ordering::SeqCst) {
+    let _ = req.response.send(ModalResponse::Cancelled);
+    return;
+  }
+
   // Drain buffered events so stray keypresses don't close the modal immediately.
   while crossterm::event::poll(Duration::ZERO).unwrap_or(false) {
     let _ = crossterm::event::read();
@@ -59,6 +71,15 @@ pub(super) fn show_modal(
       if let Ok(Event::Key(key)) = crossterm::event::read() {
         if key.kind != KeyEventKind::Press {
           continue;
+        }
+        if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+          let _ = req.response.send(ModalResponse::Cancelled);
+          state.lock().unwrap().modal = None;
+          if interrupted.swap(true, Ordering::SeqCst) {
+            std::process::exit(1);
+          }
+          queue.shutdown();
+          return;
         }
         match mode.clone() {
           ModalMode::List => match key.code {

@@ -206,7 +206,9 @@ pub(crate) fn handle_lookup_ss(
   };
 
   // ── SS lookup (semaphore limits concurrency to user's SS tier) ────────
-  ctx.ss_sem.acquire();
+  if !ctx.ss_sem.acquire() {
+    return Err("interrupted".to_string());
+  }
   let ji = if let Some(gid) = cached_game_id {
     ctx.ss.jeuinfo_by_gameid(ctx.system.id, gid).ok()
   } else {
@@ -230,7 +232,9 @@ pub(crate) fn handle_lookup_ss(
     Ok(StepStatus::Done)
   } else {
     // ── Not found: run jeu_recherche and hand off to WaitModal ────────
-    ctx.ss_sem.acquire();
+    if !ctx.ss_sem.acquire() {
+      return Err("interrupted".to_string());
+    }
     let search_results = ctx
       .ss
       .jeu_recherche(Some(ctx.system.id), &search_name(&filename))
@@ -311,7 +315,9 @@ pub(crate) fn handle_wait_modal(
   rom_arc.lock().unwrap().bar.waiting_for_user();
 
   // Serialise modal display: only one modal open at a time.
-  ctx.modal_sem.acquire();
+  if !ctx.modal_sem.acquire() {
+    return Err("interrupted".to_string());
+  }
 
   let (resp_tx, resp_rx) = crossbeam_channel::bounded::<ModalResponse>(1);
   let ss_for_closure = Arc::clone(&ctx.ss);
@@ -344,7 +350,9 @@ pub(crate) fn handle_wait_modal(
   let jeu = match response {
     ModalResponse::SelectedId(id) | ModalResponse::ManualId(id) => {
       id.parse::<u32>().ok().and_then(|gid| {
-        ctx.ss_sem.acquire();
+        if !ctx.ss_sem.acquire() {
+          return None; // interrupted
+        }
         let result = ctx.ss.jeuinfo_by_gameid(ctx.system.id, gid).ok();
         ctx.ss_sem.release();
         result

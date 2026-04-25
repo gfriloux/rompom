@@ -1,4 +1,10 @@
-use std::sync::{Arc, Condvar, Mutex};
+use std::{
+  sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, Condvar, Mutex,
+  },
+  time::Duration,
+};
 
 use crate::rom::Rom;
 
@@ -12,6 +18,7 @@ use crate::rom::Rom;
 pub struct Semaphore {
   available: Mutex<usize>,
   cvar: Condvar,
+  cancelled: AtomicBool,
 }
 
 impl Semaphore {
@@ -19,16 +26,28 @@ impl Semaphore {
     Arc::new(Self {
       available: Mutex::new(count),
       cvar: Condvar::new(),
+      cancelled: AtomicBool::new(false),
     })
   }
 
-  /// Acquires one permit, blocking if none are available.
-  pub fn acquire(&self) {
+  /// Acquires one permit. Returns `true` on success, `false` if cancelled.
+  /// Wakes up periodically to check the cancelled flag.
+  pub fn acquire(&self) -> bool {
     let mut avail = self.available.lock().unwrap();
-    while *avail == 0 {
-      avail = self.cvar.wait(avail).unwrap();
+    loop {
+      if *avail > 0 {
+        *avail -= 1;
+        return true;
+      }
+      if self.cancelled.load(Ordering::Relaxed) {
+        return false;
+      }
+      let (guard, _) = self
+        .cvar
+        .wait_timeout(avail, Duration::from_millis(50))
+        .unwrap();
+      avail = guard;
     }
-    *avail -= 1;
   }
 
   /// Releases one permit, unblocking a waiting caller if any.
@@ -36,6 +55,13 @@ impl Semaphore {
     let mut avail = self.available.lock().unwrap();
     *avail += 1;
     self.cvar.notify_one();
+  }
+
+  /// Cancels all pending and future `acquire()` calls, causing them to
+  /// return `false`. Idempotent.
+  pub fn cancel(&self) {
+    self.cancelled.store(true, Ordering::SeqCst);
+    self.cvar.notify_all();
   }
 }
 

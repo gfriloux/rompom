@@ -2,7 +2,10 @@ mod handlers;
 mod helpers;
 mod run_state;
 
-pub use run_state::{apply_run_state, collect_run_state, load_run_state, save_run_state, RunState};
+pub use run_state::{
+  apply_run_state, collect_run_state, load_run_state, restore_bar_for_resumed_rom, save_run_state,
+  RunState,
+};
 
 use handlers::*;
 
@@ -55,6 +58,11 @@ pub fn worker_loop_main(ctx: Arc<WorkerContext>) {
     }
     execute_step(rom_arc, step_idx, &ctx);
   }
+  // Unblock workers stuck in Semaphore::acquire() so they can exit cleanly.
+  if ctx.interrupted.load(Ordering::Relaxed) {
+    ctx.ss_sem.cancel();
+    ctx.modal_sem.cancel();
+  }
 }
 
 /// Blocking worker — handles `WaitModal` steps that need user input.
@@ -64,6 +72,10 @@ pub fn worker_loop_blocking(ctx: Arc<WorkerContext>) {
       break;
     }
     execute_step(rom_arc, step_idx, &ctx);
+  }
+  if ctx.interrupted.load(Ordering::Relaxed) {
+    ctx.ss_sem.cancel();
+    ctx.modal_sem.cancel();
   }
 }
 
@@ -107,6 +119,12 @@ fn execute_step(rom_arc: Arc<Mutex<Rom>>, step_idx: usize, ctx: &WorkerContext) 
 
   // Resolve final step status, handling retries.
   let final_status = match result {
+    // Handler was cancelled mid-way (semaphore acquire returned false).
+    // Reset to Pending so the step re-runs on resume; no dispatch.
+    Err(ref msg) if msg == "interrupted" => {
+      rom_arc.lock().unwrap().pipeline[step_idx].status = StepStatus::Pending;
+      return;
+    }
     Ok(s) => s,
     Err(msg) => {
       let (retry_count, max_retries) = {
