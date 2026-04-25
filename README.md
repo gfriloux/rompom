@@ -98,6 +98,46 @@ Each system entry:
 
 ## Changelog
 
+### v0.14.2
+
+**Bug fixes — Ctrl-C and interrupted-run resume.**
+
+- **Fix: Ctrl-C had no effect during a run** — `crossterm::enable_raw_mode()` clears the
+  POSIX `ISIG` flag, so pressing Ctrl-C no longer generates `SIGINT`; the `ctrlc` signal
+  handler never fired. Ctrl-C is now detected directly as a keyboard event inside the render
+  thread. It also works inside the identification modal.
+
+- **Fix: `.run.yml` was never written after Ctrl-C** — workers blocked in
+  `Semaphore::acquire()` (waiting for a free ScreenScraper slot) could not be unblocked
+  after `queue.shutdown()`. The main thread then hung indefinitely on `join()`, and the
+  run-state file was never written. `Semaphore` is now interruptible: `acquire()` returns
+  `false` when cancelled, and `cancel()` wakes all waiting threads.
+
+- **Fix: resume crashed with "attempt to subtract with overflow"** — `apply_run_state()`
+  decremented a step's `wait_for` counter even when its own predecessor had not completed
+  (e.g. `WaitModal` is `Skipped` by default, so its successor `BuildPackage` was decremented
+  on resume even though `LookupSS` had not run yet). When `LookupSS` then ran and dispatched
+  `WaitModal`, a second decrement underflowed to `usize::MAX`, causing a panic.
+  `apply_run_state` now guards each decrement: successors are only decremented if the step's
+  own `wait_for` has already reached 0 in the restored state.
+
+- **Fix: Discovery restarted from scratch on resume** — a post-handler interrupted check in
+  `execute_step` reset every step that completed just as the interrupt arrived — including
+  `LookupSS` that had finished successfully — back to `Pending`. On resume, these steps were
+  re-run from the beginning. Steps that complete normally are now always saved as `Done`.
+  Only handlers that are cancelled mid-way (via a semaphore cancel) return
+  `Err("interrupted")`, which is the sole trigger for resetting a step to `Pending`.
+
+- **Fix: resume UI showed all ROMs as "queued" in Discovery** — bars were re-initialized
+  fresh on every start. On resume, already-completed ROMs now appear immediately in the
+  Completed panel, ROMs awaiting downloads appear in the Downloads panel, and ROMs awaiting
+  packaging appear in the Discovery panel (Packaging sub-phase). Only ROMs still in Discovery
+  stay as "queued".
+
+**Migration from v0.14.1:** none — configuration file is unchanged.
+
+---
+
 ### v0.14.1
 
 **Internal refactor — no user-visible behavior change.**
