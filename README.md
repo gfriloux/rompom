@@ -98,6 +98,45 @@ Each system entry:
 
 ## Changelog
 
+### v0.14.0
+
+- **DAG-based pipeline** — the three separate thread pools (discovery / packaging / downloads)
+  have been replaced by a unified `TaskQueue` and two generic worker pools. Each ROM's pipeline
+  is now modeled as a directed acyclic graph (DAG) of `Step`s; each step is enqueued as soon
+  as its predecessors complete, so parallelism is maximised without artificial phase barriers.
+
+- **Interrupted-run resume** — on Ctrl-C, the current state of every ROM's pipeline is
+  persisted to `<system>.run.yml`. On the next invocation, rompom offers to resume from where
+  it left off. Selecting "no" deletes the file and starts fresh.
+
+- **description.xml change tracking** — changes to `description.xml` (new metadata from
+  ScreenScraper, genre/description update, etc.) now count as a package change: the `pkgver`
+  is bumped and the description icon (`󰗚`) appears in the Completed log for that ROM.
+
+- **Media icon colors** — the Completed log now distinguishes three states per media type:
+  - Green — downloaded or updated this run
+  - Gray — already up-to-date (SHA1 verified, unchanged)
+  - Red — not available on ScreenScraper
+
+- **`--debug` flag** — writes `<system>.debug.log` with per-ROM pipeline decisions
+  (`[ComputeHashes]`, `[LookupSS]`, `[BuildPackage]`), useful for understanding why a package
+  was rebuilt or skipped.
+
+- **Summary: total media coverage** — the end-of-run "Media coverage" table now counts all
+  ROMs that have the media asset present (downloaded or already up-to-date), not only those
+  updated during the current run. A second consecutive run on an unchanged system now shows
+  accurate coverage instead of zeros.
+
+- **Fix: ROM extension stripped from package name** — the file extension was incorrectly
+  included in the normalized package name (`pkgname`). It is now stripped before normalization.
+
+- **Nix: package + Home Manager module** — rompom is now installable via Nix. A Home Manager
+  module is available under `modules/home-manager/rompom`.
+
+**Migration from v0.13.x:** none — configuration file is unchanged.
+
+---
+
 ### v0.13.0
 
 - **Incremental update support** — re-running rompom on an already-processed system now
