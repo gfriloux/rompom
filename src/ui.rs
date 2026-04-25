@@ -419,7 +419,9 @@ impl Ui {
         let found = s
           .completed
           .iter()
-          .filter(|e| e.media_found.iter().any(|k| k == kind))
+          .filter(|e| {
+            e.media_found.iter().any(|k| k == kind) || e.media_unchanged.iter().any(|k| k == kind)
+          })
           .count();
         (kind, icon, found)
       })
