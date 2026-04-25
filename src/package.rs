@@ -51,6 +51,23 @@ fn render_template(src: &str, ctx: &minijinja::Value) -> String {
   env.get_template("t").unwrap().render(ctx).unwrap()
 }
 
+fn generate_description_xml(game: &Game) -> String {
+  let mut xml = String::new();
+  let mut ser = quick_xml::se::Serializer::new(&mut xml);
+  ser.indent(' ', 2);
+  game.serialize(ser).unwrap();
+  xml
+}
+
+/// Sets `game.path` to the system-specific value without performing any I/O.
+fn apply_game_path(system: &System, game: &mut Game, romname: &str) {
+  match system.id {
+    214 => game.path = format!("./{}.sh", game.name),
+    22 | 57 => game.path = format!("./{}.m3u", romname),
+    _ => {}
+  }
+}
+
 /// Lit le `pkgver` depuis un PKGBUILD existant. Retourne 0 si le fichier
 /// n'existe pas ou ne contient pas de `pkgver=N` valide.
 /// L'appelant incrémente de 1 pour obtenir le prochain pkgver.
@@ -113,36 +130,33 @@ impl Package {
     })
   }
 
-  fn write_description_xml(&self, game: &Game, directory: &Path) -> Result<()> {
-    let mut xml = String::new();
-    let mut ser = quick_xml::se::Serializer::new(&mut xml);
-    ser.indent(' ', 2);
-    game.serialize(ser).unwrap();
-
+  /// Writes description.xml only when the content has changed.
+  /// Returns `true` if the file was written (new or updated), `false` if unchanged.
+  fn write_description_xml(&self, game: &Game, directory: &Path) -> Result<bool> {
+    let xml = generate_description_xml(game);
     let path = format!("{}/description.xml", directory.display());
-    std::fs::write(&path, xml).context(WriteResultSnafu { filename: path })
+    let existing = std::fs::read_to_string(&path).unwrap_or_default();
+    if existing == xml {
+      return Ok(false);
+    }
+    std::fs::write(&path, &xml).context(WriteResultSnafu { filename: path })?;
+    Ok(true)
   }
 
   fn write_launcher(&self, system: &System, game: &mut Game, romname: &str) -> Result<()> {
-    match system.id {
-      214 => {
-        let ctx = context! {
-          rom => self.rom.replace("'", "'\\''"),
-        };
-        let launcher = render_template(
-          include_str!("../assets/templates/launcher/openbor.jinja"),
-          &ctx,
-        );
-        std::fs::write("./launcher", launcher).context(WriteResultSnafu {
-          filename: "./launcher".to_string(),
-        })?;
-        game.path = format!("./{}.sh", game.name);
-      }
-      22 | 57 => {
-        game.path = format!("./{}.m3u", romname);
-      }
-      _ => {}
+    if system.id == 214 {
+      let ctx = context! {
+        rom => self.rom.replace("'", "'\\''"),
+      };
+      let launcher = render_template(
+        include_str!("../assets/templates/launcher/openbor.jinja"),
+        &ctx,
+      );
+      std::fs::write("./launcher", launcher).context(WriteResultSnafu {
+        filename: "./launcher".to_string(),
+      })?;
     }
+    apply_game_path(system, game, romname);
     Ok(())
   }
 
@@ -289,7 +303,9 @@ impl Package {
     std::fs::write(&path, pkgbuild).context(WriteResultSnafu { filename: path })
   }
 
-  pub fn build(&mut self, system: &System, lang: &[&str], pkgver: u32) -> Result<()> {
+  /// Builds the complete `Game` struct with all media paths and system-specific
+  /// path applied. Used by both `build()` and `check_description_changed()`.
+  fn make_game(&self, system: &System, lang: &[&str]) -> (Game, String) {
     let romname = self.normalize_name();
     let mut game = Game::from_jeuinfo(&self.jeu, &self.rom, lang);
 
@@ -315,14 +331,33 @@ impl Package {
       game.manual = Some(format!("./data/{}/manual.pdf", romname));
     }
 
+    apply_game_path(system, &mut game, &romname);
+    (game, romname)
+  }
+
+  /// Returns `true` if generating description.xml now would produce content
+  /// different from what is already on disk (or if the file doesn't exist yet).
+  /// Does not write anything.
+  pub fn check_description_changed(&self, system: &System, lang: &[&str]) -> bool {
+    let (game, _) = self.make_game(system, lang);
+    let directory = Path::new(&self.rom).with_extension("");
+    let xml = generate_description_xml(&game);
+    let existing = std::fs::read_to_string(directory.join("description.xml")).unwrap_or_default();
+    existing != xml
+  }
+
+  /// Builds PKGBUILD + description.xml. Returns `true` if description.xml was
+  /// written (new or updated content), `false` if it was already up-to-date.
+  pub fn build(&mut self, system: &System, lang: &[&str], pkgver: u32) -> Result<bool> {
+    let (mut game, romname) = self.make_game(system, lang);
+
     self.write_launcher(system, &mut game, &romname)?;
 
     let directory = Path::new(&self.rom).with_extension("");
     create_dir_all(&directory).ok();
 
-    self.write_description_xml(&game, &directory)?;
-
+    let description_changed = self.write_description_xml(&game, &directory)?;
     self.build_pkgbuild(system, &game, pkgver)?;
-    Ok(())
+    Ok(description_changed)
   }
 }

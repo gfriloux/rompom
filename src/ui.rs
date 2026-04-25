@@ -33,6 +33,7 @@ const PANEL_HEIGHT: u16 = 12;
 /// Canonical media types with their display icon.
 /// Order here is the order icons appear in the Completed log and summary.
 pub(crate) const MEDIA_ICONS: &[(&str, &str)] = &[
+  ("description", "󰗚"),
   ("video", "󰕧"),
   ("image", "󰋩"),
   ("thumbnail", "󰋫"),

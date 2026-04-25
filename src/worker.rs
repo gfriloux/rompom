@@ -734,7 +734,12 @@ fn handle_build_package(
 
   let mut package = Package::new(jeu, &filename, &rom_url, &sha1).map_err(|e| e.to_string())?;
 
-  // ── Delta check: skip build if ROM + all media sha1s are unchanged ─────
+  let lang_refs: Vec<&str> = ctx.lang.iter().map(|s| s.as_str()).collect();
+
+  // Check if description.xml content would change (pure read, no I/O side effect).
+  let description_changed = package.check_description_changed(&ctx.system, &lang_refs);
+
+  // ── Delta check: skip build if ROM + all media sha1s + description are unchanged ─
   let (package_changed, debug_lines) = {
     let state = ctx.state.lock().unwrap();
     match state.roms.get(&filename) {
@@ -751,9 +756,15 @@ fn handle_build_package(
           (true, vec![line])
         } else {
           let (media_changed, mut lines) = check_media_changes(&package.medias, &prev.medias);
-          if media_changed {
+          if description_changed {
+            lines.push("[BuildPackage] description.xml  : CHANGED".to_string());
+          } else {
+            lines.push("[BuildPackage] description.xml  : ok       (unchanged)".to_string());
+          }
+          if media_changed || description_changed {
             lines.push(
-              "[BuildPackage] → package_changed: true (media sha1 mismatch above)".to_string(),
+              "[BuildPackage] → package_changed: true (media or description mismatch above)"
+                .to_string(),
             );
             (true, lines)
           } else {
@@ -769,10 +780,16 @@ fn handle_build_package(
   if package_changed {
     let dir = Path::new(&filename).with_extension("");
     let pkgver = read_pkgver(&dir) + 1;
-    let lang_refs: Vec<&str> = ctx.lang.iter().map(|s| s.as_str()).collect();
     package
       .build(&ctx.system, &lang_refs, pkgver)
       .map_err(|e| e.to_string())?;
+  }
+
+  // Show description.xml icon: green if written/updated, gray if unchanged.
+  if description_changed {
+    rom_arc.lock().unwrap().bar.media_done("description");
+  } else {
+    rom_arc.lock().unwrap().bar.media_skipped("description");
   }
 
   // Move results back into rom.
