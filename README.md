@@ -98,6 +98,21 @@ Each system entry:
 
 ## Changelog
 
+### v0.14.1
+
+**Internal refactor — no user-visible behavior change.**
+
+The four largest source files have been split into focused sub-modules:
+
+- `worker.rs` → `worker/{mod, run_state, helpers, handlers/{discovery, packaging, downloads, save_state}}`
+- `ui.rs` → `ui/{mod, render, modal}`
+- `conf.rs` → `conf/{mod, update}`
+- `rom.rs` → `rom/{mod, step, source}`
+
+No migration required.
+
+---
+
 ### v0.14.0
 
 - **DAG-based pipeline** — the three separate thread pools (discovery / packaging / downloads)
