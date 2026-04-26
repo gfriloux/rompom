@@ -1,5 +1,48 @@
 # Changelog
 
+### v0.15.0
+
+**Multi-disc support.**
+
+- **Multi-disc games are now packaged as a single unit** — files whose stems contain a disc
+  indicator (`(Disc N)`, `(Disk N)`, `(CD N)`) and share the same base name and extension are
+  automatically grouped during collection into one `RomSourceData` entry. A single PKGBUILD,
+  `description.xml`, and state entry are produced for the whole game.
+
+  Examples of matched patterns:
+  - `Panzer Dragoon Saga (Disc 1).chd` + `(Disc 2).chd` + `(Disc 3).chd` + `(Disc 4).chd`
+  - `Enemy Zero (USA) (Disc 0).zip` + `(Disc 1).zip` + `(Disc 2).zip` + `(Disc 3).zip`
+  - `Game (CD1).bin` + `(CD2).bin`
+
+  Disc numbering starts at 0 or 1 and the detector scans all parenthesised groups in the
+  filename, so region tags like `(USA)` before the disc indicator are handled correctly.
+
+- **All disc files appear as sources in the PKGBUILD** — each disc gets its own entry in the
+  `source` array with its actual filename and SHA1.
+
+- **PKGBUILD `build()` / `package()` use the real file extension** — the templates that
+  generate the `.m3u` playlist and install the disc files now use `*.{{ ext }}` (e.g. `*.zip`,
+  `*.chd`) instead of the previously hardcoded `*.chd`. This affects the `psx`, `ps2`, and new
+  `multidisc` template pairs.
+
+- **`rom_unchanged` checks all discs** — on subsequent runs, the fast-skip logic verifies the
+  SHA1 of every disc file (stored in `<system>.state.yml` under `extra_disc_sha1s`). A package
+  is only marked unchanged if all discs and all media assets are unmodified.
+
+- **Bug fix: media file extensions in PKGBUILD sources** — the local source names for `bezel`,
+  `image`, `thumbnail`, `marquee`, `screenshot`, and `wheel` were previously hardcoded to `.png`
+  regardless of the actual format served by ScreenScraper. They now use the real format (e.g.
+  `image.jpg` when ScreenScraper serves a JPEG).
+
+**New files:**
+- `assets/templates/pkgbuild/multidisc-build.jinja`
+- `assets/templates/pkgbuild/multidisc-package.jinja`
+
+**Migration from v0.14.x:** none — configuration file is unchanged.
+Existing single-disc state files are forward-compatible (`extra_disc_sha1s` defaults to `[]`).
+
+---
+
 ### v0.14.2
 
 **Bug fixes — Ctrl-C and interrupted-run resume.**
