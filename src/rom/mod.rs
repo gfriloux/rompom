@@ -1,7 +1,7 @@
 mod source;
 mod step;
 
-pub use source::{FolderSource, IaSource, RomSource, RomSourceData};
+pub use source::{DiscFile, FolderSource, IaSource, RomSource, RomSourceData};
 pub use step::{Step, StepData, StepKind, StepStatus};
 
 use std::sync::{Arc, Mutex};
@@ -39,6 +39,11 @@ pub struct Rom {
   pub romname: Option<String>,
   /// True when both ROM and all media sha1s match the saved state → build skipped.
   pub package_unchanged: bool,
+  /// SHA-1 hashes for extra discs (disc 2, 3, …).
+  /// For IA sources: seeded from IA metadata during collection.
+  /// For folder sources: computed by `ComputeHashes`.
+  /// Empty for single-disc games.
+  pub extra_disc_sha1s: Vec<String>,
   /// Per-step decision log lines, appended throughout the pipeline.
   /// Written to `<system>.debug.log` at the end of `SaveState` when `--debug` is set.
   pub debug_log: Vec<String>,
@@ -141,6 +146,7 @@ impl Rom {
       medias: None,
       romname: None,
       package_unchanged: false,
+      extra_disc_sha1s: Vec::new(),
       debug_log: Vec::new(),
     }))
   }
@@ -221,6 +227,13 @@ impl Rom {
       ),
     ];
 
+    // Seed extra_disc_sha1s from IA metadata (already available, no ComputeHashes needed).
+    let extra_disc_sha1s: Vec<String> = source
+      .extra_discs
+      .iter()
+      .map(|d| d.sha1.clone().unwrap_or_default())
+      .collect();
+
     Arc::new(Mutex::new(Self {
       source,
       pipeline,
@@ -235,6 +248,7 @@ impl Rom {
       medias: None,
       romname: None,
       package_unchanged: false,
+      extra_disc_sha1s,
       debug_log: Vec::new(),
     }))
   }

@@ -22,18 +22,54 @@ pub(crate) fn handle_build_package(
   ctx: &WorkerContext,
 ) -> Result<StepStatus, String> {
   // Extract what we need, releasing the lock before expensive I/O.
-  let (filename, sha1, rom_url, jeu, rom_unchanged) = {
+  let (filename, disc1_filename, sha1, rom_url, extra_discs_info, jeu, rom_unchanged) = {
     let mut rom = rom_arc.lock().unwrap();
     let jeu = rom.jeu.take(); // Package::new takes ownership; we'll put it back
     let sha1 = rom.sha1.clone().unwrap_or_default();
-    let rom_url = match &rom.source.source {
-      RomSource::InternetArchive(ia) => ia.rom_url.clone(),
-      RomSource::Folder(_) => String::new(),
+    let (rom_url, extra_discs_info) = match &rom.source.source {
+      RomSource::InternetArchive(ia) => {
+        let extras: Vec<(String, String, String)> = rom
+          .source
+          .extra_discs
+          .iter()
+          .map(|d| {
+            (
+              d.filename.clone(),
+              d.rom_url.clone(),
+              d.sha1.clone().unwrap_or_default(),
+            )
+          })
+          .collect();
+        (ia.rom_url.clone(), extras)
+      }
+      RomSource::Folder(_) => {
+        let extras: Vec<(String, String, String)> = rom
+          .source
+          .extra_discs
+          .iter()
+          .map(|d| {
+            (
+              d.filename.clone(),
+              String::new(),
+              d.sha1.clone().unwrap_or_default(),
+            )
+          })
+          .collect();
+        (String::new(), extras)
+      }
     };
+    // Actual disc-1 filename (differs from virtual filename for multi-disc games).
+    let disc1_filename = Path::new(&rom.source.file_name)
+      .file_name()
+      .and_then(|n| n.to_str())
+      .unwrap_or(&rom.source.filename)
+      .to_string();
     (
       rom.source.filename.clone(),
+      disc1_filename,
       sha1,
       rom_url,
+      extra_discs_info,
       jeu,
       rom.rom_unchanged,
     )
@@ -41,7 +77,15 @@ pub(crate) fn handle_build_package(
 
   rom_arc.lock().unwrap().bar.preparing();
 
-  let mut package = Package::new(jeu, &filename, &rom_url, &sha1).map_err(|e| e.to_string())?;
+  let mut package = Package::new(
+    jeu,
+    &filename,
+    &disc1_filename,
+    &rom_url,
+    &sha1,
+    extra_discs_info,
+  )
+  .map_err(|e| e.to_string())?;
 
   let lang_refs: Vec<&str> = ctx.lang.iter().map(|s| s.as_str()).collect();
 

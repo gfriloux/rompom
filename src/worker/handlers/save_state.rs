@@ -59,6 +59,7 @@ pub(crate) fn handle_save_state(
       rom_mtime: rom.mtime,
       rom_size: rom.size,
       medias,
+      extra_disc_sha1s: rom.extra_disc_sha1s.clone(),
     };
     (
       rom.source.filename.clone(),

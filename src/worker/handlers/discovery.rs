@@ -27,13 +27,20 @@ pub(crate) fn handle_compute_hashes(
   _step_idx: usize,
   ctx: &WorkerContext,
 ) -> Result<StepStatus, String> {
-  let (filename, local_path) = {
+  let (filename, local_path, extra_disc_paths) = {
     let rom = rom_arc.lock().unwrap();
     let path = match &rom.source.source {
       RomSource::Folder(f) => f.local_path.clone(),
       _ => unreachable!("ComputeHashes only runs on folder sources"),
     };
-    (rom.source.filename.clone(), path)
+    // Collect extra disc local paths for hash computation below.
+    let extra_paths: Vec<std::path::PathBuf> = rom
+      .source
+      .extra_discs
+      .iter()
+      .map(|d| d.local_path.clone().unwrap_or_default())
+      .collect();
+    (rom.source.filename.clone(), path, extra_paths)
   };
 
   rom_arc.lock().unwrap().bar.discovering();
@@ -94,6 +101,16 @@ pub(crate) fn handle_compute_hashes(
     rom.size = size;
   }
 
+  // ── Compute sha1 for extra discs (no fast-path for multi-disc extras) ────
+  let extra_disc_sha1s: Vec<String> = extra_disc_paths
+    .iter()
+    .map(|p| hash_file(p, Algorithm::SHA1).to_lowercase())
+    .collect();
+
+  if !extra_disc_sha1s.is_empty() {
+    rom_arc.lock().unwrap().extra_disc_sha1s = extra_disc_sha1s.clone();
+  }
+
   // ── Check if ROM is unchanged based on saved state ────────────────────
   let sha1_now: Option<String> = rom_arc.lock().unwrap().sha1.clone();
   let (unchanged, state_rom_sha1) = {
@@ -102,8 +119,15 @@ pub(crate) fn handle_compute_hashes(
       None => (None, None),
       Some(entry) => {
         let current = sha1_now.as_deref().unwrap_or("");
-        let u = !current.is_empty() && entry.rom_sha1 == current;
-        (Some(u), Some(entry.rom_sha1.clone()))
+        let disc1_ok = !current.is_empty() && entry.rom_sha1 == current;
+        // Also verify extra discs match in count and sha1.
+        let extras_ok = entry.extra_disc_sha1s.len() == extra_disc_sha1s.len()
+          && entry
+            .extra_disc_sha1s
+            .iter()
+            .zip(&extra_disc_sha1s)
+            .all(|(saved, cur)| !cur.is_empty() && saved == cur);
+        (Some(disc1_ok && extras_ok), Some(entry.rom_sha1.clone()))
       }
     }
   };
@@ -163,14 +187,27 @@ pub(crate) fn handle_lookup_ss(
 
   // ── For IA sources: determine rom_unchanged here (no ComputeHashes ran) ─
   if is_ia_source {
+    // Collect extra-disc sha1s from the source (seeded at collection time).
+    let extra_disc_sha1s_current: Vec<String> = {
+      let rom = rom_arc.lock().unwrap();
+      rom.extra_disc_sha1s.clone()
+    };
+
     let (unchanged, state_rom_sha1) = {
       let state = ctx.state.lock().unwrap();
       match state.roms.get(&filename) {
         None => (None, None),
         Some(entry) => {
           let current = sha1.as_deref().unwrap_or("");
-          let u = !current.is_empty() && entry.rom_sha1 == current;
-          (Some(u), Some(entry.rom_sha1.clone()))
+          let disc1_ok = !current.is_empty() && entry.rom_sha1 == current;
+          // Extra discs must match in count and sha1.
+          let extras_ok = entry.extra_disc_sha1s.len() == extra_disc_sha1s_current.len()
+            && entry
+              .extra_disc_sha1s
+              .iter()
+              .zip(&extra_disc_sha1s_current)
+              .all(|(saved, current)| !current.is_empty() && saved == current);
+          (Some(disc1_ok && extras_ok), Some(entry.rom_sha1.clone()))
         }
       }
     };

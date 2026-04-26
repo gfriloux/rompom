@@ -20,12 +20,17 @@ pub struct Medias {
 }
 
 pub struct Package {
+  /// Logical/virtual ROM name (without disc indicator for multi-disc games).
   pub rom: String,
+  /// Actual disc-1 filename (equals `rom` for single-disc games).
+  pub disc1_filename: String,
   pub rom_url: String,
   pub hash: String,
   pub jeu: Option<JeuInfo>,
   pub name: String,
   pub medias: Medias,
+  /// (filename, rom_url, sha1) for disc 2, 3, …  Empty for single-disc.
+  pub extra_discs: Vec<(String, String, String)>,
 }
 
 #[derive(Debug, Snafu)]
@@ -60,10 +65,14 @@ fn generate_description_xml(game: &Game) -> String {
 }
 
 /// Sets `game.path` to the system-specific value without performing any I/O.
-fn apply_game_path(system: &System, game: &mut Game, romname: &str) {
+///
+/// `is_multi_disc` is true when the ROM is part of a multi-disc group; any
+/// system (except OpenBOR) will then use a `.m3u` playlist as the game path.
+fn apply_game_path(system: &System, game: &mut Game, romname: &str, is_multi_disc: bool) {
   match system.id {
     214 => game.path = format!("./{}.sh", game.name),
     22 | 57 => game.path = format!("./{}.m3u", romname),
+    _ if is_multi_disc => game.path = format!("./{}.m3u", romname),
     _ => {}
   }
 }
@@ -109,7 +118,14 @@ impl Package {
       .to_lowercase()
   }
 
-  pub fn new(mut jeu: Option<JeuInfo>, file: &str, url: &str, hash: &str) -> Result<Package> {
+  pub fn new(
+    mut jeu: Option<JeuInfo>,
+    file: &str,
+    disc1_filename: &str,
+    url: &str,
+    hash: &str,
+    extra_discs: Vec<(String, String, String)>,
+  ) -> Result<Package> {
     let medias = match jeu {
       Some(ref mut x) => Medias {
         image: x.media("sstitle"),
@@ -125,12 +141,19 @@ impl Package {
     };
     Ok(Package {
       rom: file.to_string(),
+      disc1_filename: disc1_filename.to_string(),
       rom_url: url.to_string(),
       hash: hash.to_string(),
       jeu,
       name: file.to_string(),
       medias,
+      extra_discs,
     })
+  }
+
+  /// Returns `true` when this ROM is part of a multi-disc group.
+  pub fn is_multi_disc(&self) -> bool {
+    !self.extra_discs.is_empty()
   }
 
   /// Writes description.xml only when the content has changed.
@@ -159,13 +182,12 @@ impl Package {
         filename: "./launcher".to_string(),
       })?;
     }
-    apply_game_path(system, game, romname);
+    apply_game_path(system, game, romname, self.is_multi_disc());
     Ok(())
   }
 
   pub fn build_pkgbuild(&mut self, system: &System, game: &Game, pkgver: u32) -> Result<()> {
     let romname = self.normalize_name();
-    let sourcerom = self.rom.replace("'", "'\\''");
     let rom_escaped = self.rom.replace("$", "\\$");
     let directory = Path::new(&self.rom).with_extension("");
     let jeu_id = self.jeu.as_ref().map(|j| j.id.as_str()).unwrap_or("");
@@ -174,8 +196,17 @@ impl Package {
     let mut sources: Vec<String> = Vec::new();
     let mut sha1sums: Vec<String> = Vec::new();
 
-    sources.push(format!("{}::{}", sourcerom, self.rom_url));
+    // Disc 1 (or the only disc for single-disc games).
+    let disc1_escaped = self.disc1_filename.replace("'", "'\\''");
+    sources.push(format!("{}::{}", disc1_escaped, self.rom_url));
     sha1sums.push(self.hash.clone());
+
+    // Extra discs (disc 2, 3, …).
+    for (disc_filename, disc_url, disc_sha1) in &self.extra_discs {
+      let escaped = disc_filename.replace("'", "'\\''");
+      sources.push(format!("{}::{}", escaped, disc_url));
+      sha1sums.push(disc_sha1.clone());
+    }
 
     sources.push("description.xml".to_string());
     sha1sums.push(checksums::hash_file(
@@ -192,7 +223,8 @@ impl Package {
     }
     if let Some(ref x) = self.medias.bezel {
       sources.push(format!(
-        "bezel.png::https://screenscraper.fr/medias/{}/{}/bezel-16-9({}).{}",
+        "bezel.{}::https://screenscraper.fr/medias/{}/{}/bezel-16-9({}).{}",
+        x.format,
         system.id,
         jeu_id,
         x.region.as_deref().unwrap_or("wor"),
@@ -202,7 +234,8 @@ impl Package {
     }
     if let Some(ref x) = self.medias.image {
       sources.push(format!(
-        "image.png::https://screenscraper.fr/medias/{}/{}/{}.{}",
+        "image.{}::https://screenscraper.fr/medias/{}/{}/{}.{}",
+        x.format,
         system.id,
         jeu_id,
         media_region(&x.url),
@@ -212,23 +245,26 @@ impl Package {
     }
     if let Some(ref x) = self.medias.thumbnail {
       sources.push(format!(
-        "thumbnail.png::https://screenscraper.fr/medias/{}/{}/{}.png",
+        "thumbnail.{}::https://screenscraper.fr/medias/{}/{}/{}.{}",
+        x.format,
         system.id,
         jeu_id,
-        media_region(&x.url)
+        media_region(&x.url),
+        x.format
       ));
       sha1sums.push(x.sha1.clone());
     }
     if let Some(ref x) = self.medias.marquee {
       sources.push(format!(
-        "marquee.png::https://screenscraper.fr/medias/{}/{}/marquee.{}",
-        system.id, jeu_id, x.format
+        "marquee.{}::https://screenscraper.fr/medias/{}/{}/marquee.{}",
+        x.format, system.id, jeu_id, x.format
       ));
       sha1sums.push(x.sha1.clone());
     }
     if let Some(ref x) = self.medias.screenshot {
       sources.push(format!(
-        "screenshot.png::https://screenscraper.fr/medias/{}/{}/ss({}).{}",
+        "screenshot.{}::https://screenscraper.fr/medias/{}/{}/ss({}).{}",
+        x.format,
         system.id,
         jeu_id,
         x.region.as_deref().unwrap_or("wor"),
@@ -238,7 +274,8 @@ impl Package {
     }
     if let Some(ref x) = self.medias.wheel {
       sources.push(format!(
-        "wheel.png::https://screenscraper.fr/medias/{}/{}/{}.{}",
+        "wheel.{}::https://screenscraper.fr/medias/{}/{}/{}.{}",
+        x.format,
         system.id,
         jeu_id,
         media_region(&x.url),
@@ -256,8 +293,15 @@ impl Package {
       sha1sums.push(x.sha1.clone());
     }
 
+    // Extension of the disc files (used by multi-disc templates).
+    let disc_ext = Path::new(&self.disc1_filename)
+      .extension()
+      .and_then(|e| e.to_str())
+      .unwrap_or("zip")
+      .to_string();
+
     // System-specific build/package sections
-    let sys_ctx = context! { dir => system.dir, rom => rom_escaped };
+    let sys_ctx = context! { dir => system.dir, rom => rom_escaped, ext => disc_ext };
     let (build_src, package_src) = match system.id {
       20 => (
         include_str!("../assets/templates/pkgbuild/segacd-build.jinja"),
@@ -270,6 +314,10 @@ impl Package {
       57 => (
         include_str!("../assets/templates/pkgbuild/ps2-build.jinja"),
         include_str!("../assets/templates/pkgbuild/ps2-package.jinja"),
+      ),
+      _ if self.is_multi_disc() => (
+        include_str!("../assets/templates/pkgbuild/multidisc-build.jinja"),
+        include_str!("../assets/templates/pkgbuild/multidisc-package.jinja"),
       ),
       _ => (
         include_str!("../assets/templates/pkgbuild/default-build.jinja"),
@@ -334,7 +382,7 @@ impl Package {
       game.manual = Some(format!("./data/{}/manual.pdf", romname));
     }
 
-    apply_game_path(system, &mut game, &romname);
+    apply_game_path(system, &mut game, &romname, self.is_multi_disc());
     (game, romname)
   }
 

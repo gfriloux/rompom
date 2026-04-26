@@ -13,6 +13,9 @@ pub struct RomStateEntry {
   #[serde(default)]
   pub rom_size: u64,
   pub medias: HashMap<String, Option<String>>,
+  /// SHA-1 hashes for extra discs (disc 2, 3, …).  Empty for single-disc ROMs.
+  #[serde(default)]
+  pub extra_disc_sha1s: Vec<String>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]

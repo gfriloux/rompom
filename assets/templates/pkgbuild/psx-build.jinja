@@ -1,4 +1,4 @@
   IFS=$'\n'
-  for file in $(ls *.chd); do
+  for file in $(ls *.{{ ext }}); do
     echo ".data/$_romname/${file}" >>${_romname}.m3u
   done
