@@ -93,29 +93,126 @@ pub fn read_pkgver(directory: &Path) -> u32 {
     .unwrap_or(0)
 }
 
+/// Wraps a value so a POSIX shell reads it back as exactly one literal token.
+///
+/// Inside single quotes every character is literal, so the only one needing care is
+/// the single quote itself: close the quote, emit an escaped one, reopen. The returned
+/// string **includes** its quotes — templates interpolate it bare, never inside quotes
+/// of their own.
+///
+/// This is what stands between ScreenScraper data and `makepkg`. A game named
+/// `$(id)` must reach the PKGBUILD as five characters, not as a command.
+fn shell_quote(value: &str) -> String {
+  format!("'{}'", value.replace('\'', r"'\''"))
+}
+
+/// Keeps only what is meaningful in a filename fragment coming from ScreenScraper —
+/// a media format (`png`), a region (`wor`), a disc extension (`chd`).
+///
+/// These land in shell globs (`ls *.chd`) and in paths, where quoting alone would not
+/// help: a `/` or a `..` would still traverse. A whitelist is the only reliable answer.
+fn sanitize_token(value: &str) -> String {
+  value
+    .chars()
+    .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+    .collect()
+}
+
+/// A `sha1sums` entry is 40 hex characters or it is corrupt.
+///
+/// Fails closed: anything else becomes an all-zero hash, so `makepkg` refuses the
+/// package on an integrity mismatch. Substituting `SKIP` would be the opposite —
+/// it disables the check on exactly the data we have reason to distrust.
+fn sanitize_sha1(value: &str) -> String {
+  let v = value.trim().to_ascii_lowercase();
+  if v.len() == 40 && v.chars().all(|c| c.is_ascii_hexdigit()) {
+    v
+  } else {
+    "0".repeat(40)
+  }
+}
+
+/// Escapes a value used as the *pattern* of a `sed "s|pattern|replacement|"` running
+/// inside double quotes — the Sega CD template rewrites the ROM name in description.xml
+/// that way.
+///
+/// Two layers apply at once: the shell reads the double-quoted string first (`$`,
+/// backtick, `\`, `"`), then sed reads the result as a basic regular expression
+/// (`. * [ ] ^` and the `|` delimiter).
+fn sed_pattern(value: &str) -> String {
+  let mut out = String::with_capacity(value.len());
+  for c in value.chars() {
+    if matches!(
+      c,
+      '\\' | '"' | '$' | '`' | '|' | '.' | '*' | '[' | ']' | '^' | '/' | '&'
+    ) {
+      out.push('\\');
+    }
+    out.push(c);
+  }
+  out
+}
+
+/// Maps a Latin letter carrying a diacritic onto its ASCII base.
+///
+/// Without this, whitelisting would turn "Astérix" into "astrix". Game titles are
+/// full of accents, and `pkgname` has to stay both readable and Arch-legal.
+fn fold_latin(c: char) -> Option<&'static str> {
+  Some(match c {
+    'à' | 'á' | 'â' | 'ã' | 'ä' | 'å' => "a",
+    'ç' => "c",
+    'è' | 'é' | 'ê' | 'ë' => "e",
+    'ì' | 'í' | 'î' | 'ï' => "i",
+    'ñ' => "n",
+    'ò' | 'ó' | 'ô' | 'õ' | 'ö' | 'ø' => "o",
+    'ù' | 'ú' | 'û' | 'ü' => "u",
+    'ý' | 'ÿ' => "y",
+    'æ' => "ae",
+    'œ' => "oe",
+    'ß' => "ss",
+    _ => return None,
+  })
+}
+
 impl Package {
+  /// Derives the package name from the ROM filename, keeping only characters that are
+  /// legal in an Arch `pkgname`.
+  ///
+  /// This is a **whitelist**. The previous blocklist enumerated characters to strip and
+  /// missed `"`, backtick, `\` and newline — all of which reach a double-quoted shell
+  /// assignment in the PKGBUILD. A blocklist cannot be complete; this one cannot be
+  /// escaped from.
+  ///
+  /// Titles written entirely in a non-Latin script (Japanese, for one) would normalize
+  /// to nothing and collide with every other such title, so they fall back to the ROM
+  /// hash, which is stable across runs.
   pub fn normalize_name(&self) -> String {
     let stem = Path::new(&self.name)
       .file_stem()
       .and_then(|s| s.to_str())
       .unwrap_or(&self.name);
-    stem
-      .replace("(", "")
-      .replace(")", "")
-      .replace(" ", "")
-      .replace(",", "")
-      .replace("'", "")
-      .replace("!", "")
-      .replace("&", "and")
-      .replace("%", "")
-      .replace("^", "")
-      .replace(";", "")
-      .replace("$", "")
-      .replace("~", "-")
-      .replace("=", "-")
-      .replace("[", "")
-      .replace("]", "")
-      .to_lowercase()
+
+    let mut out = String::with_capacity(stem.len());
+    for c in stem.chars() {
+      let lower = c.to_ascii_lowercase();
+      match lower {
+        'a'..='z' | '0'..='9' | '.' | '_' | '-' => out.push(lower),
+        '&' => out.push_str("and"),
+        '~' | '=' => out.push('-'),
+        _ => {
+          if let Some(folded) = fold_latin(c.to_lowercase().next().unwrap_or(c)) {
+            out.push_str(folded);
+          }
+        }
+      }
+    }
+
+    if out.is_empty() {
+      let hash = sanitize_sha1(&self.hash);
+      format!("rom-{}", &hash[..12])
+    } else {
+      out
+    }
   }
 
   pub fn new(
@@ -188,120 +285,122 @@ impl Package {
 
   pub fn build_pkgbuild(&mut self, system: &System, game: &Game, pkgver: u32) -> Result<()> {
     let romname = self.normalize_name();
-    let rom_escaped = self.rom.replace("$", "\\$");
     let directory = Path::new(&self.rom).with_extension("");
-    let jeu_id = self.jeu.as_ref().map(|j| j.id.as_str()).unwrap_or("");
+    let jeu_id = sanitize_token(self.jeu.as_ref().map(|j| j.id.as_str()).unwrap_or(""));
 
-    // Sources & checksums
+    // Sources & checksums. Every entry is shell-quoted here rather than in the
+    // template, so a template can never forget to quote one.
     let mut sources: Vec<String> = Vec::new();
     let mut sha1sums: Vec<String> = Vec::new();
 
     // Disc 1 (or the only disc for single-disc games).
-    let disc1_escaped = self.disc1_filename.replace("'", "'\\''");
-    sources.push(format!("{}::{}", disc1_escaped, self.rom_url));
-    sha1sums.push(self.hash.clone());
+    sources.push(shell_quote(&format!(
+      "{}::{}",
+      self.disc1_filename, self.rom_url
+    )));
+    sha1sums.push(shell_quote(&sanitize_sha1(&self.hash)));
 
     // Extra discs (disc 2, 3, …).
     for (disc_filename, disc_url, disc_sha1) in &self.extra_discs {
-      let escaped = disc_filename.replace("'", "'\\''");
-      sources.push(format!("{}::{}", escaped, disc_url));
-      sha1sums.push(disc_sha1.clone());
+      sources.push(shell_quote(&format!("{}::{}", disc_filename, disc_url)));
+      sha1sums.push(shell_quote(&sanitize_sha1(disc_sha1)));
     }
 
-    sources.push("description.xml".to_string());
-    sha1sums.push(checksums::hash_file(
+    sources.push(shell_quote("description.xml"));
+    sha1sums.push(shell_quote(&sanitize_sha1(&checksums::hash_file(
       Path::new(&format!("{}/description.xml", directory.display())),
       checksums::Algorithm::SHA1,
-    ));
+    ))));
 
+    // Media sources. `format` and `region` come straight from ScreenScraper and end up
+    // in filenames, so they go through the token whitelist before anything else.
     if let Some(ref x) = self.medias.video {
-      sources.push(format!(
+      sources.push(shell_quote(&format!(
         "video.mp4::https://screenscraper.fr/medias/{}/{}/video.mp4",
         system.id, jeu_id
-      ));
-      sha1sums.push(x.sha1.clone());
+      )));
+      sha1sums.push(shell_quote(&sanitize_sha1(&x.sha1)));
     }
     if let Some(ref x) = self.medias.bezel {
-      sources.push(format!(
+      let fmt = sanitize_token(&x.format);
+      let region = sanitize_token(x.region.as_deref().unwrap_or("wor"));
+      sources.push(shell_quote(&format!(
         "bezel.{}::https://screenscraper.fr/medias/{}/{}/bezel-16-9({}).{}",
-        x.format,
-        system.id,
-        jeu_id,
-        x.region.as_deref().unwrap_or("wor"),
-        x.format
-      ));
-      sha1sums.push(x.sha1.clone());
+        fmt, system.id, jeu_id, region, fmt
+      )));
+      sha1sums.push(shell_quote(&sanitize_sha1(&x.sha1)));
     }
     if let Some(ref x) = self.medias.image {
-      sources.push(format!(
+      let fmt = sanitize_token(&x.format);
+      let region = sanitize_token(media_region(&x.url));
+      sources.push(shell_quote(&format!(
         "image.{}::https://screenscraper.fr/medias/{}/{}/{}.{}",
-        x.format,
-        system.id,
-        jeu_id,
-        media_region(&x.url),
-        x.format
-      ));
-      sha1sums.push(x.sha1.clone());
+        fmt, system.id, jeu_id, region, fmt
+      )));
+      sha1sums.push(shell_quote(&sanitize_sha1(&x.sha1)));
     }
     if let Some(ref x) = self.medias.thumbnail {
-      sources.push(format!(
+      let fmt = sanitize_token(&x.format);
+      let region = sanitize_token(media_region(&x.url));
+      sources.push(shell_quote(&format!(
         "thumbnail.{}::https://screenscraper.fr/medias/{}/{}/{}.{}",
-        x.format,
-        system.id,
-        jeu_id,
-        media_region(&x.url),
-        x.format
-      ));
-      sha1sums.push(x.sha1.clone());
+        fmt, system.id, jeu_id, region, fmt
+      )));
+      sha1sums.push(shell_quote(&sanitize_sha1(&x.sha1)));
     }
     if let Some(ref x) = self.medias.marquee {
-      sources.push(format!(
+      let fmt = sanitize_token(&x.format);
+      sources.push(shell_quote(&format!(
         "marquee.{}::https://screenscraper.fr/medias/{}/{}/marquee.{}",
-        x.format, system.id, jeu_id, x.format
-      ));
-      sha1sums.push(x.sha1.clone());
+        fmt, system.id, jeu_id, fmt
+      )));
+      sha1sums.push(shell_quote(&sanitize_sha1(&x.sha1)));
     }
     if let Some(ref x) = self.medias.screenshot {
-      sources.push(format!(
+      let fmt = sanitize_token(&x.format);
+      let region = sanitize_token(x.region.as_deref().unwrap_or("wor"));
+      sources.push(shell_quote(&format!(
         "screenshot.{}::https://screenscraper.fr/medias/{}/{}/ss({}).{}",
-        x.format,
-        system.id,
-        jeu_id,
-        x.region.as_deref().unwrap_or("wor"),
-        x.format
-      ));
-      sha1sums.push(x.sha1.clone());
+        fmt, system.id, jeu_id, region, fmt
+      )));
+      sha1sums.push(shell_quote(&sanitize_sha1(&x.sha1)));
     }
     if let Some(ref x) = self.medias.wheel {
-      sources.push(format!(
+      let fmt = sanitize_token(&x.format);
+      let region = sanitize_token(media_region(&x.url));
+      sources.push(shell_quote(&format!(
         "wheel.{}::https://screenscraper.fr/medias/{}/{}/{}.{}",
-        x.format,
-        system.id,
-        jeu_id,
-        media_region(&x.url),
-        x.format
-      ));
-      sha1sums.push(x.sha1.clone());
+        fmt, system.id, jeu_id, region, fmt
+      )));
+      sha1sums.push(shell_quote(&sanitize_sha1(&x.sha1)));
     }
     if let Some(ref x) = self.medias.manual {
-      sources.push(format!(
+      let region = sanitize_token(media_region(&x.url));
+      sources.push(shell_quote(&format!(
         "manual.pdf::https://screenscraper.fr/medias/{}/{}/{}.pdf",
-        system.id,
-        jeu_id,
-        media_region(&x.url)
-      ));
-      sha1sums.push(x.sha1.clone());
+        system.id, jeu_id, region
+      )));
+      sha1sums.push(shell_quote(&sanitize_sha1(&x.sha1)));
     }
 
-    // Extension of the disc files (used by multi-disc templates).
-    let disc_ext = Path::new(&self.disc1_filename)
-      .extension()
-      .and_then(|e| e.to_str())
-      .unwrap_or("zip")
-      .to_string();
+    // Extension of the disc files (used by multi-disc templates in a `ls *.ext` glob,
+    // hence the whitelist rather than quoting).
+    let disc_ext = sanitize_token(
+      Path::new(&self.disc1_filename)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("zip"),
+    );
 
     // System-specific build/package sections
-    let sys_ctx = context! { dir => system.dir, rom => rom_escaped, ext => disc_ext };
+    // `rom` is shell-quoted for the install commands; `rom_sed` is escaped for the
+    // sed s|| expression the Sega CD template uses, a different context entirely.
+    let sys_ctx = context! {
+      dir => system.dir,
+      rom => shell_quote(&self.rom),
+      rom_sed => sed_pattern(&self.rom),
+      ext => disc_ext,
+    };
     let (build_src, package_src) = match system.id {
       20 => (
         include_str!("../assets/templates/pkgbuild/segacd-build.jinja"),
@@ -334,12 +433,12 @@ impl Package {
       format!("https://screenscraper.fr/gameinfos.php?gameid={}", jeu_id)
     };
     let ctx = context! {
-      pkgname => format!("{}{}", system.basename, romname),
-      romname => romname,
+      pkgname => shell_quote(&format!("{}{}", system.basename, romname)),
+      romname => shell_quote(&romname),
       pkgver => pkgver,
       pkgrel => 1_u32,
-      pkgdesc => &game.name,
-      url => url,
+      pkgdesc => shell_quote(&game.name),
+      url => shell_quote(&url),
       depends => system.depends.as_deref().unwrap_or(""),
       sources => sources,
       sha1sums => sha1sums,
@@ -469,6 +568,144 @@ mod tests {
     .join("\n");
 
     assert_eq!(generate_description_xml(&sample_game()), expected);
+  }
+
+  fn pkg(rom_name: &str, hash: &str) -> Package {
+    Package {
+      rom: rom_name.to_string(),
+      disc1_filename: rom_name.to_string(),
+      rom_url: "https://example.invalid/rom.zip".to_string(),
+      hash: hash.to_string(),
+      jeu: None,
+      name: rom_name.to_string(),
+      medias: Medias::default(),
+      extra_discs: Vec::new(),
+    }
+  }
+
+  const SHA: &str = "da39a3ee5e6b4b0d3255bfef95601890afd80709";
+
+  /// The blocklist this replaced stripped `$` but left backtick, `"`, `\` and newline,
+  /// all of which reached a double-quoted assignment in the PKGBUILD. Before the fix
+  /// this produced `sonic`id`` and `game";id;"`.
+  #[test]
+  fn normalize_name_drops_every_shell_metacharacter() {
+    for hostile in [
+      "sonic`id`.zip",
+      "game\";id;\".zip",
+      "game$(id).zip",
+      "game\\x.zip",
+      "game\nid.zip",
+      "game|id.zip",
+      "game>out.zip",
+    ] {
+      let got = pkg(hostile, SHA).normalize_name();
+      for bad in ['`', '"', '$', '\\', '\n', '|', '>', '(', ')', ';', '\''] {
+        assert!(
+          !got.contains(bad),
+          "{hostile:?} normalized to {got:?}, which still contains {bad:?}"
+        );
+      }
+    }
+  }
+
+  /// Whitelisting must not mangle accented titles into unreadable stumps:
+  /// "Astérix" has to stay "asterix", not become "astrix".
+  #[test]
+  fn normalize_name_folds_accents() {
+    assert_eq!(
+      pkg("Astérix & Obélix.zip", SHA).normalize_name(),
+      "asterixandobelix"
+    );
+    assert_eq!(
+      pkg("Pokémon Rouge.zip", SHA).normalize_name(),
+      "pokemonrouge"
+    );
+  }
+
+  /// A title written entirely in a non-Latin script whitelists down to nothing. Without
+  /// a fallback every such ROM would share one package name and overwrite the others.
+  #[test]
+  fn normalize_name_falls_back_to_the_hash_when_nothing_survives() {
+    let got = pkg("ソニック.zip", SHA).normalize_name();
+    assert_eq!(got, format!("rom-{}", &SHA[..12]));
+    assert_ne!(
+      got,
+      pkg("メトロイド.zip", "0".repeat(40).as_str()).normalize_name()
+    );
+  }
+
+  /// The core guarantee: whatever ScreenScraper sends, the shell sees one literal token.
+  #[test]
+  fn shell_quote_neutralizes_command_substitution() {
+    assert_eq!(shell_quote("$(id)"), "'$(id)'");
+    assert_eq!(shell_quote("`id`"), "'`id`'");
+    assert_eq!(shell_quote("it's"), r"'it'\''s'");
+    // The escape must not be defeatable by closing the quote first.
+    assert_eq!(shell_quote("';id;'"), r"''\'';id;'\'''");
+  }
+
+  /// `format` and `region` land in filenames and globs, where quoting does not stop a
+  /// traversal — only a whitelist does.
+  #[test]
+  fn sanitize_token_strips_path_and_shell_characters() {
+    assert_eq!(sanitize_token("png/../../etc"), "pngetc");
+    assert_eq!(sanitize_token("png"), "png");
+    assert_eq!(sanitize_token("../.."), "");
+    assert_eq!(sanitize_token("wor;id"), "worid");
+  }
+
+  /// A malformed checksum must fail the build, never disable the check.
+  #[test]
+  fn sanitize_sha1_fails_closed() {
+    assert_eq!(sanitize_sha1(SHA), SHA);
+    assert_eq!(sanitize_sha1(&SHA.to_uppercase()), SHA);
+    assert_eq!(sanitize_sha1("'; rm -rf /; '"), "0".repeat(40));
+    assert_eq!(sanitize_sha1("deadbeef"), "0".repeat(40));
+    assert_ne!(sanitize_sha1("nonsense"), "SKIP");
+  }
+
+  /// Sega CD rewrites the ROM name through sed; a `|` in a filename used to end the
+  /// expression early, and a backtick reached the shell through the double quotes.
+  #[test]
+  fn sed_pattern_escapes_both_shell_and_regex() {
+    assert_eq!(sed_pattern("a|b"), r"a\|b");
+    assert_eq!(sed_pattern("a.b*"), r"a\.b\*");
+    assert_eq!(sed_pattern("`id`"), r"\`id\`");
+    assert_eq!(sed_pattern("$HOME"), r"\$HOME");
+  }
+
+  /// The template must interpolate pre-quoted values bare. Wrapping them in quotes of
+  /// its own would nest one layer inside another and reopen the hole the escaping just
+  /// closed — this is the check that the .jinja files and shell_quote agree.
+  #[test]
+  fn pkgbuild_template_does_not_requote_escaped_values() {
+    let rendered = render_template(
+      include_str!("../assets/templates/pkgbuild/pkgbuild.jinja"),
+      &context! {
+        pkgname => shell_quote("megadrive-sonic"),
+        romname => shell_quote("sonic"),
+        pkgver => 1_u32,
+        pkgrel => 1_u32,
+        pkgdesc => shell_quote("Sonic & Knuckles $(id) `id`"),
+        url => shell_quote("https://example.invalid/"),
+        depends => "",
+        sources => vec![shell_quote("rom.zip::https://example.invalid/a'b")],
+        sha1sums => vec![shell_quote(SHA)],
+        build_section => "  true",
+        package_section => "  true",
+      },
+    );
+
+    assert!(rendered.contains("pkgdesc='Sonic & Knuckles $(id) `id`'"));
+    assert!(rendered.contains("_romname='sonic'"));
+    assert!(rendered.contains("pkgname=('megadrive-sonic')"));
+    // The apostrophe in the URL must be broken out and re-quoted, not left bare.
+    assert!(rendered.contains(r"'rom.zip::https://example.invalid/a'\''b'"));
+    // No value may end up double-quoted: that is the layering mistake to catch.
+    assert!(!rendered.contains("pkgdesc=\""));
+    assert!(!rendered.contains("_romname=\""));
+    assert!(!rendered.contains("''''"));
   }
 
   /// `skip_serializing_if` must drop absent media rather than emit empty tags:

@@ -1,22 +1,25 @@
-pkgname=('{{ pkgname }}')
-_romname="{{ romname }}"
+{# Values coming from ScreenScraper or Internet Archive arrive already shell-quoted
+   from package.rs (shell_quote). Do NOT wrap them in quotes here: they carry their
+   own, and a second layer would break the escaping rather than reinforce it. #}
+pkgname=({{ pkgname }})
+_romname={{ romname }}
 pkgver={{ pkgver }}
 pkgrel={{ pkgrel }}
-pkgdesc="{{ pkgdesc }}"
+pkgdesc={{ pkgdesc }}
 arch=('any')
-url="{{ url }}"
+url={{ url }}
 license=('All rights reserved')
 {% if depends %}
 depends=('{{ depends }}')
 {% endif %}
 source=(
 {% for src in sources %}
-  '{{ src }}'
+  {{ src }}
 {% endfor %}
 )
 sha1sums=(
 {% for sha in sha1sums %}
-  '{{ sha }}'
+  {{ sha }}
 {% endfor %}
 )
 
