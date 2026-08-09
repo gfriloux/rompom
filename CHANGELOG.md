@@ -12,6 +12,50 @@ git-cliff; they are preserved verbatim, with far more detail, in
 [SemVer]: https://semver.org/
 [Conventional Commits]: https://www.conventionalcommits.org/
 
+## [0.16.0] — 2026-08-09
+
+### Bug fixes
+
+- **package**: Fall back to the epoch on a malformed ScreenScraper date ([`72f6d5e`](https://github.com/gfriloux/rompom/commit/72f6d5e0e26d8a96c8511ecba6de4a5c381890a0))
+- **collect**: Report collection failures instead of panicking under the TUI ([`aa5853a`](https://github.com/gfriloux/rompom/commit/aa5853a57401cb3f8abf98f884803eef9f0b0d3e))
+- **state**: Restart an unfinished ROM instead of resuming it mid-pipeline ([`2b4010d`](https://github.com/gfriloux/rompom/commit/2b4010d76d65d1a466d81e7129f4952ea23ebe0d))
+- **pipeline**: Stop dispatching successors after a definitive failure ([`fa55cbf`](https://github.com/gfriloux/rompom/commit/fa55cbfe7fd80713c099feb5ac818c962801bb36))
+- **pipeline**: Turn a handler panic into a failed step instead of a deadlock ([`2449c4a`](https://github.com/gfriloux/rompom/commit/2449c4ae890158e80fb347afaaf28c74c117cde7))
+- **pipeline**: Reject path separators in media filenames ([`ea649a7`](https://github.com/gfriloux/rompom/commit/ea649a7140e85f2f459d5530ff666cce9c6bd573))
+- **package**: Escape every ScreenScraper field injected into a PKGBUILD ([`8aa9ff2`](https://github.com/gfriloux/rompom/commit/8aa9ff21e663f895aef28286da43edd0606e2c6e))
+- **deps**: Upgrade quick-xml to 0.41 (RUSTSEC-2026-0194/0195) ([`dcfa1d6`](https://github.com/gfriloux/rompom/commit/dcfa1d693ead1673a26498b52a5412140b96b82c))
+- **nix**: Align the rompom package version with Cargo.toml ([`b907097`](https://github.com/gfriloux/rompom/commit/b907097e9f58408df2591d1b4e4fab6fdc7143b7))
+
+### Documentation
+
+- Close the P0 lot and record what the diagnosis missed ([`34de4cb`](https://github.com/gfriloux/rompom/commit/34de4cb3b2748621ab7e12863aaba7e45c0cb7b9))
+- Record the whitelist arbitration in the v0.16.0 plan ([`833ce5e`](https://github.com/gfriloux/rompom/commit/833ce5e594275c0b47661b245945abf139b9e2f0))
+- Land a regression test with its fix instead of as a red commit ([`812b427`](https://github.com/gfriloux/rompom/commit/812b4279b0075410cfeb24e29d7187cfba0cd029))
+- Add the v0.16.0 plan for the failure-path lot ([`2a4515d`](https://github.com/gfriloux/rompom/commit/2a4515d3063b81b210333b9f5a733555bb44a8b4))
+- Record the dependency-security debt in the roadmap ([`509d935`](https://github.com/gfriloux/rompom/commit/509d935d27f4407c68824cbd535e8ca7fb18c2b3))
+- Add PROCEDURE_PLANS.md defining the working norms ([`eb5ac98`](https://github.com/gfriloux/rompom/commit/eb5ac9874cbf445bbb5312258dea885283aabd4a))
+
+### Tests
+
+- **package**: Pin the description.xml output with a snapshot ([`0576bc2`](https://github.com/gfriloux/rompom/commit/0576bc20c439e6eedbb9c32cdffec8e548c92984))
+
+### Continuous integration
+
+- Allowlist the advisories that cannot be fixed from this repository ([`5028584`](https://github.com/gfriloux/rompom/commit/5028584206ebdd906849cc74d5523e5091e286f9))
+- Enable Renovate for dependency updates ([`a61c2ce`](https://github.com/gfriloux/rompom/commit/a61c2ce4f3b4f88a8489aa3b2f412d9c91a7f773))
+- Add GitHub Actions workflows for CI and release ([`d39a4ce`](https://github.com/gfriloux/rompom/commit/d39a4ce5530f557d62d95947c38e2dc643acc3ba))
+- Generate CHANGELOG.md from the Conventional Commits ([`562ad29`](https://github.com/gfriloux/rompom/commit/562ad297da5a411762d9653b7120f4b2b45c8316))
+- Add a Justfile as the single definition of the quality gates ([`cf75a23`](https://github.com/gfriloux/rompom/commit/cf75a23a432f5756819bac6cce25bc984cfc6cd1))
+
+### Miscellaneous
+
+- **nix**: Add git-cliff and cargo-audit to the dev shell ([`cfac737`](https://github.com/gfriloux/rompom/commit/cfac73775309b064e093cb0d76ec876e5f6a82fb))
+
+### Dependencies
+
+- **deps**: Update Rust crate openssl to v0.10.80 [SECURITY] (#19) ([`fa9c379`](https://github.com/gfriloux/rompom/commit/fa9c3798c8d56800b8dfdd06288921752cb76856))
+- **deps**: Update Rust crate chrono to v0.4.45 (#20) ([`63988d6`](https://github.com/gfriloux/rompom/commit/63988d669e4a74ae0b92193848b94d0bda1c5284))
+
 ## [0.15.0] — 2026-04-26
 
 ### Features
