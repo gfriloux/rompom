@@ -412,3 +412,72 @@ impl Package {
     Ok(description_changed)
   }
 }
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  /// A game exercising every branch of the serialization: populated and skipped
+  /// `Option` fields, and characters XML must escape (`&`, `<`, `>`, `"`).
+  fn sample_game() -> Game {
+    Game {
+      path: "./Sonic & Knuckles.zip".to_string(),
+      name: "Sonic & Knuckles <Special>".to_string(),
+      desc: "A \"blue\" hedgehog & his friend > all.".to_string(),
+      rating: 0.85,
+      releasedate: "19941018T000000".to_string(),
+      developer: "Sega".to_string(),
+      publisher: "Sega".to_string(),
+      genre: "Plate-forme".to_string(),
+      players: "1-2".to_string(),
+      region: "wor".to_string(),
+      image: Some("./image.png".to_string()),
+      thumbnail: None,
+      video: Some("./video.mp4".to_string()),
+      marquee: None,
+      screenshot: None,
+      wheel: None,
+      manual: None,
+    }
+  }
+
+  /// Pins the exact bytes rompom writes to `description.xml`.
+  ///
+  /// EmulationStation reads these files and `check_description_changed()` compares
+  /// them byte for byte to decide whether to bump `pkgver`, so a silent change in
+  /// quick-xml's output would rewrite and re-version every package on the next run.
+  /// This snapshot was verified identical across the quick-xml 0.39.2 -> 0.41.0
+  /// upgrade; if it moves, the change must be deliberate.
+  #[test]
+  fn description_xml_snapshot() {
+    let expected = [
+      "<game>",
+      "  <path>./Sonic &amp; Knuckles.zip</path>",
+      "  <name>Sonic &amp; Knuckles &lt;Special&gt;</name>",
+      "  <desc>A \"blue\" hedgehog &amp; his friend &gt; all.</desc>",
+      "  <rating>0.85</rating>",
+      "  <releasedate>19941018T000000</releasedate>",
+      "  <developer>Sega</developer>",
+      "  <publisher>Sega</publisher>",
+      "  <genre>Plate-forme</genre>",
+      "  <players>1-2</players>",
+      "  <region>wor</region>",
+      "  <image>./image.png</image>",
+      "  <video>./video.mp4</video>",
+      "</game>",
+    ]
+    .join("\n");
+
+    assert_eq!(generate_description_xml(&sample_game()), expected);
+  }
+
+  /// `skip_serializing_if` must drop absent media rather than emit empty tags:
+  /// EmulationStation treats `<thumbnail></thumbnail>` as a path to a missing file.
+  #[test]
+  fn description_xml_omits_absent_medias() {
+    let xml = generate_description_xml(&sample_game());
+    for absent in ["thumbnail", "marquee", "screenshot", "wheel", "manual"] {
+      assert!(!xml.contains(absent), "{absent} should not be serialized");
+    }
+  }
+}
