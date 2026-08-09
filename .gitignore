@@ -1,4 +1,12 @@
 .direnv
 .envrc
 target
-.pre-commit-config.yaml
+result
+
+# Scratch: design handoffs, notes, work output. Never committed.
+tmp/
+
+# rompom runtime output, written in the working directory it runs from.
+*.state.yml
+*.run.yml
+*.debug.log

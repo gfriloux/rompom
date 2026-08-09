@@ -1,0 +1,37 @@
+---
+# Local hooks. They call the same gates as `just ci` and the CI workflow — one
+# definition (the Justfile), three triggers. Install with `pre-commit install`
+# (the dev shell does it automatically on first entry).
+repos:
+  - repo: local
+    hooks:
+      - id: alejandra
+        name: alejandra
+        language: system
+        entry: alejandra --check
+        files: \.nix$
+        pass_filenames: true
+      - id: deadnix
+        name: deadnix
+        language: system
+        entry: deadnix --fail
+        files: \.nix$
+        pass_filenames: true
+      - id: rustfmt
+        name: rustfmt
+        language: system
+        entry: just fmt-check
+        files: \.rs$
+        pass_filenames: false
+      - id: clippy
+        name: clippy
+        language: system
+        entry: just lint
+        files: \.rs$
+        pass_filenames: false
+      - id: version-check
+        name: version-check
+        language: system
+        entry: just version-check
+        files: ^(Cargo\.toml|Cargo\.lock|packages/rompom/default\.nix)$
+        pass_filenames: false
