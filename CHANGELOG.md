@@ -1,317 +1,173 @@
 # Changelog
 
-### v0.15.0
+All notable changes to rompom. Format inspired by [Keep a Changelog], versions follow
+[SemVer]. Generated from [Conventional Commits] by git-cliff — do not edit by hand,
+run `just changelog` instead.
 
-**Multi-disc support.**
+Entries for **v0.15.0 and earlier** were written by hand before this repository adopted
+git-cliff; they are preserved verbatim, with far more detail, in
+[`CHANGELOG-legacy.md`](./CHANGELOG-legacy.md).
 
-- **Multi-disc games are now packaged as a single unit** — files whose stems contain a disc
-  indicator (`(Disc N)`, `(Disk N)`, `(CD N)`) and share the same base name and extension are
-  automatically grouped during collection into one `RomSourceData` entry. A single PKGBUILD,
-  `description.xml`, and state entry are produced for the whole game.
+[Keep a Changelog]: https://keepachangelog.com/en/1.1.0/
+[SemVer]: https://semver.org/
+[Conventional Commits]: https://www.conventionalcommits.org/
 
-  Examples of matched patterns:
-  - `Panzer Dragoon Saga (Disc 1).chd` + `(Disc 2).chd` + `(Disc 3).chd` + `(Disc 4).chd`
-  - `Enemy Zero (USA) (Disc 0).zip` + `(Disc 1).zip` + `(Disc 2).zip` + `(Disc 3).zip`
-  - `Game (CD1).bin` + `(CD2).bin`
+## [0.15.0] — 2026-04-26
 
-  Disc numbering starts at 0 or 1 and the detector scans all parenthesised groups in the
-  filename, so region tags like `(USA)` before the disc indicator are handled correctly.
+### Features
 
-- **All disc files appear as sources in the PKGBUILD** — each disc gets its own entry in the
-  `source` array with its actual filename and SHA1.
+- **all**: Add support for multi-disk systems ([`af89fe9`](https://github.com/gfriloux/rompom/commit/af89fe987dc61dc067194e862b00b66566cd8590))
 
-- **PKGBUILD `build()` / `package()` use the real file extension** — the templates that
-  generate the `.m3u` playlist and install the disc files now use `*.{{ ext }}` (e.g. `*.zip`,
-  `*.chd`) instead of the previously hardcoded `*.chd`. This affects the `psx`, `ps2`, and new
-  `multidisc` template pairs.
+### Documentation
 
-- **`rom_unchanged` checks all discs** — on subsequent runs, the fast-skip logic verifies the
-  SHA1 of every disc file (stored in `<system>.state.yml` under `extra_disc_sha1s`). A package
-  is only marked unchanged if all discs and all media assets are unmodified.
+- **all**: Rework readme ([`08d24ca`](https://github.com/gfriloux/rompom/commit/08d24cabfca3945d755d40dc2b714d3c8d6176e4))
 
-- **Bug fix: media file extensions in PKGBUILD sources** — the local source names for `bezel`,
-  `image`, `thumbnail`, `marquee`, `screenshot`, and `wheel` were previously hardcoded to `.png`
-  regardless of the actual format served by ScreenScraper. They now use the real format (e.g.
-  `image.jpg` when ScreenScraper serves a JPEG).
+## [0.14.2] — 2026-04-25
 
-**New files:**
-- `assets/templates/pkgbuild/multidisc-build.jinja`
-- `assets/templates/pkgbuild/multidisc-package.jinja`
+### Bug fixes
 
-**Migration from v0.14.x:** none — configuration file is unchanged.
-Existing single-disc state files are forward-compatible (`extra_disc_sha1s` defaults to `[]`).
+- **all**: Fix cancel/resume of rompom ([`efd7300`](https://github.com/gfriloux/rompom/commit/efd7300ec8d1df1f51e313e3081008299de8f31d))
 
----
+## [0.14.1] — 2026-04-25
 
-### v0.14.2
+### Refactoring
 
-**Bug fixes — Ctrl-C and interrupted-run resume.**
+- **all**: Split large modules into focused sub-modules ([`8733b56`](https://github.com/gfriloux/rompom/commit/8733b560bdeda8f32d2fb6114e648c2eceedeb4b))
 
-- **Fix: Ctrl-C had no effect during a run** — `crossterm::enable_raw_mode()` clears the
-  POSIX `ISIG` flag, so pressing Ctrl-C no longer generates `SIGINT`; the `ctrlc` signal
-  handler never fired. Ctrl-C is now detected directly as a keyboard event inside the render
-  thread. It also works inside the identification modal.
+### Dependencies
 
-- **Fix: `.run.yml` was never written after Ctrl-C** — workers blocked in
-  `Semaphore::acquire()` (waiting for a free ScreenScraper slot) could not be unblocked
-  after `queue.shutdown()`. The main thread then hung indefinitely on `join()`, and the
-  run-state file was never written. `Semaphore` is now interruptible: `acquire()` returns
-  `false` when cancelled, and `cancel()` wakes all waiting threads.
+- **all**: Update Cargo.lock ([`7e8af35`](https://github.com/gfriloux/rompom/commit/7e8af35f5b27de24e5345a7d0870b4d2bcc386ea))
 
-- **Fix: resume crashed with "attempt to subtract with overflow"** — `apply_run_state()`
-  decremented a step's `wait_for` counter even when its own predecessor had not completed
-  (e.g. `WaitModal` is `Skipped` by default, so its successor `BuildPackage` was decremented
-  on resume even though `LookupSS` had not run yet). When `LookupSS` then ran and dispatched
-  `WaitModal`, a second decrement underflowed to `usize::MAX`, causing a panic.
-  `apply_run_state` now guards each decrement: successors are only decremented if the step's
-  own `wait_for` has already reached 0 in the restored state.
+## [0.14.0] — 2026-04-25
 
-- **Fix: Discovery restarted from scratch on resume** — a post-handler interrupted check in
-  `execute_step` reset every step that completed just as the interrupt arrived — including
-  `LookupSS` that had finished successfully — back to `Pending`. On resume, these steps were
-  re-run from the beginning. Steps that complete normally are now always saved as `Done`.
-  Only handlers that are cancelled mid-way (via a semaphore cancel) return
-  `Err("interrupted")`, which is the sole trigger for resetting a step to `Pending`.
+### Features
 
-- **Fix: resume UI showed all ROMs as "queued" in Discovery** — bars were re-initialized
-  fresh on every start. On resume, already-completed ROMs now appear immediately in the
-  Completed panel, ROMs awaiting downloads appear in the Downloads panel, and ROMs awaiting
-  packaging appear in the Discovery panel (Packaging sub-phase). Only ROMs still in Discovery
-  stay as "queued".
+- **ui**: Media coverage should count unchanged medias ([`d45eb74`](https://github.com/gfriloux/rompom/commit/d45eb74675e68dce426f9809b22dbf538ea3bdcc))
+- **ui**: Track description.xml changes with icon and pkgver bump ([`12aec61`](https://github.com/gfriloux/rompom/commit/12aec61fc7605419953abbfb4812fa575fadaa6b))
+- **all**: Add --debug flag to log per-ROM pipeline decisions ([`e364ea7`](https://github.com/gfriloux/rompom/commit/e364ea79d94c4f3606d5429598ef904bc688990b))
+- **ui**: Distinguish downloaded vs unchanged media icons ([`00bbd9d`](https://github.com/gfriloux/rompom/commit/00bbd9d57c6727dfa50fab02e3f5da90a4c0635e))
+- **all**: Refactor pipeline to DAG-based task queue with state machines (#18) ([`0564682`](https://github.com/gfriloux/rompom/commit/05646820f7bbde9284dc314e9ab74c9c06cabaab))
+- **all**: Add package + home-manager module ([`00cc220`](https://github.com/gfriloux/rompom/commit/00cc2207b00185df3a494fd1c869ab113a45db67))
 
-**Migration from v0.14.1:** none — configuration file is unchanged.
+### Bug fixes
 
----
+- **all**: Strip ROM extension from normalized pkgname ([`b53acc6`](https://github.com/gfriloux/rompom/commit/b53acc6f6bbd5436a1873e8c5b6e9747c198e243))
 
-### v0.14.1
+### Miscellaneous
 
-**Internal refactor — no user-visible behavior change.**
+- **nix**: Set rompom as default package ([`c0ea50a`](https://github.com/gfriloux/rompom/commit/c0ea50ae55093e1fcbd131aff973ef89fc7c9d2a))
 
-The four largest source files have been split into focused sub-modules:
+### Dependencies
 
-- `worker.rs` → `worker/{mod, run_state, helpers, handlers/{discovery, packaging, downloads, save_state}}`
-- `ui.rs` → `ui/{mod, render, modal}`
-- `conf.rs` → `conf/{mod, update}`
-- `rom.rs` → `rom/{mod, step, source}`
+- **all**: Update Cargo.lock ([`8c223d1`](https://github.com/gfriloux/rompom/commit/8c223d1e3f8e9261f220a5a65f1834474bad7353))
+- **all**: Cargo update ([`a03e13e`](https://github.com/gfriloux/rompom/commit/a03e13ebef431e32f5cc1a53821427ffd83ba944))
 
-No migration required.
+## [0.13.0] — 2026-04-19
 
----
+### Features
 
-### v0.14.0
+- **all**: Feat: skip SHA1 computation using mtime+size fast-path for folder ROMs ([`c4fec03`](https://github.com/gfriloux/rompom/commit/c4fec03317cb75c135ca2811860e1e60bf025ed8))
+- **all**: Add incremental update support with state tracking ([`a5630d5`](https://github.com/gfriloux/rompom/commit/a5630d5d10bd70ceec38b66f87bf9f19f3e5e8a7))
 
-- **DAG-based pipeline** — the three separate thread pools (discovery / packaging / downloads)
-  have been replaced by a unified `TaskQueue` and two generic worker pools. Each ROM's pipeline
-  is now modeled as a directed acyclic graph (DAG) of `Step`s; each step is enqueued as soon
-  as its predecessors complete, so parallelism is maximised without artificial phase barriers.
+## [0.12.0] — 2026-04-19
 
-- **Interrupted-run resume** — on Ctrl-C, the current state of every ROM's pipeline is
-  persisted to `<system>.run.yml`. On the next invocation, rompom offers to resume from where
-  it left off. Selecting "no" deletes the file and starts fresh.
+### Features
 
-- **description.xml change tracking** — changes to `description.xml` (new metadata from
-  ScreenScraper, genre/description update, etc.) now count as a package change: the `pkgver`
-  is bumped and the description icon (`󰗚`) appears in the Completed log for that ROM.
+- **all**: Allows to search for a game or identify ROM by it's SS ID ([`374b0b0`](https://github.com/gfriloux/rompom/commit/374b0b001499f8452827fc9e17619c1408418fe2))
 
-- **Media icon colors** — the Completed log now distinguishes three states per media type:
-  - Green — downloaded or updated this run
-  - Gray — already up-to-date (SHA1 verified, unchanged)
-  - Red — not available on ScreenScraper
-
-- **`--debug` flag** — writes `<system>.debug.log` with per-ROM pipeline decisions
-  (`[ComputeHashes]`, `[LookupSS]`, `[BuildPackage]`), useful for understanding why a package
-  was rebuilt or skipped.
-
-- **Summary: total media coverage** — the end-of-run "Media coverage" table now counts all
-  ROMs that have the media asset present (downloaded or already up-to-date), not only those
-  updated during the current run. A second consecutive run on an unchanged system now shows
-  accurate coverage instead of zeros.
-
-- **Fix: ROM extension stripped from package name** — the file extension was incorrectly
-  included in the normalized package name (`pkgname`). It is now stripped before normalization.
-
-- **Nix: package + Home Manager module** — rompom is now installable via Nix. A Home Manager
-  module is available under `modules/home-manager/rompom`.
-
-**Migration from v0.13.x:** none — configuration file is unchanged.
-
----
+## [0.11.0] — 2026-04-19
 
-### v0.13.0
-
-- **Incremental update support** — re-running rompom on an already-processed system now
-  skips unchanged ROMs and media instead of redoing all work from scratch.
-  A state file `<system>.state.yml` is written next to the game folders after each run,
-  recording for each ROM: ScreenScraper game ID, ROM SHA1, and per-media SHA1s.
+### Features
 
-  On subsequent runs:
-  - **Faster discovery** — ROMs already identified use `jeuinfo_by_gameid` (direct lookup
-    by cached ID) instead of the slower checksum-based `jeuinfo` call.
-  - **ROM skip** — if the ROM's SHA1 is unchanged, the copy or download is skipped entirely.
-  - **Media skip** — media files already on disk with a matching SHA1 are not re-downloaded.
-  - **Package skip** — if neither the ROM nor any media changed, the `PKGBUILD` and
-    `description.xml` are not rewritten.
-  - **`pkgver` bump** — when a package *is* updated (new or changed media, ROM changed),
-    the existing `pkgver` is read from the `PKGBUILD` and incremented by 1 automatically.
-    First-time packages start at `pkgver=1`.
+- **all**: Work with folders too ([`235b6c0`](https://github.com/gfriloux/rompom/commit/235b6c0756e1be5384d81560386df2a1585c83e8))
+- **all**: Change ROM sources, config needs to be updated ([`2e6cedf`](https://github.com/gfriloux/rompom/commit/2e6cedfc07448037554fbf28db56e289f5f04363))
 
-- **SHA1 fast-skip for folder sources** — for local folder sources, if a ROM file's
-  modification time and size are unchanged since the last run, its SHA1 is reused from
-  the state file without reading the file. This significantly reduces processing time
-  when re-running on a folder of large ROM files.
+### Documentation
 
-- **UI: unchanged vs updated** — the Completed panel now distinguishes:
-  - `=` (gray) — package is fully unchanged, nothing was rewritten or re-downloaded
-  - `✓` (green) — package is new or was updated
-  The end-of-run summary also reports `updated` and `unchanged` counts separately.
+- **all**: Update for v0.11.0 ([`1d3070a`](https://github.com/gfriloux/rompom/commit/1d3070a03e5766e9da93daf31e2c8722ffbcfe62))
 
-**Migration from v0.12.x:** none — configuration file is unchanged.
-The state file is created automatically on the first run after upgrading.
+## [0.10.0] — 2026-04-19
 
----
+### Features
 
-### v0.12.0
+- **all**: Add bottom line on completed pannel to print media legend ([`8d1e56b`](https://github.com/gfriloux/rompom/commit/8d1e56bc581f6b22f7b0d2ff30efff69b974d740))
+- **all**: Use real xml lib to create description.xml ([`54c5702`](https://github.com/gfriloux/rompom/commit/54c5702dbc73a5080023ed1dd42fde482cef1fda))
+- **all**: Use template to create OpenBOR launcher ([`9943889`](https://github.com/gfriloux/rompom/commit/9943889520ee6ef2d6de31c89aa7022dbb902581))
+- **all**: Whole PKGBUILD is now created from template ([`6d22b55`](https://github.com/gfriloux/rompom/commit/6d22b559e8d8dbb9af3c318d2c868a6b72962cf1))
+- **all**: Use templates to make it easier to maintain code ([`d0dc3d2`](https://github.com/gfriloux/rompom/commit/d0dc3d22de929e29c01d4bdacfcdd1e43954fca9))
+- **all**: Change how we manage languages ([`8ffd5b4`](https://github.com/gfriloux/rompom/commit/8ffd5b403b4940de615b5755190efb59e75d25fb))
 
-- **Interactive identification modal** — when a ROM cannot be identified automatically during
-  discovery, rompom opens an interactive TUI modal instead of silently skipping it:
-  - Lists up to 30 `jeuRecherche` candidates (name + year) for the user to pick from
-  - `↑`/`↓` to navigate, `Enter` to confirm, `Esc` to cancel (ROM is skipped)
-  - `i` switches to manual entry: type a ScreenScraper game ID, press `Enter` to preview
-    the game name, then confirm or go back
-  - Multiple unidentified ROMs queue up; the modal processes them one at a time
+### Refactoring
 
-**Dependency:** requires `screenscraper` ≥ v0.6.0 (`jeu_recherche`, `jeuinfo_by_gameid`).
+- **all**: Naming convention ([`38c3f2a`](https://github.com/gfriloux/rompom/commit/38c3f2aed52bee518551d1f7c1d08be3e6a8d5cd))
+- **all**: Simplify pkgbuild logic ([`d884126`](https://github.com/gfriloux/rompom/commit/d8841266302a5d83c64861538b5add6ca69c9b07))
 
----
+### Documentation
 
-### v0.11.0
+- **all**: Update ([`c8cb234`](https://github.com/gfriloux/rompom/commit/c8cb2342784f180dc7ffaa07f6db48ddc926312e))
+- **all**: Update changes on v0.10.0 ([`c839ace`](https://github.com/gfriloux/rompom/commit/c839ace44c4a7ef7d6198702db1f9af9067e5b80))
 
-- **Local folder source** — systems can now load ROMs from a local directory instead of
-  Internet Archive. Use `source.folder` with a `path` and one or more glob `filter` patterns.
-  SHA1/MD5/CRC32 checksums are computed per-ROM in the discovery workers (not during collection),
-  so the full ROM list appears immediately in the TUI.
-- **`filter` is now a list** — both `internet_archive` and `folder` sources accept multiple
-  glob patterns (e.g. `["*.zip", "*.7z"]`).
-- **Config format change: `ia_items` → `source`** — the per-system `ia_items` field has been
-  replaced by a `source` block. Run `rompom --update-config` to migrate automatically.
+## [0.9.0] — 2026-04-18
 
-**Migration from v0.10.x — BREAKING:**
+### Features
 
-The `ia_items` field is no longer valid. If your `rompom.yml` still uses it, rompom will
-refuse to start and tell you to run:
+- **all**: Add stats on how scraping went ([`94936b3`](https://github.com/gfriloux/rompom/commit/94936b3935e652a8e061397d5334d7d31f3f98e2))
 
-```
-rompom --update-config
-```
+### Documentation
 
-This migrates each `ia_items` entry to the new `source.internet_archive` format in place,
-including converting `filter: "*.zip"` (string) to `filter: ["*.zip"]` (list).
+- **all**: Update ([`0a5e854`](https://github.com/gfriloux/rompom/commit/0a5e854a2e75f792a3bf860618d07ef97f143d1c))
 
----
+## [0.8.1] — 2026-04-18
 
-### v0.10.0
+### Features
 
-- **Description language preference** — a new required `lang` field in `rompom.yml` controls
-  the language used for game descriptions and genres (e.g. `[fr, en]` tries French first,
-  falls back to English).
-- **Media region follows the ROM** — media assets (screenshot, image, bezel, etc.) are now
-  selected based on the ROM's own region rather than a fixed `fr`-first preference.
-  A US ROM will get US assets; only if none exist does it fall back to `wor`, then `ss`.
-- **Media icon legend** — the bottom line of the Completed panel now shows a compact legend
-  (`󰕧 video  󰋩 image  …`) so icons are self-explanatory without leaving the TUI.
+- **all**: Remove the packaging pannel ([`77089ad`](https://github.com/gfriloux/rompom/commit/77089adafaa0c5a8ea6b4ddd14f867ba59b684a3))
 
-**Internal refactors (no user-visible behavior change):**
+### Documentation
 
-- **Template-based PKGBUILD generation** — PKGBUILD files are now generated via MiniJinja
-  templates (`assets/templates/pkgbuild/`). System-specific build/package sections live in
-  dedicated `.jinja` files instead of inline Rust strings, making them easier to read and modify.
-- **Template-based launchers** — the OpenBOR launcher script is generated from
-  `assets/templates/launcher/openbor.jinja` instead of being built by hand in Rust.
-- **description.xml via quick-xml** — the `Game` struct is now serialized using
-  `quick_xml::se::Serializer` (serde), replacing the previous manual string construction.
-- **Naming convention** — `find_system` and `normalize_name` aligned with Rust verb-noun convention.
+- **all**: Update ([`1bb64ea`](https://github.com/gfriloux/rompom/commit/1bb64eac5be87ee16683fedc8ca27b864765d982))
 
-**Migration from v0.9.x — BREAKING:**
+## [0.8.0] — 2026-04-18
 
-The `lang` field is now required. If your `rompom.yml` does not have it, rompom will refuse
-to start and tell you to run:
+### Features
 
-```
-rompom --update-config
-```
+- **ui**: Enhance it. add progress bars ([`945e782`](https://github.com/gfriloux/rompom/commit/945e7825254d60e64eca8c5f6a60ca21dabd6015))
+- **all**: Use ratatui for UI ([`4d065f8`](https://github.com/gfriloux/rompom/commit/4d065f8fa3c6be74014b78d2bc88adb0b8fb9603))
+- **all**: Run stages in parallel! ([`2ac9a35`](https://github.com/gfriloux/rompom/commit/2ac9a35b0da25e484f9de0a3fd309879757a4d16))
 
-This command interactively asks for your language preference and updates `rompom.yml` in place.
+### Documentation
 
----
+- **all**: Update ([`1636bf8`](https://github.com/gfriloux/rompom/commit/1636bf87d242bafd6d08cab9ce7bf7e9481f9d10))
 
-### v0.9.0
+## [0.6.0] — 2026-04-18
 
-- **Media icons in Completed log** — each finished ROM now shows a Nerd Font icon per
-  media type, colored green if downloaded or red if unavailable:
-  `󰕧` video · `󰋩` image · `󰋫` thumbnail · `󰹙` screenshot · `󱂬` bezel · `󰯃` marquee · `󰊢` wheel · `󰂺` manual
-- **End-of-run summary** — after the TUI exits, rompom prints a concise report:
-  success/error counts and a per-media-type coverage bar with percentages.
-  Requires a Nerd Font terminal for icons to render correctly.
+### Features
 
-**Migration from v0.8.x:** none — configuration file is unchanged.
+- **all**: Enhance code inside main.rs ([`a438691`](https://github.com/gfriloux/rompom/commit/a43869107a7e6c2bfe82b67e16c810be57b4d3e9))
+- **all**: Rompom will now support downloading of medias ([`3260a91`](https://github.com/gfriloux/rompom/commit/3260a91227c44fa6ee8fb9fc5a4f30ff1e706554))
+- **all**: Have an UI! ([`49af833`](https://github.com/gfriloux/rompom/commit/49af833f2a116466801d50e3db87f45f0a2e4cce))
+- **all**: Use latest version of screenscraper and internetarchive ([`7d0f224`](https://github.com/gfriloux/rompom/commit/7d0f22430fcb1aa187339f2b3348d83efc4b07a0))
 
----
+### Bug fixes
 
-### v0.8.1
+- **all**: Don't panic if ia_items doesn't exist ([`23d1aa4`](https://github.com/gfriloux/rompom/commit/23d1aa4e90656072f5847df5b17f8475db122ea9))
 
-- **TUI fixes** — two visual correctness fixes:
-  - ROMs now show `waiting` in the target panel as soon as they are enqueued,
-    not only when a worker actually picks them up. The Downloads panel now reflects
-    the full queue, not just the 4 active slots.
-  - The Prepare panel (PKGBUILD generation) was merged into Discovery — the phase
-    is too fast to warrant its own column. ROMs in that sub-phase now appear in
-    Discovery with status `preparing...`.
+### Refactoring
 
-**Migration from v0.8.0:** none.
+- **all**: Better code overall ([`299c60c`](https://github.com/gfriloux/rompom/commit/299c60cbe830e5c2ce98a48f3f6f9b1bf2074de3))
+- **all**: Enhance code in emulationstation.rs ([`d432f98`](https://github.com/gfriloux/rompom/commit/d432f98c309a46df25ce44c0e39a381bd4610acc))
+- **all**: Trying to separate things for maintainability ([`d7f30d4`](https://github.com/gfriloux/rompom/commit/d7f30d48788e0af8e48ab7abdfbcee9304428028))
 
----
+### Documentation
 
-### v0.8.0
+- **all**: First version ([`af79ff2`](https://github.com/gfriloux/rompom/commit/af79ff234ace6aa2dd88c683b8f230378e261cd9))
 
-- **Reworked TUI** — replaced the flat spinner list with a proper panel-based interface
-  built on `ratatui` + `crossterm`:
-  - Top: scrolling **Completed** log (newest first) with a global progress gauge
-  - Bottom: three side-by-side panels — **Discovery**, **Packaging**, **Downloads** —
-    each showing only the ROMs currently active in that phase, with their own
-    per-phase progress gauge
-  - Accent colors per phase (cyan / yellow / green), rounded borders, bold labels,
-    status text colored by state (active, done, error, queued)
+### Miscellaneous
 
-**Migration from v0.7.0:** none — configuration file is unchanged.
+- **git**: Update ([`4519134`](https://github.com/gfriloux/rompom/commit/4519134ab662295af9e2cda64f1e7292163debbe))
+- **git**: Add .gitignore ([`5d061bf`](https://github.com/gfriloux/rompom/commit/5d061bffd4e9052d8deac7ba8b86603ecc9d4a9a))
+- **nix**: First version ([`67c91d9`](https://github.com/gfriloux/rompom/commit/67c91d9ba05cf46c43f101c5dad1ad7a8c702410))
 
----
+## [0.0.2] — 2020-10-01
 
-### v0.7.0
-
-- **Parallel pipeline** — discovery, packaging, and downloads now run concurrently.
-  As soon as a ROM is discovered, it moves to packaging; as soon as it is packaged,
-  it moves to download — without waiting for the rest of the queue.
-  Discovery parallelism is automatically capped to the `maxthreads` limit of your
-  ScreenScraper account.
-
-**Migration from v0.6.0:** none — configuration file is unchanged.
-
----
-
-### v0.6.0
-
-- **Terminal UI** — progress is now displayed with spinners, one per ROM.
-  Download states are explicit: checking, downloading, already present, checksum mismatch.
-- **Media downloads** — rompom now downloads all available media assets alongside the ROM:
-  video, image, thumbnail, bezel, marquee, screenshot, wheel, manual.
-  Files already present and valid are skipped automatically.
-- **Dependency updates** — `screenscraper` v0.4.0, `internet_archive` v0.2.0.
-
-### v0.5.0
-
-- Download ROM files from Internet Archive with SHA1 verification
-- Skip already-downloaded ROMs
-
-### v0.4.x and earlier
-
-Initial releases — PKGBUILD and description.xml generation only.
+<!-- generated by git-cliff -->
