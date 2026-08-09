@@ -1,0 +1,23 @@
+# cargo-audit configuration, read by `just audit` and the CI audit job.
+#
+# Every entry below is an advisory we have looked at and consciously accepted, with the
+# reason and the way out. The point is to keep the audit job GREEN in steady state, so a
+# red run means a genuinely new advisory rather than a backlog everyone has learned to
+# ignore. Never add an ID here without a justification and a tracked way out.
+
+[advisories]
+ignore = [
+  # rustc-serialize 0.3.25 — stack overflow parsing deeply nested JSON.
+  # Reached through shaman <- checksums, which rompom uses only for SHA1/MD5/CRC32
+  # hashing; no JSON is ever handed to it. Upstream has no fixed release, so the way
+  # out is dropping the `checksums` crate. Tracked in TODO.md P1.4.
+  "RUSTSEC-2022-0004",
+
+  # rustls-webpki 0.101.7 — three certificate-validation advisories, pulled in by
+  # rustls 0.21 <- reqwest 0.11. Fixing them means moving to reqwest 0.12, which
+  # rompom cannot do alone: the screenscraper and internetarchive libraries pin
+  # reqwest 0.11 too, so all three must move together. Tracked in TODO.md P1.4.
+  "RUSTSEC-2026-0098",
+  "RUSTSEC-2026-0099",
+  "RUSTSEC-2026-0104",
+]
