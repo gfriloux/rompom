@@ -111,11 +111,27 @@ fn shell_quote(value: &str) -> String {
 ///
 /// These land in shell globs (`ls *.chd`) and in paths, where quoting alone would not
 /// help: a `/` or a `..` would still traverse. A whitelist is the only reliable answer.
-fn sanitize_token(value: &str) -> String {
+pub(crate) fn sanitize_token(value: &str) -> String {
   value
     .chars()
     .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
     .collect()
+}
+
+/// The extension to give a downloaded media asset, from the format ScreenScraper
+/// reports.
+///
+/// Shared by the PKGBUILD `source` entries and the download destination on purpose:
+/// if the two disagreed, makepkg would look for a file that is not there. The `bin`
+/// fallback covers a format that whitelists down to nothing, so both sides still
+/// agree on a name.
+pub(crate) fn media_ext(format: &str) -> String {
+  let clean = sanitize_token(format);
+  if clean.is_empty() {
+    "bin".to_string()
+  } else {
+    clean
+  }
 }
 
 /// A `sha1sums` entry is 40 hex characters or it is corrupt.
@@ -322,7 +338,7 @@ impl Package {
       sha1sums.push(shell_quote(&sanitize_sha1(&x.sha1)));
     }
     if let Some(ref x) = self.medias.bezel {
-      let fmt = sanitize_token(&x.format);
+      let fmt = media_ext(&x.format);
       let region = sanitize_token(x.region.as_deref().unwrap_or("wor"));
       sources.push(shell_quote(&format!(
         "bezel.{}::https://screenscraper.fr/medias/{}/{}/bezel-16-9({}).{}",
@@ -331,7 +347,7 @@ impl Package {
       sha1sums.push(shell_quote(&sanitize_sha1(&x.sha1)));
     }
     if let Some(ref x) = self.medias.image {
-      let fmt = sanitize_token(&x.format);
+      let fmt = media_ext(&x.format);
       let region = sanitize_token(media_region(&x.url));
       sources.push(shell_quote(&format!(
         "image.{}::https://screenscraper.fr/medias/{}/{}/{}.{}",
@@ -340,7 +356,7 @@ impl Package {
       sha1sums.push(shell_quote(&sanitize_sha1(&x.sha1)));
     }
     if let Some(ref x) = self.medias.thumbnail {
-      let fmt = sanitize_token(&x.format);
+      let fmt = media_ext(&x.format);
       let region = sanitize_token(media_region(&x.url));
       sources.push(shell_quote(&format!(
         "thumbnail.{}::https://screenscraper.fr/medias/{}/{}/{}.{}",
@@ -349,7 +365,7 @@ impl Package {
       sha1sums.push(shell_quote(&sanitize_sha1(&x.sha1)));
     }
     if let Some(ref x) = self.medias.marquee {
-      let fmt = sanitize_token(&x.format);
+      let fmt = media_ext(&x.format);
       sources.push(shell_quote(&format!(
         "marquee.{}::https://screenscraper.fr/medias/{}/{}/marquee.{}",
         fmt, system.id, jeu_id, fmt
@@ -357,7 +373,7 @@ impl Package {
       sha1sums.push(shell_quote(&sanitize_sha1(&x.sha1)));
     }
     if let Some(ref x) = self.medias.screenshot {
-      let fmt = sanitize_token(&x.format);
+      let fmt = media_ext(&x.format);
       let region = sanitize_token(x.region.as_deref().unwrap_or("wor"));
       sources.push(shell_quote(&format!(
         "screenshot.{}::https://screenscraper.fr/medias/{}/{}/ss({}).{}",
@@ -366,7 +382,7 @@ impl Package {
       sha1sums.push(shell_quote(&sanitize_sha1(&x.sha1)));
     }
     if let Some(ref x) = self.medias.wheel {
-      let fmt = sanitize_token(&x.format);
+      let fmt = media_ext(&x.format);
       let region = sanitize_token(media_region(&x.url));
       sources.push(shell_quote(&format!(
         "wheel.{}::https://screenscraper.fr/medias/{}/{}/{}.{}",

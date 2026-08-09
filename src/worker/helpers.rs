@@ -1,6 +1,6 @@
 use std::{collections::HashMap, path::Path};
 
-use crate::package::Medias;
+use crate::package::{media_ext, Medias};
 
 pub(crate) const NAME_REGIONS: &[&str] = &["wor", "eu", "us", "fr", "jp", "ss"];
 
@@ -23,11 +23,16 @@ pub(crate) fn search_name(filename: &str) -> String {
 }
 
 /// Returns the output filename for a downloaded media asset.
+///
+/// The result is joined onto the ROM's output directory, and `Path::join` happily
+/// walks out of it: a ScreenScraper format of `png/../../x` would have written
+/// outside the tree. `media_ext` whitelists the extension, so the value returned here
+/// is always a single path component.
 pub(crate) fn media_filename(kind: &str, format: &str) -> String {
   match kind {
     "video" => "video.mp4".to_string(),
     "manual" => "manual.pdf".to_string(),
-    _ => format!("{}.{}", kind, format),
+    _ => format!("{}.{}", kind, media_ext(format)),
   }
 }
 
@@ -73,4 +78,55 @@ pub(crate) fn check_media_changes(
   }
 
   (changed, lines)
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use std::path::PathBuf;
+
+  /// The destination is built as `directory.join(media_filename(...))`, and Path::join
+  /// resolves `..` against the directory rather than rejecting it. Before the fix,
+  /// a format of `png/../../x` produced `image.png/../../x`, which lands two levels
+  /// above the ROM's output directory.
+  #[test]
+  fn media_filename_stays_inside_the_output_directory() {
+    let directory = PathBuf::from("/out/roms/sonic");
+
+    for hostile in [
+      "png/../../x",
+      "../../etc/passwd",
+      "png/../..",
+      "/etc/passwd",
+      "png\\..\\..",
+    ] {
+      let name = media_filename("image", hostile);
+      assert!(
+        !name.contains('/') && !name.contains('\\') && !name.contains(".."),
+        "format {hostile:?} produced {name:?}"
+      );
+
+      // One path component, and the join cannot leave the directory.
+      let dest = directory.join(&name);
+      assert_eq!(dest.parent(), Some(directory.as_path()));
+      assert!(dest.starts_with(&directory));
+    }
+  }
+
+  /// The fixed kinds keep their own extension, whatever ScreenScraper claims.
+  #[test]
+  fn media_filename_keeps_the_canonical_names() {
+    assert_eq!(media_filename("video", "../../x"), "video.mp4");
+    assert_eq!(media_filename("manual", "../../x"), "manual.pdf");
+    assert_eq!(media_filename("image", "png"), "image.png");
+    assert_eq!(media_filename("thumbnail", "jpg"), "thumbnail.jpg");
+  }
+
+  /// A format that whitelists down to nothing must still yield a usable name, and the
+  /// same one the PKGBUILD source entry uses.
+  #[test]
+  fn media_filename_falls_back_when_the_format_is_unusable() {
+    assert_eq!(media_filename("image", "../.."), "image.bin");
+    assert_eq!(media_filename("image", ""), "image.bin");
+  }
 }
