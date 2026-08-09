@@ -1,5 +1,11 @@
 # Plan : v0.16.0 — Chemins d'échec de première classe
 
+> **Statut : clos le 2026-08-09.** Les étapes 0 à 7 sont livrées — **P0 complet**.
+> La phase 5 (P1.1–P1.3), annoncée séparable dès l'écriture du plan, a été **sortie du
+> périmètre** : le lot P0 forme un ensemble cohérent et publiable, et P1.1 s'est révélé
+> bloqué par la lib `screenscraper`, qui jette le statut HTTP et rend un `404`
+> indistinguable d'un `430` (détail dans `TODO.md`). Reportée en v0.17.
+
 **Type :** bug / sécurité (P0 complet + P1.1–P1.3)
 **Étages :** `package`, `pipeline`, `state`, `collect`, `conf`, `ui`
 **Phase 0 :** [`phase0_results.md`](phase0_results.md) — vert, `509d935`

@@ -12,45 +12,69 @@ TLS correct, pas de fuite de credentials, XML échappé via quick-xml.
 
 ---
 
-## P0 — Corruption / sécurité (avant toute feature)
+## P0 — Corruption / sécurité — **CLOS le 2026-08-09 (v0.16.0)**
 
-- [ ] **P0.1 — Injection shell dans les PKGBUILD** (HAUTE). Les templates MiniJinja sont
-  enregistrés sous le nom `"t"` (`package.rs:55`) → auto-échappement désactivé.
-  `pkgdesc` (nom de jeu SS) et `_romname` sont injectés bruts : un nom contenant
-  `"$(...)"` = RCE au `makepkg` sur la Batocera. `normalize_name()` ne retire ni `"`,
-  ni backtick, ni `\`, ni retour à la ligne.
-  → Fonction d'échappement shell unique appliquée à tout champ SS/IA injecté dans un
-  PKGBUILD (`pkgdesc`, `romname`, `pkgname`) + whitelist alphanumérique pour
-  `format`/`region` des médias + validation `sha1 =~ ^[0-9a-f]{40}$`. *(petit)*
-- [ ] **P0.2 — Path traversal via `m.format`** : `media_filename()` (`worker/helpers.rs:26`)
-  accepte `png/../../../x` → écriture hors du répertoire de sortie
-  (`downloads.rs:231`). Rejeter `/`, `\`, `..`. *(petit)*
-- [ ] **P0.3 — Panique de handler = deadlock global** : pas de `catch_unwind` dans
-  `execute_step` (`worker/mod.rs:84-167`). Un handler qui panique (date SS malformée
-  `emulationstation.rs:73`, `hash_file` sur fichier disparu) tue le worker,
-  `remaining` n'est jamais décrémenté, tout bloque. → `catch_unwind` → `Failed`. *(petit)*
-- [ ] **P0.4 — Step `Failed` corrompt l'état** : `do_dispatch` est appelé même après
-  échec définitif (`worker/mod.rs:166`) → `SaveState` persiste le sha1 attendu d'une
-  ROM jamais téléchargée (plus jamais retentée) + double comptage UI (1 erreur +
-  1 succès). → Marquer les successeurs Skipped/Failed, ne pas persister, ne pas
-  re-finir la barre. *(moyen)*
-- [ ] **P0.5 — Resume corrompt les paquets** : `run.yml` ne stocke que les statuts ;
-  `jeu`/`medias` ne sont pas re-dérivés. Interruption entre LookupSS (Done) et
-  BuildPackage (Pending) → description.xml vide écrase le bon + bump pkgver ;
-  SaveState peut écraser l'état avec map vide (perte du cache ss_game_id).
-  → Au resume, si BuildPackage/SaveState Pending, remettre LookupSS à Pending. *(petit/moyen)*
-- [ ] **P0.6 — `unwrap()` de la collecte paniquent sous TUI** (erreur invisible,
-  terminal corrompu) : `Metadata::get` (`main.rs:395`), `ScreenScraper::new`
-  (`main.rs:509`, credentials faux !), `Pattern::new` (`main.rs:402,450`, glob invalide
-  dans la config), `read_dir` (`main.rs:440`), `parse_from_str` sur date SS
-  (`emulationstation.rs:73`). → Sortir du TUI proprement puis eprintln + exit. *(moyen)*
+Les six points sont corrigés. Le détail vit dans `.claude/plans/v0.16.0/`. Chaque
+correction est arrivée avec ses tests : le dépôt est passé de 0 à 34 tests.
+
+- [x] **P0.1 — Injection shell dans les PKGBUILD.** Le trou était plus large que décrit :
+  `pkgdesc` recevait le nom ScreenScraper **totalement brut**, sans même la liste noire.
+  Rejouée sur des noms hostiles, l'ancienne `normalize_name()` laissait passer backtick,
+  `"`, `\`, saut de ligne, `|` et `>` — et `_romname="…"` étant entre guillemets doubles,
+  le backtick y est une substitution de commande. Corrigé par `shell_quote()` (la valeur
+  porte ses propres quotes, les templates interpolent nu), liste blanche sur
+  `normalize_name()`, `sanitize_token()` sur format/région, `sanitize_sha1()` qui échoue
+  fermé. Non prévus au diagnostic : repli ASCII des accents (« Astérix » → `asterix`),
+  repli sur le hash pour les titres non latins (tous les jeux japonais partageaient sinon
+  un seul `pkgname`), et `sed_pattern()` pour le `sed` Sega CD — ce qui clôt au passage
+  le point `|` listé en P3.
+- [x] **P0.2 — Path traversal via `m.format`.** Un format `png/../../x` écrivait dans
+  `/out/roms/x`, deux niveaux au-dessus. Le piège réel n'était pas la fonction mais la
+  **cohérence** : `package.rs` assainissait déjà le format côté PKGBUILD et
+  `downloads.rs` calculait son nom de son côté. D'où `media_ext()`, partagée, avec repli
+  `bin` — sinon `makepkg` cherche un fichier jamais écrit.
+- [x] **P0.3 — Panique de handler = deadlock global.** Deux découvertes : le profil Nix
+  posait `panic = "abort"`, qui rendait `catch_unwind` inopérant dans le binaire livré
+  (retiré, coût mesuré +483 Ko / +4,3 %) ; et attraper la panique ne suffit pas, il faut
+  `clear_poison()` sur les trois mutex, sans quoi le verrou suivant panique et le worker
+  meurt quand même. Les paniques contournent aussi le retry — un dépassement d'index
+  retombe à l'identique.
+- [x] **P0.4 — Step `Failed` corrompt l'état.** Préalable indispensable : déplacer la
+  décrémentation de `remaining` hors de `handle_save_state` vers `finish_rom` dans
+  `execute_step`. Sans ça, couper les successeurs réintroduisait le blocage de P0.3.
+  La propagation suit un ensemble de visités et non le statut, parce que `WaitModal`
+  démarre `Skipped` : un garde par statut se serait arrêté net dessus.
+- [x] **P0.5 — Resume corrompt les paquets.** Le remède prévu (« remettre LookupSS à
+  Pending ») était insuffisant : **chaque** step alimente les suivants en mémoire
+  (`sha1`, `jeu`, `medias`, `romname`…), aucun préfixe du pipeline n'est fiable. Le
+  resume est devenu **tout ou rien par ROM** — abordable parce que tout ce qui coûte est
+  déjà idempotent. Un jeu identifié à la main via la modale doit l'être à nouveau.
+- [x] **P0.6 — `unwrap()` de la collecte paniquent sous TUI.** `collect_sources()`
+  remonte l'erreur en nommant l'item, le motif ou le chemin fautif ; le `Ui` est relâché
+  avant l'écriture. Au passage : globs compilés une fois par système au lieu d'une fois
+  par fichier candidat, et noms de fichiers non-UTF-8 ignorés plutôt qu'`unwrap()`és.
+  La date SS était pire que « parfois invalide » — valider par longueur de chaîne n'est
+  pas valider : `"abcd"` fait 4 caractères, `"2024-13-45"` en fait 10.
 
 ## P1 — Robustesse et confiance
 
 - [ ] **P1.1 — Erreur réseau SS ≠ « jeu non trouvé »** : `jeuinfo(...).ok()`
   (`discovery.rs:249-256`) avale timeout/500/quota → modale d'identification
-  injustifiée ; le retry de LookupSS est du code mort. → Distinguer `Err` (retry)
-  de `Ok(None)` (modale). *(petit)*
+  injustifiée ; le retry de LookupSS est du code mort. *(petit côté rompom)*
+  - **Bloqué par la lib `screenscraper`** (constaté le 2026-08-09, avant de coder) :
+    l'API ScreenScraper signale ses erreurs par **code HTTP** — `404` jeu introuvable,
+    `429` trop de threads, `430` quota journalier, `423` API fermée, `403` identifiants
+    (cf. `../screenscraper/apiv2.html`). Or `api::get()` fait
+    `.send().and_then(|r| r.text())` **sans `error_for_status()`** : le statut est
+    jeté, et comme le corps de ces réponses n'est pas du JSON, tout revient
+    indistinctement en `Error::Parse`. Un `404` et un `430` sont donc littéralement le
+    même objet d'erreur côté rompom.
+  - **Correction complète** : ajouter dans la lib une variante portant le statut
+    (~15 lignes dans `get()`), taguer une v0.7.0, puis mapper `404` → modale et tout le
+    reste → retry. Impose de mettre à jour le `tag =` dans `Cargo.toml` **et** le
+    `cargoLock.outputHashes` du paquet Nix. *(décision à prendre : touche un second dépôt)*
+  - **Fix partiel possible sans la lib** : traiter `Error::Request` (timeout, DNS,
+    connexion refusée) comme transitoire. Ne couvre que le timeout des trois cas cités.
 - [ ] **P1.2 — Afficher les erreurs des ROMs échouées** : `StepStatus::Failed(msg)`
   existe mais `finish_error()` ne prend pas le message ; le summary n'imprime qu'un
   compteur. → Panneau Completed `✗ rom — cause` + liste des échecs dans
@@ -146,8 +170,8 @@ TLS correct, pas de fuite de credentials, XML échappé via quick-xml.
   RAII ; `debug_assert!` anti-wrap dans `dec_wait_for` ; `cancelled` sous le mutex
   du Semaphore (supprime le polling 50ms) ; retry sans `thread::sleep` bloquant.
 - [ ] Templates : `mkdir -p 0700 -p` (voulu : `-m 0700`) et `ls *.pdf,` (virgule
-  parasite) dans multidisc/psx/ps2-package.jinja ; `sed` Sega CD cassable par `|`
-  dans un nom de fichier.
+  parasite) dans multidisc/psx/ps2-package.jinja. *(le `sed` Sega CD cassable par `|`
+  est corrigé — `sed_pattern()`, cf. P0.1)*
 - [ ] Migration rustls (rompom + screenscraper + internetarchive) → supprime openssl
   vendored + perl du Nix. Remplacer `serde_yaml` (archivé). `Debug` masqué sur
   `Auth`/`ScreenScraper`.
@@ -158,11 +182,19 @@ TLS correct, pas de fuite de credentials, XML échappé via quick-xml.
 
 ---
 
-## Séquencement proposé
+## Séquencement
 
-1. **v0.15.1** — P0 complet + P1.1-P1.3 : patch sécurité/fiabilité, aucun changement
-   de comportement visible.
-2. **v0.16** — outillage (P1.4-P1.6, CI) + UX rapide (P1.7-P1.8, P2.1-P2.3, P2.5).
-3. **v0.17** — `--plain` (P2.6), multi-disc edge cases (P2.4), `--init` (P2.2).
-4. **v0.18** — refonte TUI « turn 4 » (P2.7), une fois P1.2 en place et l'état stabilisé.
-5. **Ensuite** — dette P3 au fil de l'eau, puis contribution SS sur base saine.
+1. ~~**v0.15.1** — P0 + P1.1-P1.3~~ → devenu **v0.16.0** : l'outillage (Justfile, CI,
+   changelog généré, montée quick-xml, premiers tests) avait déjà atterri sur `master`
+   sans release, donc le tag contenait des ajouts et pas seulement des correctifs.
+2. **v0.16.0 — livrée le 2026-08-09.** Outillage + **P0 complet** + P1.5 (CI) + amorce de
+   P1.6 (34 tests). P1.1–P1.3 ont été **sortis du périmètre** en cours de route : le lot
+   P0 formait un ensemble cohérent et publiable, et P1.1 s'est révélé bloqué par la lib
+   `screenscraper` (cf. ci-dessus).
+3. **v0.17** — confiance : P1.1 (après décision sur la lib), P1.2 (cause des échecs
+   affichée), P1.3 (messages d'erreur de config), puis P1.4 (pinning + dette de sécurité
+   des dépendances), P1.7, P1.8.
+4. **v0.18** — UX : `--plain` (P2.6), multi-disc edge cases (P2.4), `--init` (P2.2),
+   P2.1, P2.3, P2.5.
+5. **v0.19** — refonte TUI « turn 4 » (P2.7), une fois P1.2 en place.
+6. **Ensuite** — dette P3 au fil de l'eau, puis contribution SS sur base saine.
