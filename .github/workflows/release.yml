@@ -1,0 +1,59 @@
+name: Release
+
+# Triggered when the maintainer pushes a vX.Y.Z tag (hybrid git policy: Claude never tags).
+# Publishes a GitHub release whose body is the changelog entry for that exact version,
+# with the static musl binary attached.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # git-cliff needs the full history and all tags
+
+      # Guard: the tag must match the version in Cargo.toml. Without this a mistyped tag
+      # would ship a release whose binary reports a different version than its notes.
+      - name: Check tag matches Cargo.toml version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          toml=$(sed -n 's/^version = "\([0-9.]*\)"/\1/p' Cargo.toml | head -1)
+          echo "tag=${tag} Cargo.toml=${toml}"
+          if [ "$tag" != "$toml" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} does not match Cargo.toml version ${toml}" >&2
+            exit 1
+          fi
+
+      # The changelog entry for this tag, and nothing else — this is the release body.
+      - name: Release notes (git-cliff --latest)
+        id: cliff
+        uses: orhun/git-cliff-action@v4
+        with:
+          config: cliff.toml
+          args: --latest --strip header
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Build static musl binary
+        run: |
+          nix build --print-build-logs
+          install -m 0755 result/bin/rompom \
+            "rompom-${GITHUB_REF_NAME}-x86_64-unknown-linux-musl"
+
+      - name: GitHub release
+        uses: softprops/action-gh-release@v3
+        with:
+          name: ${{ github.ref_name }}
+          body: ${{ steps.cliff.outputs.content }}
+          files: rompom-${{ github.ref_name }}-x86_64-unknown-linux-musl
+          fail_on_unmatched_files: true

@@ -1,0 +1,74 @@
+name: CI
+
+# Quality gates on push and pull request. Calls `just ci` (version-check + fmt-check +
+# lint + test) inside the Nix dev shell — the same definition pre-commit and local dev
+# use. The Justfile is the single source of truth.
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+# One run per ref: successive pushes cancel stale runs.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Cache Cargo registry and build artifacts
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: cargo-ci-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            cargo-ci-${{ runner.os }}-
+
+      - name: just ci (version-check + fmt-check + lint + test)
+        run: nix develop --command just ci
+
+  nix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      # alejandra / deadnix / statix / rustfmt, as defined in checks/.
+      - name: nix flake check
+        run: nix flake check --print-build-logs
+
+  audit:
+    runs-on: ubuntu-latest
+    # Advisory: a freshly published CVE must surface without turning every unrelated
+    # pull request red. Review the job output, do not ignore a red mark here.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: just audit (cargo-audit)
+        run: nix develop --command just audit
