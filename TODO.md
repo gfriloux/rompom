@@ -60,15 +60,30 @@ TLS correct, pas de fuite de credentials, XML échappé via quick-xml.
   (ligne/colonne) et le chemin sont perdus. *(petit)*
 - [ ] **P1.4 — Cargo.toml** : pinner les 10 dépendances `*` (valeurs du lock, reqwest
   est à 0.11.27), supprimer la section `[target.x86_64...]` invalide (ignorée par
-  cargo), ajouter `[profile.release]` (opt-level=z, LTO — aujourd'hui seulement dans
-  le Nix), retirer `serde_derive` redondant. *(petit)*
+  cargo — elle produit un `unused manifest key` à chaque build), ajouter
+  `[profile.release]` (opt-level=z, LTO — aujourd'hui seulement dans le Nix), retirer
+  `serde_derive` redondant. *(petit)*
+  - **Dette de sécurité associée**, révélée par `just audit` le 2026-08-09 et acceptée
+    explicitement dans `.cargo/audit.toml` (chaque ignore y est justifié) :
+    - `rustls-webpki 0.101.7` — 3 advisories (RUSTSEC-2026-0098/0099/0104), via
+      `rustls 0.21` ← `reqwest 0.11`. Sortie = reqwest 0.12, **impossible pour rompom
+      seul** : screenscraper et internetarchive pinnent aussi reqwest 0.11, les trois
+      doivent bouger ensemble. Se combine avec la migration rustls de P3. *(moyen)*
+    - `rustc-serialize 0.3.25` — RUSTSEC-2022-0004, sans correctif amont, via
+      `shaman` ← `checksums`. Sortie = abandonner la crate `checksums` (rompom ne s'en
+      sert que pour SHA1/MD5/CRC32). *(petit/moyen)*
+    - Restent 9 avertissements *unmaintained/unsound* non bloquants (`atty`,
+      `ansi_term`, `paste`, `lru`, `shaman`, `anyhow`…), à revoir au même moment.
 - [x] **P1.5 — CI GitHub Actions** — *fait le 2026-08-09*. `.github/workflows/ci.yml` :
   job `ci` (`just ci` = version-check + fmt-check + clippy `-D warnings` + test),
   job `nix` (`nix flake check`), job `audit` (`cargo audit`, advisory). Le `Justfile` est
   la seule définition des portes ; pre-commit l'appelle aussi. Voir `PROCEDURE_PLANS.md` §7.
-- [ ] **P1.6 — Premiers tests unitaires** (fonctions pures, sans réseau) :
+- [ ] **P1.6 — Premiers tests unitaires** (fonctions pures, sans réseau).
+  *Entamé le 2026-08-09* : le snapshot XML de `generate_description_xml()` existe
+  (`src/package.rs`, 2 tests) — il a servi à prouver que la montée quick-xml 0.39→0.41
+  ne changeait pas d'un octet la sortie. Restent :
   `disc_indicator()`, `group_multi_disc()`, `search_name()`, `check_media_changes()`,
-  snapshot XML de `generate_description_xml()` + `apply_game_path()`,
+  `apply_game_path()`,
   `read_pkgver()` + round-trip `SystemState`. Puis `apply_run_state()`
   (invariant anti-underflow). Extraire `disc_indicator`/`group_multi_disc` vers
   `src/collect.rs` au passage. *(petit chacun)*
