@@ -228,6 +228,120 @@ fn group_multi_disc(sources: Vec<RomSourceData>) -> Vec<RomSourceData> {
   result
 }
 
+/// Compiles a system's `filter` globs once, naming the offending pattern on failure.
+///
+/// They used to be recompiled inside the per-file filter closure, so an invalid glob in
+/// the config panicked once per candidate file — and compiling the same pattern for every
+/// file in an Internet Archive item is wasted work besides.
+fn compile_patterns(patterns: &[String]) -> Result<Vec<Pattern>, String> {
+  patterns
+    .iter()
+    .map(|p| Pattern::new(p).map_err(|e| format!("invalid filter pattern {:?}: {}", p, e)))
+    .collect()
+}
+
+/// Resolves a system's `source` block to the list of ROM files to process.
+///
+/// Everything in here used to `unwrap()`. All of these failures are ordinary user-facing
+/// mistakes — a mistyped Internet Archive item, an invalid glob in `rompom.yml`, a folder
+/// that does not exist — and they happen after the terminal has entered raw mode, where a
+/// panic message is painted over the interface and wiped by the next frame. The caller
+/// drops the `Ui` before printing what comes back from here.
+fn collect_sources(source: &Source, ui: &Ui) -> Result<Vec<RomSourceData>, String> {
+  let mut sources: Vec<RomSourceData> = Vec::new();
+
+  match source {
+    Source::InternetArchive(ia_items) => {
+      for item in ia_items {
+        ui.fetching_metadata(&item.item);
+
+        let patterns = compile_patterns(&item.filter)?;
+        let metadata = Arc::new(Metadata::get(&item.item).map_err(|e| {
+          format!(
+            "could not fetch Internet Archive metadata for item {:?}: {}",
+            item.item, e
+          )
+        })?);
+
+        for file in &metadata.files {
+          // A name that is not valid UTF-8 cannot travel any further: every downstream
+          // structure is String-based. Skipping it beats failing the whole system.
+          let Some(filename) = Path::new(&file.name).file_name().and_then(|n| n.to_str()) else {
+            continue;
+          };
+          if !patterns.iter().any(|pat| pat.matches(filename)) {
+            continue;
+          }
+
+          let rom_url = metadata
+            .file_urls(&file.name)
+            .map_err(|e| format!("no download URL for {:?}: {}", file.name, e))?
+            .into_iter()
+            .next()
+            .unwrap_or_default();
+
+          sources.push(RomSourceData {
+            file_name: file.name.clone(),
+            filename: filename.to_string(),
+            source: RomSource::InternetArchive(IaSource {
+              rom_url,
+              crc32: file.crc32.clone(),
+              md5: file.md5.clone(),
+              sha1: file.sha1.clone(),
+              size: file
+                .size
+                .as_deref()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0),
+              metadata: Arc::clone(&metadata),
+            }),
+            extra_discs: Vec::new(),
+          });
+        }
+      }
+    }
+
+    Source::Folder(folder) => {
+      ui.fetching_metadata(&folder.path);
+
+      let patterns = compile_patterns(&folder.filter)?;
+      let dir = Path::new(&folder.path);
+      let entries = fs::read_dir(dir)
+        .map_err(|e| format!("could not read source folder {:?}: {}", folder.path, e))?;
+
+      for entry in entries {
+        let entry =
+          entry.map_err(|e| format!("could not read an entry of {:?}: {}", folder.path, e))?;
+        let path = entry.path();
+        if !path.is_file() {
+          continue;
+        }
+
+        // Same reasoning as above, for both the base name and the full path.
+        let (Some(filename), Some(full_path)) =
+          (path.file_name().and_then(|n| n.to_str()), path.to_str())
+        else {
+          continue;
+        };
+        if !patterns.iter().any(|pat| pat.matches(filename)) {
+          continue;
+        }
+
+        sources.push(RomSourceData {
+          file_name: full_path.to_string(),
+          filename: filename.to_string(),
+          source: RomSource::Folder(FolderSource {
+            local_path: path.clone(),
+          }),
+          extra_discs: Vec::new(),
+        });
+      }
+    }
+  }
+
+  Ok(sources)
+}
+
 fn print_usage(program: &str, opts: getopts::Options) {
   let brief = format!("Usage: {} -s SYSTEM", program);
   print!("{}", opts.usage(&brief));
@@ -382,6 +496,9 @@ fn main() {
   //
   // Collect RomSourceData for all matching files first (total unknown),
   // then create bars and Rom structs once the total is known.
+  //
+  // See `collect_sources` below: every failure here is reported, not panicked, because
+  // the terminal is already in raw mode by this point.
 
   // Must precede Ui::new: from here on the terminal is in raw mode and the default
   // panic output would be written over the interface.
@@ -390,80 +507,16 @@ fn main() {
   let interrupted = Arc::new(AtomicBool::new(false));
   let queue = TaskQueue::new();
   let ui = Ui::new(Arc::clone(&interrupted), Arc::clone(&queue));
-  let mut sources: Vec<RomSourceData> = Vec::new();
-
-  match &source {
-    Source::InternetArchive(ia_items) => {
-      for item in ia_items {
-        ui.fetching_metadata(&item.item);
-        let metadata = Arc::new(Metadata::get(&item.item).unwrap());
-
-        for file in metadata.files.iter().filter(|f| {
-          let filename = Path::new(&f.name).file_name().unwrap().to_str().unwrap();
-          item
-            .filter
-            .iter()
-            .any(|pat| Pattern::new(pat).unwrap().matches(filename))
-        }) {
-          let filename = Path::new(&file.name)
-            .file_name()
-            .unwrap()
-            .to_str()
-            .unwrap()
-            .to_string();
-          let rom_url = metadata
-            .file_urls(&file.name)
-            .unwrap()
-            .into_iter()
-            .next()
-            .unwrap_or_default();
-          sources.push(RomSourceData {
-            file_name: file.name.clone(),
-            filename,
-            source: RomSource::InternetArchive(IaSource {
-              rom_url,
-              crc32: file.crc32.clone(),
-              md5: file.md5.clone(),
-              sha1: file.sha1.clone(),
-              size: file
-                .size
-                .as_deref()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(0),
-              metadata: Arc::clone(&metadata),
-            }),
-            extra_discs: Vec::new(),
-          });
-        }
-      }
+  let sources = match collect_sources(&source, &ui) {
+    Ok(sources) => sources,
+    Err(message) => {
+      // Dropping the Ui leaves raw mode and restores the screen. Printing before this
+      // would write over the interface and be wiped by the next frame.
+      drop(ui);
+      eprintln!("rompom: {}", message);
+      std::process::exit(1);
     }
-
-    Source::Folder(folder) => {
-      ui.fetching_metadata(&folder.path);
-      let dir = Path::new(&folder.path);
-      for entry in fs::read_dir(dir).unwrap() {
-        let entry = entry.unwrap();
-        let path = entry.path();
-        if !path.is_file() {
-          continue;
-        }
-        let filename = path.file_name().unwrap().to_str().unwrap().to_string();
-        if !folder
-          .filter
-          .iter()
-          .any(|pat| Pattern::new(pat).unwrap().matches(&filename))
-        {
-          continue;
-        }
-        sources.push(RomSourceData {
-          file_name: path.to_str().unwrap().to_string(),
-          filename,
-          source: RomSource::Folder(FolderSource { local_path: path }),
-          extra_discs: Vec::new(),
-        });
-      }
-    }
-  }
+  };
 
   // ── Group multi-disc files ────────────────────────────────────────────
 
@@ -504,13 +557,25 @@ fn main() {
 
   // ── Pipeline setup ────────────────────────────────────────────────────
 
-  let ss = ScreenScraper::new(
+  // Wrong credentials are the everyday case here, and this ran under the TUI: the panic
+  // was painted over the interface and the terminal left in raw mode.
+  let ss = match ScreenScraper::new(
     &conf.screenscraper.user.login,
     &conf.screenscraper.user.password,
     &conf.screenscraper.dev.login,
     &conf.screenscraper.dev.password,
-  )
-  .unwrap();
+  ) {
+    Ok(ss) => ss,
+    Err(e) => {
+      drop(ui);
+      eprintln!(
+        "rompom: could not authenticate against ScreenScraper: {}\n\
+         Check the screenscraper.user and screenscraper.dev credentials in your config.",
+        e
+      );
+      std::process::exit(1);
+    }
+  };
 
   let n_disc = ss.user_info.maxthreads as usize;
   let modal_tx = ui.modal_sender();
@@ -672,4 +737,44 @@ fn main() {
   summary.step_avg_durations = step_avg_durations;
   drop(ui);
   summary.print();
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  /// An invalid glob in rompom.yml used to panic — under the TUI, so the message was
+  /// painted over the interface and lost. The error has to name the offending pattern,
+  /// otherwise the user has no way to tell which of their filters is at fault.
+  #[test]
+  fn compile_patterns_names_the_offending_pattern() {
+    let err = compile_patterns(&["*.zip".to_string(), "[".to_string()])
+      .expect_err("an unclosed character class is not a valid glob");
+    assert!(
+      err.contains("\"[\""),
+      "error should quote the pattern: {err}"
+    );
+    assert!(err.contains("invalid filter pattern"));
+  }
+
+  #[test]
+  fn compile_patterns_accepts_the_usual_filters() {
+    let patterns = compile_patterns(&["*.zip".to_string(), "*.chd".to_string()]).unwrap();
+    assert_eq!(patterns.len(), 2);
+    assert!(patterns[0].matches("Sonic.zip"));
+    assert!(patterns[1].matches("Panzer Dragoon Saga (Disc 1).chd"));
+    assert!(!patterns[0].matches("Sonic.7z"));
+  }
+
+  /// `*` matches path separators too, unless `require_literal_separator` is set — so
+  /// `*.zip` happily matches a whole path. That is precisely why `collect_sources` feeds
+  /// these patterns the base name and never the full path: a filter meant to select files
+  /// in one folder would otherwise reach into subfolders as well. Pins the library
+  /// behaviour the collection relies on.
+  #[test]
+  fn a_star_pattern_also_matches_path_separators() {
+    let patterns = compile_patterns(&["*.zip".to_string()]).unwrap();
+    assert!(patterns[0].matches("Sonic.zip"));
+    assert!(patterns[0].matches("/roms/megadrive/Sonic.zip"));
+  }
 }
