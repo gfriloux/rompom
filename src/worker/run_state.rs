@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 
-use crate::rom::{Rom, StepKind, StepStatus};
+use crate::rom::{Rom, Step, StepStatus};
 
 // ── Run state ─────────────────────────────────────────────────────────────
 //
@@ -79,87 +79,315 @@ pub fn load_run_state(path: &str) -> Result<RunState, Box<dyn std::error::Error>
 
 /// Apply a previously saved run state to an already-constructed ROM.
 ///
-/// Steps that were Done or Skipped are restored and their successors'
-/// `wait_for` counters are decremented accordingly, so the next call to
-/// "enqueue ready steps" will correctly identify which steps still need
-/// to run.
+/// A ROM is resumed **all or nothing**: either its pipeline finished in the previous run
+/// and every status is restored, or it starts over from the beginning.
 ///
-/// Steps that were InProgress are treated as Pending (re-run from scratch).
+/// Partial resumption is not possible, and the reason is that every step feeds the next
+/// ones through the `Rom` struct, not through disk:
+///
+/// | step | leaves behind in memory |
+/// |---|---|
+/// | `ComputeHashes` | `sha1`, `md5`, `crc32`, `rom_unchanged` |
+/// | `LookupSS` / `WaitModal` | `jeu` |
+/// | `BuildPackage` | `medias`, `romname`, `package_unchanged` |
+///
+/// `run.yml` records step statuses only. A resumed `Rom` is a fresh struct, so all of
+/// that is `None`. Restoring `LookupSS` as Done and letting `BuildPackage` run meant
+/// building a package with no `JeuInfo` at all: an empty description.xml overwriting the
+/// good one, and a `pkgver` bumped for the privilege. Further along, `SaveState` would
+/// persist `ss_game_id: None` and an empty media map, throwing away the cache that makes
+/// the next run fast.
+///
+/// Starting over is affordable because every expensive operation is already
+/// skip-if-valid: `ComputeHashes` has the mtime+size fast path, `LookupSS` reuses the
+/// cached `ss_game_id`, downloads verify sha1 before fetching, and `BuildPackage` only
+/// rewrites when something actually changed. What a resumed ROM re-does is checks, not
+/// work.
+///
+/// One thing is genuinely lost: a game identified by hand through the modal has to be
+/// identified again, because that choice only ever lived in `rom.jeu` and in the
+/// `state.yml` entry `SaveState` never got to write.
+///
+/// Returns `true` when the ROM was already finished, so the caller can mark it as such
+/// and keep the run's `remaining` counter in step with what `main` counted.
 pub fn apply_run_state(rom: &mut Rom, run_entry: &RunRomEntry) {
+  rom.finished = restore_finished_pipeline(&mut rom.pipeline, run_entry);
+}
+
+/// Takes the pipeline rather than the `Rom` so it can be tested without building a
+/// `RomBar`, and with it the whole terminal UI.
+fn restore_finished_pipeline(pipeline: &mut [Step], run_entry: &RunRomEntry) -> bool {
+  // The leaf is the last step of both DAGs; if it reached a terminal status the ROM is
+  // done and nothing may run again.
+  let leaf_finished = run_entry
+    .step_statuses
+    .get(pipeline.len() - 1)
+    .is_some_and(|s| {
+      matches!(
+        s,
+        RunStepStatus::Done | RunStepStatus::Skipped | RunStepStatus::Failed(_)
+      )
+    });
+
+  if !leaf_finished {
+    // Leave the pipeline exactly as constructed: everything Pending, WaitModal Skipped.
+    // No wait_for is touched, so the counters cannot underflow later.
+    return false;
+  }
+
   for (idx, saved) in run_entry.step_statuses.iter().enumerate() {
-    if idx >= rom.pipeline.len() {
+    if idx >= pipeline.len() {
       break;
     }
-    let restored = match saved {
+    pipeline[idx].status = match saved {
       RunStepStatus::Done => StepStatus::Done,
       RunStepStatus::Skipped => StepStatus::Skipped,
       RunStepStatus::Failed(e) => StepStatus::Failed(e.clone()),
-      // Pending or InProgress → stay Pending (initial DAG status)
-      _ => continue,
+      // A step still running when the interrupt landed cannot have produced anything
+      // downstream, yet the leaf is finished — treat it as skipped rather than leave it
+      // Pending, which would re-enqueue it in a pipeline nothing else will follow.
+      RunStepStatus::Pending | RunStepStatus::InProgress => StepStatus::Skipped,
     };
-    rom.pipeline[idx].status = restored;
-
-    // Only propagate through the DAG if this step was actually reached in the
-    // previous run, i.e. its own wait_for has already reached 0 (all its
-    // predecessors were restored as Done/Skipped earlier in this loop).
-    //
-    // Without this guard, a step that is Skipped by default (WaitModal) but
-    // whose predecessor is still Pending would incorrectly decrement its
-    // successor's wait_for — causing an underflow when the predecessor later
-    // dispatches the same step via do_dispatch during the resumed run.
-    if rom.pipeline[idx].wait_for_count() != 0 {
-      continue;
-    }
-
-    let nexts: Vec<usize> = rom.pipeline[idx].next.clone();
-    for next_idx in nexts {
-      rom.pipeline[next_idx].dec_wait_for();
-    }
   }
+
+  true
 }
 
 /// Update the ROM's UI bar to reflect its restored pipeline state.
 ///
-/// Must be called after `apply_run_state`. Places each ROM in the correct
-/// panel so the user sees:
-/// - already-completed ROMs in the Completed panel,
-/// - ROMs waiting for downloads in the Downloads panel,
-/// - ROMs waiting for packaging in the Discovery panel (Packaging sub-phase),
-/// - ROMs still in Discovery unchanged (default "queued" state).
+/// Must be called after `apply_run_state`. Since resumption is all or nothing there are
+/// only two cases: a ROM that finished last run goes straight to the Completed panel,
+/// and any other ROM restarts from the first step, which is the "queued / Discovering"
+/// state `new_rom_bar()` already set.
 pub fn restore_bar_for_resumed_rom(rom: &Rom) {
-  let pipeline = &rom.pipeline;
-  let last = pipeline.len() - 1;
+  let leaf = &rom.pipeline[rom.pipeline.len() - 1];
 
-  // ROM was fully completed in the previous run.
-  match &pipeline[last].status {
-    StepStatus::Done | StepStatus::Skipped => {
-      rom.bar.finish(false);
-      return;
-    }
-    StepStatus::Failed(_) => {
-      rom.bar.finish_error();
-      return;
-    }
+  match &leaf.status {
+    StepStatus::Done | StepStatus::Skipped => rom.bar.finish(false),
+    StepStatus::Failed(_) => rom.bar.finish_error(),
     _ => {}
   }
+}
 
-  // Find the first step that still needs to run to infer the current phase.
-  let first_pending = pipeline
-    .iter()
-    .find(|s| s.status == StepStatus::Pending)
-    .map(|s| &s.kind);
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use crate::rom::{StepData, StepKind};
 
-  match first_pending {
-    Some(StepKind::BuildPackage) => {
-      rom.bar.preparing_pending();
+  /// Same shape as the folder DAG: 7 steps, WaitModal Skipped by default, SaveState
+  /// the single leaf waiting on two predecessors.
+  fn pipeline() -> Vec<Step> {
+    vec![
+      Step::new(
+        StepKind::ComputeHashes,
+        StepStatus::Pending,
+        StepData::ComputeHashes {
+          sha1: None,
+          md5: None,
+          crc32: None,
+          size: 0,
+          mtime: 0,
+        },
+        vec![1],
+        0,
+      ),
+      Step::new(
+        StepKind::LookupSS,
+        StepStatus::Pending,
+        StepData::LookupSS {
+          jeu: Box::new(None),
+          candidates: Vec::new(),
+        },
+        vec![2],
+        1,
+      ),
+      Step::new(
+        StepKind::WaitModal,
+        StepStatus::Skipped,
+        StepData::WaitModal {
+          jeu: Box::new(None),
+        },
+        vec![3],
+        1,
+      ),
+      Step::new(
+        StepKind::BuildPackage,
+        StepStatus::Pending,
+        StepData::BuildPackage {
+          medias: Box::new(None),
+          romname: None,
+          pkgver: 0,
+        },
+        vec![4, 5],
+        1,
+      ),
+      Step::new(
+        StepKind::CopyRom,
+        StepStatus::Pending,
+        StepData::CopyRom,
+        vec![6],
+        1,
+      ),
+      Step::new(
+        StepKind::DownloadMedias,
+        StepStatus::Pending,
+        StepData::DownloadMedias,
+        vec![6],
+        1,
+      ),
+      Step::new(
+        StepKind::SaveState,
+        StepStatus::Pending,
+        StepData::SaveState,
+        vec![],
+        2,
+      ),
+    ]
+  }
+
+  fn entry(statuses: Vec<RunStepStatus>) -> RunRomEntry {
+    RunRomEntry {
+      filename: "Sonic.zip".to_string(),
+      step_statuses: statuses,
     }
-    Some(
-      StepKind::CopyRom | StepKind::DownloadRom | StepKind::DownloadMedias | StepKind::SaveState,
-    ) => {
-      rom.bar.downloading_pending();
-    }
-    // ComputeHashes / LookupSS / WaitModal → still in Discovering phase.
-    // The bar was initialised to "queued / Discovering" in new_rom_bar(); no change needed.
-    _ => {}
+  }
+
+  /// The corruption case. Interrupted between LookupSS (Done) and BuildPackage
+  /// (Pending): restoring LookupSS as Done let BuildPackage run with `jeu` at None,
+  /// writing an empty description.xml over the good one and bumping pkgver for it.
+  /// The whole pipeline has to start over instead.
+  #[test]
+  fn an_unfinished_rom_restarts_from_the_beginning() {
+    use RunStepStatus as R;
+    let mut p = pipeline();
+
+    let finished = restore_finished_pipeline(
+      &mut p,
+      &entry(vec![
+        R::Done,    // ComputeHashes
+        R::Done,    // LookupSS  ← produced `jeu`, which is gone
+        R::Skipped, // WaitModal
+        R::Pending, // BuildPackage
+        R::Pending, // CopyRom
+        R::Pending, // DownloadMedias
+        R::Pending, // SaveState
+      ]),
+    );
+
+    assert!(!finished);
+    assert_eq!(
+      p[0].status,
+      StepStatus::Pending,
+      "ComputeHashes must re-run"
+    );
+    assert_eq!(p[1].status, StepStatus::Pending, "LookupSS must re-run");
+    assert_eq!(
+      p[2].status,
+      StepStatus::Skipped,
+      "WaitModal keeps its default"
+    );
+    assert_eq!(p[3].status, StepStatus::Pending);
+  }
+
+  /// Nothing may be decremented for a restarting ROM: the counters have to stay at
+  /// their constructed values or do_dispatch would underflow them during the run.
+  #[test]
+  fn restarting_leaves_every_wait_for_untouched() {
+    use RunStepStatus as R;
+    let mut p = pipeline();
+    let before: Vec<usize> = p.iter().map(|s| s.wait_for_count()).collect();
+
+    restore_finished_pipeline(
+      &mut p,
+      &entry(vec![
+        R::Done,
+        R::Done,
+        R::Skipped,
+        R::InProgress,
+        R::Pending,
+        R::Pending,
+        R::Pending,
+      ]),
+    );
+
+    let after: Vec<usize> = p.iter().map(|s| s.wait_for_count()).collect();
+    assert_eq!(before, after);
+    assert_eq!(after[6], 2, "SaveState still waits on both branches");
+  }
+
+  /// A ROM that finished keeps its statuses so it shows up in the Completed panel, and
+  /// reports itself finished — `main` excludes it from `remaining`, so a later
+  /// decrement would underflow the counter and the queue would never shut down.
+  #[test]
+  fn a_finished_rom_is_restored_and_reports_itself_finished() {
+    use RunStepStatus as R;
+    let mut p = pipeline();
+
+    let finished = restore_finished_pipeline(
+      &mut p,
+      &entry(vec![
+        R::Done,
+        R::Done,
+        R::Skipped,
+        R::Done,
+        R::Done,
+        R::Done,
+        R::Done,
+      ]),
+    );
+
+    assert!(finished);
+    assert_eq!(p[6].status, StepStatus::Done);
+    assert!(p.iter().all(|s| s.status != StepStatus::Pending));
+  }
+
+  /// A ROM that failed last run is finished too: its leaf was cut to Skipped by
+  /// skip_successors, and it must not be retried silently inside the same resume.
+  #[test]
+  fn a_rom_cut_short_by_a_failure_counts_as_finished() {
+    use RunStepStatus as R;
+    let mut p = pipeline();
+
+    let finished = restore_finished_pipeline(
+      &mut p,
+      &entry(vec![
+        R::Done,
+        R::Done,
+        R::Skipped,
+        R::Done,
+        R::Failed("download failed".to_string()),
+        R::Done,
+        R::Skipped,
+      ]),
+    );
+
+    assert!(finished);
+    assert!(matches!(p[4].status, StepStatus::Failed(_)));
+    assert!(p.iter().all(|s| s.status != StepStatus::Pending));
+  }
+
+  /// A step still in flight when the interrupt landed, in a pipeline whose leaf did
+  /// finish, must not be left Pending — it would be re-enqueued on its own with nothing
+  /// downstream to follow it.
+  #[test]
+  fn an_in_flight_step_in_a_finished_pipeline_is_not_requeued() {
+    use RunStepStatus as R;
+    let mut p = pipeline();
+
+    restore_finished_pipeline(
+      &mut p,
+      &entry(vec![
+        R::Done,
+        R::Done,
+        R::Skipped,
+        R::Done,
+        R::InProgress,
+        R::Done,
+        R::Done,
+      ]),
+    );
+
+    assert_eq!(p[4].status, StepStatus::Skipped);
+    assert!(p.iter().all(|s| s.status != StepStatus::Pending));
   }
 }

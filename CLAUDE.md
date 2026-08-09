@@ -331,26 +331,41 @@ and are **not** re-run on resume (their work is preserved). Only genuinely cance
 ### Interrupted run / resume
 
 On Ctrl-C, a flag is set; workers finish their current step then stop. `collect_run_state()`
-snapshots each ROM's step statuses to `<system>.run.yml`. On the next run, if this file exists,
-the user is prompted to resume. On "yes":
+snapshots each ROM's step statuses to `<system>.run.yml`. On the next run, if this file exists, the user is prompted to resume.
 
-1. `apply_run_state()` restores Done/Skipped statuses and decrements successor `wait_for`
-   counters so only pending steps are re-queued.
-2. `restore_bar_for_resumed_rom()` updates each ROM's bar to the correct UI phase:
-   - SaveState Done/Failed → `bar.finish()` / `bar.finish_error()` → Completed panel
-   - DownloadRom / DownloadMedias / SaveState Pending → `bar.downloading_pending()` → Downloads panel
-   - BuildPackage Pending → `bar.preparing_pending()` → Discovery panel (Packaging sub-phase)
-   - LookupSS / ComputeHashes Pending → stays "queued" in Discovery panel
+**Resumption is all or nothing, per ROM.** `apply_run_state()` either restores every status
+(the ROM finished last run) or leaves the pipeline exactly as constructed (the ROM starts
+over). There is no partial resume, because every step feeds the next ones **through the
+`Rom` struct, not through disk**:
+
+| step | leaves behind in memory |
+|---|---|
+| `ComputeHashes` | `sha1`, `md5`, `crc32`, `rom_unchanged` |
+| `LookupSS` / `WaitModal` | `jeu` |
+| `BuildPackage` | `medias`, `romname`, `package_unchanged` |
+
+`run.yml` records step statuses only, and a resumed `Rom` is a fresh struct where all of
+that is `None`. Restoring `LookupSS` as Done and letting `BuildPackage` run built a package
+with no `JeuInfo`: an empty `description.xml` overwriting the good one, with a `pkgver`
+bumped for it. Further along, `SaveState` persisted `ss_game_id: None` and an empty media
+map, discarding the cache that makes the next run fast.
+
+Starting over is affordable because every expensive operation is already skip-if-valid —
+the mtime+size fast path, the cached `ss_game_id`, sha1 verification before downloading,
+and `BuildPackage` rewriting only on a real change. A resumed ROM re-does checks, not work.
+What is genuinely lost is a game identified by hand through the modal: that choice only
+lived in `rom.jeu` and in the `state.yml` entry `SaveState` never wrote.
+
+A ROM restored as finished also gets `Rom::finished = true`, because `main` excludes it
+from `remaining` — without it a later decrement would underflow the counter and the queue
+would never shut down.
+
+`restore_bar_for_resumed_rom()` follows the same two cases: finished → Completed panel
+(`bar.finish()` / `bar.finish_error()`), otherwise the bar keeps the "queued / Discovering"
+state `new_rom_bar()` set.
 
 On "no", the file is deleted and a fresh run starts.
 Second Ctrl-C triggers `std::process::exit(1)` immediately.
-
-**`apply_run_state` invariant**: a step's successors are only decremented if the step's own
-`wait_for` has already reached 0 (i.e. all its predecessors were restored as Done/Skipped
-earlier in the loop). This prevents `WaitModal` — which starts as `Skipped` by default but
-may have an unfinished predecessor — from incorrectly decrementing `BuildPackage`'s counter
-on resume, which would cause an underflow in `dec_wait_for()` when the predecessor later
-dispatches it via `do_dispatch`.
 
 ## RomSourceData / Rom structs
 
