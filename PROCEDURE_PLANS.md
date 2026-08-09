@@ -141,10 +141,23 @@ intentionnel, et le diff se relit.
 | Nouveau template PKGBUILD | `package` | 1. template + sélection (`feat(package): …`) → 2. snapshot → 3. doc |
 | Changement de `description.xml` | `package` | 1. snapshot mis à jour (`test(package): …`) → 2. impl → 3. doc |
 | Changement d'UI / phase | `ui` | 1. impl (`feat(ui): …`) → 2. `manual_tests.md` → relecture visuelle |
-| Correction de bug | étage concerné | 1. test de régression qui échoue (`test: reproduce …`) → 2. fix (`fix(scope): …`) |
+| Correction de bug | étage concerné | test de régression **+** fix dans le **même** commit (`fix(scope): …`) — cf. note ci-dessous |
 | Refactor | étage concerné | 1. refactor sans changer de snapshot (`refactor(scope): …`). Si un snapshot bouge, ce n'était pas un refactor. |
 | Changement de format d'état | `state` | migration explicite + note de rupture ; jamais de changement silencieux de `state.yml` |
 | Doc seule | — | `docs: …` |
+
+### Test de régression : observé rouge, commité vert
+
+On écrit toujours le test **avant** le correctif et on le **regarde échouer** — sans ça,
+rien ne prouve qu'il teste quelque chose. Mais il est commité **avec** le correctif, pas
+avant.
+
+Raison : §3 exige que chaque commit passe les portes seul. Un commit intermédiaire rouge
+casse `git bisect` et interdit de relire l'historique en confiance. Le message de commit
+porte alors la preuve, en décrivant ce que le test produisait avant le fix.
+
+C'est la seule entorse à « une étape = un commit » : ici l'étape *est* la paire
+test + correctif.
 
 ---
 
