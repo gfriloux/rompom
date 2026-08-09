@@ -36,6 +36,11 @@ mais ne l'entame pas.
    `[A-Za-z0-9._-]`, tout le reste tombe. Un nom de jeu ne peut alors plus rien injecter,
    quelle que soit la créativité de ScreenScraper.
 
+   **Arbitrage validé par l'utilisateur le 2026-08-09 :** on accepte que des `pkgname`
+   existants changent, donc qu'un `pkgver` soit bumpé et qu'un paquet soit renommé au
+   prochain run. *« Tant pis si cela renomme des packages — ils n'étaient pas conformes. »*
+   Le risque correspondant est donc clos, pas à surveiller.
+
 2. **Échappement au point d'injection, pas à la source.** `pkgdesc` doit rester lisible
    (« Sonic & Knuckles »), donc on ne le normalise pas : on l'échappe pour le shell au
    moment de le rendre dans le template. Une fonction unique, appliquée à tout champ
@@ -86,35 +91,32 @@ mais ne l'entame pas.
 
 ### Phase 1 — Injection et traversée de chemin (P0.1, P0.2)
 
-#### Étape 1 : tests d'injection qui échouent
-**Description :** tests montrant qu'un nom SS hostile (`$(id)`, backtick, `"`, `\n`) sort
-intact de `normalize_name()` et atteint le PKGBUILD ; qu'un sha1 non hexadécimal est
-accepté ; que `media_filename("image", "png/../../x")` s'échappe du répertoire.
-**Vérification :** `just test` — les tests échouent, c'est le but.
-**Commit :** `test(package): expose the PKGBUILD injection and traversal surface`
-
-#### Étape 2 : échappement des champs injectés
-**Description :** fonction d'échappement shell unique appliquée à `pkgdesc`, `romname`,
-`pkgname` ; `normalize_name()` passe en liste blanche `[A-Za-z0-9._-]` ; liste blanche
-alphanumérique pour `format`/`region` des médias ; `sha1` validé contre `^[0-9a-f]{40}$`.
-**Vérification :** `just ci` — les tests de l'étape 1 passent.
+#### Étape 1 : échappement des champs injectés
+**Description :** tests d'abord (observés rouges) montrant qu'un nom SS hostile
+(`$(id)`, backtick, `"`, `\n`) traverse `normalize_name()` et atteint le PKGBUILD, et
+qu'un sha1 non hexadécimal est accepté. Puis le correctif : fonction d'échappement shell
+unique appliquée à `pkgdesc`, `romname`, `pkgname` ; `normalize_name()` en liste blanche
+`[A-Za-z0-9._-]` ; liste blanche alphanumérique pour `format`/`region` des médias ;
+`sha1` validé contre `^[0-9a-f]{40}$`.
+**Vérification :** `just ci`
 **Commit :** `fix(package): escape every ScreenScraper field injected into a PKGBUILD`
 
-#### Étape 3 : traversée de chemin sur les médias
-**Description :** `media_filename()` rejette `/`, `\` et `..`.
+#### Étape 2 : traversée de chemin sur les médias
+**Description :** test montrant que `media_filename("image", "png/../../x")` s'échappe du
+répertoire de sortie, puis rejet de `/`, `\` et `..`.
 **Vérification :** `just ci`
 **Commit :** `fix(pipeline): reject path separators in media filenames`
 
 ### Phase 2 — Le DAG survit à l'échec (P0.3, P0.4)
 
-#### Étape 4 : une panique de handler devient un échec
+#### Étape 3 : une panique de handler devient un échec
 **Description :** `catch_unwind(AssertUnwindSafe(...))` autour du dispatch des handlers
 dans `execute_step` ; la panique devient `Failed` au lieu de tuer le worker et de laisser
 `remaining` bloqué.
 **Vérification :** `just ci` + test d'un handler qui panique.
 **Commit :** `fix(pipeline): turn a handler panic into a failed step instead of a deadlock`
 
-#### Étape 5 : un échec définitif n'empoisonne plus l'état
+#### Étape 4 : un échec définitif n'empoisonne plus l'état
 **Description :** après `Failed`, marquer les successeurs `Skipped` au lieu de les
 dispatcher — `SaveState` ne persiste plus le sha1 d'une ROM jamais téléchargée, et l'UI
 ne compte plus 1 erreur *et* 1 succès pour la même ROM.
@@ -123,29 +125,24 @@ ne compte plus 1 erreur *et* 1 succès pour la même ROM.
 
 ### Phase 3 — Le resume ne corrompt plus les paquets (P0.5)
 
-#### Étape 6 : test de l'invariant `apply_run_state`
-**Description :** test de l'invariant anti-underflow existant, puis test montrant qu'une
-interruption entre `LookupSS` (Done) et `BuildPackage` (Pending) produit un
-`description.xml` vide au resume.
-**Vérification :** `just test`
-**Commit :** `test(state): cover apply_run_state and the resume corruption case`
-
-#### Étape 7 : re-dériver `jeu`/`medias` au resume
-**Description :** au resume, si `BuildPackage` ou `SaveState` est `Pending`, remettre
-`LookupSS` à `Pending`.
+#### Étape 5 : re-dériver `jeu`/`medias` au resume
+**Description :** tests d'abord — l'invariant anti-underflow de `apply_run_state`, puis le
+cas de corruption : une interruption entre `LookupSS` (Done) et `BuildPackage` (Pending)
+produit un `description.xml` vide au resume. Puis le correctif : si `BuildPackage` ou
+`SaveState` est `Pending`, remettre `LookupSS` à `Pending`.
 **Vérification :** `just ci` + test manuel de resume (cf. `manual_tests.md`)
 **Commit :** `fix(state): re-run the ScreenScraper lookup when resuming an unfinished package`
 
 ### Phase 4 — Sorties d'erreur lisibles (P0.6)
 
-#### Étape 8 : la collecte ne panique plus
+#### Étape 6 : la collecte ne panique plus
 **Description :** remplacer les `unwrap()` de collecte (`Metadata::get`, `Pattern::new`,
 `read_dir`, `ScreenScraper::new`) par des erreurs remontées ; sortir du TUI avant
 d'écrire sur stderr. Les `lock().unwrap()` restent.
 **Vérification :** `just ci` + essai avec credentials faux et glob invalide.
 **Commit :** `fix(collect): report collection failures instead of panicking under the TUI`
 
-#### Étape 9 : date ScreenScraper malformée
+#### Étape 7 : date ScreenScraper malformée
 **Description :** `emulationstation.rs:73` — `parse_from_str(...).unwrap()` sur une date
 SS invalide tue le worker. Repli sur la date epoch déjà prévue plus haut.
 **Vérification :** `just ci` + test avec date `0000-00-00` et date absurde.
@@ -156,21 +153,21 @@ SS invalide tue le worker. Repli sur la date epoch déjà prévue plus haut.
 > Cette phase peut être décalée en v0.17 sans rien casser des précédentes. Elle est ici
 > parce que P1.1 touche `discovery.rs`, déjà ouvert par la phase 3.
 
-#### Étape 10 : erreur réseau ≠ jeu introuvable
+#### Étape 8 : erreur réseau ≠ jeu introuvable
 **Description :** `discovery.rs:250,255` — distinguer `Err` (retry, le retry de `LookupSS`
 est aujourd'hui du code mort) de `Ok(None)` (modale d'identification). Supprime les
 modales injustifiées sur timeout, 500 ou quota dépassé.
 **Vérification :** `just ci` + essai hors ligne (cf. `manual_tests.md`)
 **Commit :** `fix(pipeline): tell a ScreenScraper network error from a missing game`
 
-#### Étape 11 : afficher la cause des échecs
+#### Étape 9 : afficher la cause des échecs
 **Description :** propager le message de `StepStatus::Failed(msg)` jusqu'à
 `finish_error()` ; panneau Completed `✗ rom — cause` ; liste des échecs dans
 `Summary::print()`.
 **Vérification :** `just ci` + relecture visuelle
 **Commit :** `feat(ui): show the failure cause for each failed ROM`
 
-#### Étape 12 : messages d'erreur de configuration
+#### Étape 10 : messages d'erreur de configuration
 **Description :** `#[snafu(display)]` sur `ReadConfiguration`/`ParseConfiguration` pour
 conserver le chemin et l'erreur serde_yaml (ligne/colonne).
 **Vérification :** `just ci` + config volontairement cassée
@@ -178,12 +175,12 @@ conserver le chemin et l'erreur serde_yaml (ligne/colonne).
 
 ### Clôture
 
-#### Étape 13 : documentation et roadmap
+#### Étape 11 : documentation et roadmap
 **Description :** `CLAUDE.md` (comportement du DAG en échec, resume, échappement),
 `TODO.md` (cocher P0.1–P0.6, P1.1–P1.3, rafraîchir le séquencement).
 **Commit :** `docs: record the failure-path behaviour and tick off the P0 lot`
 
-#### Étape 14 : release
+#### Étape 12 : release
 **Description :** `just release 0.16.0`, relire le changelog généré, puis l'utilisateur
 tague.
 **Commit :** `chore(release): v0.16.0`
@@ -205,6 +202,6 @@ tague.
 | Risque | Parade |
 |---|---|
 | L'échappement casse des PKGBUILD qui marchaient | Snapshot PKGBUILD avant/après sur un jeu au nom simple, en plus des tests hostiles |
-| La liste blanche change des `pkgname` existants → re-bump massif de `pkgver` | Vérifier sur un dépôt réel avant release ; l'accepter et le documenter si c'est le cas |
+| ~~La liste blanche renomme des `pkgname` existants~~ | **Arbitré le 2026-08-09 : accepté.** Les noms non conformes doivent changer. À signaler dans le changelog. |
 | `catch_unwind` masque un vrai bug | Le message de panique part dans `Failed(msg)`, donc visible via l'étape 11 |
 | Phase 5 fait déborder la version | Elle est séparable : la décaler en v0.17 ne casse rien |
