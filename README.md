@@ -318,11 +318,25 @@ Installing `set-castlevania` pulls all listed games in one command.
 nix develop
 ```
 
-This drops you into a shell with cargo, rustc, clippy, rustfmt, and rust-analyzer. On first
-entry, the pre-commit git hook is installed automatically. It runs on every commit to enforce
-formatting and linting.
+This drops you into a shell with cargo, rustc, clippy, rustfmt, rust-analyzer, just,
+git-cliff and cargo-audit. On first entry, the pre-commit git hook is installed
+automatically. It runs on every commit to enforce formatting and linting.
 
-To run checks manually:
+### Quality gates
+
+The `Justfile` is the single definition of the gates — pre-commit, the CI workflow and
+local development all call the same recipes:
+
+```
+just ci             # version-check + fmt-check + lint + test
+just fmt            # rustfmt --config tab_spaces=2, in place
+just audit          # CVE scan of the dependency tree
+```
+
+`just version-check` guards against the version drifting between `Cargo.toml`, `Cargo.lock`
+and `packages/rompom/default.nix`.
+
+Nix-side checks run separately:
 
 ```
 nix flake check
@@ -330,6 +344,16 @@ nix flake check
 
 This validates Nix formatting (alejandra), dead Nix code (deadnix), Nix linting (statix),
 and Rust formatting (rustfmt).
+
+### Contributing
+
+Read [`PROCEDURE_PLANS.md`](PROCEDURE_PLANS.md) before starting: it defines the planning
+procedure, the commit convention and the test discipline. In short — dedicated branch,
+atomic [Conventional Commits](https://www.conventionalcommits.org/) with a real scope
+(never `all`), docs in the same commit as the code.
+
+Commit subjects matter: `CHANGELOG.md` is generated from them, so each subject becomes a
+release note verbatim.
 
 ### Working against local library changes
 
@@ -349,4 +373,30 @@ Restore the `tag =` line before tagging a new release.
 
 ## Changelog
 
-See [CHANGELOG.md](CHANGELOG.md) for the full version history.
+[CHANGELOG.md](CHANGELOG.md) holds the version history. It is **generated** from the
+Conventional Commits by [git-cliff](https://git-cliff.org) — run `just changelog` rather
+than editing it.
+
+Entries for **v0.15.0 and earlier** predate git-cliff and are kept, in their original and
+much more detailed form, in [CHANGELOG-legacy.md](CHANGELOG-legacy.md).
+
+## Release
+
+Versioning follows [SemVer](https://semver.org/). The tag is set by the **maintainer** and
+triggers publication.
+
+1. `just release X.Y.Z` — bumps the version in `Cargo.toml`, `Cargo.lock` and
+   `packages/rompom/default.nix`, then regenerates `CHANGELOG.md` for that version.
+2. Review the diff, commit as `chore(release): vX.Y.Z`, merge onto `master`.
+3. Tag and push:
+
+   ```
+   git tag -a vX.Y.Z -m "vX.Y.Z" && git push origin vX.Y.Z
+   ```
+
+Pushing the tag runs [`.github/workflows/release.yml`](.github/workflows/release.yml), which
+refuses to publish if the tag does not match the version in `Cargo.toml`, then creates a
+GitHub release whose body is the `CHANGELOG.md` entry for that exact version, with the
+static musl binary attached.
+
+Dependencies (Cargo, flake inputs, GitHub Actions) are kept up to date by **Renovate**.
