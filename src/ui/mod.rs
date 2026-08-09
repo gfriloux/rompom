@@ -188,6 +188,15 @@ pub struct RomBar {
   index: usize,
 }
 
+impl RomBar {
+  /// Makes the shared UI state usable again after a step handler panicked while
+  /// holding its lock. Without this the render thread would panic on its next frame
+  /// and the interface would freeze mid-run.
+  pub fn clear_poison(&self) {
+    self.state.clear_poison();
+  }
+}
+
 pub struct Ui {
   state: Arc<Mutex<AppState>>,
   running: Arc<AtomicBool>,

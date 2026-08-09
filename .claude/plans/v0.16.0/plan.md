@@ -55,6 +55,22 @@ mais ne l'entame pas.
    doit quand même tomber à zéro, sinon la queue ne s'arrête jamais. On propage donc un
    `Skipped` le long du DAG au lieu de simplement ne pas dispatcher.
 
+   **Correction apportée à l'étape 3 :** cette conception ne suffit pas. `remaining`
+   n'est décrémenté que **dans `handle_save_state`** (`save_state.rs:96`), et le chemin
+   rapide `Skipped` de `execute_step` retourne **sans exécuter le handler**. Propager un
+   `Skipped` jusqu'à `SaveState` laisserait donc `remaining` bloqué — exactement le
+   blocage que P0.3 corrige. L'étape 4 doit **déplacer la décrémentation dans
+   `execute_step`**, sur la fin de pipeline, pour qu'elle ait lieu une fois par ROM que
+   la fin soit `Done`, `Skipped` ou `Failed`.
+
+7. **`panic = "abort"` doit disparaître du profil release Nix.** Il était posé pour la
+   taille du binaire ; il rend `catch_unwind` inopérant — le process avorte. Le correctif
+   P0.3 aurait été du code mort dans le seul build que les utilisateurs lancent.
+
+8. **Une panique ne se retente pas.** Un dépassement d'index ou un `unwrap()` sur `None`
+   retombera à l'identique : la logique de retry ne ferait que dépenser le backoff pour
+   arriver au même échec. Les paniques vont directement en `Failed`.
+
 5. **Au resume, on re-dérive plutôt qu'on ne devine.** `run.yml` ne stocke pas `jeu`/
    `medias`. Plutôt que de les sérialiser (format d'état supplémentaire à maintenir), on
    remet `LookupSS` à `Pending` dès que `BuildPackage` ou `SaveState` est `Pending`. Coût :

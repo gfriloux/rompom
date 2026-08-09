@@ -383,6 +383,10 @@ fn main() {
   // Collect RomSourceData for all matching files first (total unknown),
   // then create bars and Rom structs once the total is known.
 
+  // Must precede Ui::new: from here on the terminal is in raw mode and the default
+  // panic output would be written over the interface.
+  worker::install_panic_hook();
+
   let interrupted = Arc::new(AtomicBool::new(false));
   let queue = TaskQueue::new();
   let ui = Ui::new(Arc::clone(&interrupted), Arc::clone(&queue));

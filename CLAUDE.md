@@ -245,6 +245,27 @@ LookupSS → WaitModal* → BuildPackage → DownloadRom ────┐
   `main.rs` after all workers join). Persists `extra_disc_sha1s` for multi-disc games.
   Emits `bar.finish()`. Decrements `remaining` counter; shuts down the queue when it reaches 0.
 
+### Panic containment
+
+`execute_step` wraps the handler dispatch in `catch_unwind`. A panicking handler used to
+kill its worker thread, leaving that ROM short of `SaveState`, `remaining` above zero and
+the queue never shut down — the run hung. The panic now becomes `StepStatus::Failed` with
+its message and location, and the run continues.
+
+Three things this depends on:
+
+- **Poison clearing.** A handler almost always panics while holding the `Rom`, `state` or
+  `AppState` lock. Every `lock()` in `worker/` unwraps, so without
+  `clear_poison()` the next one panics in turn and the worker dies anyway.
+- **No `panic = "abort"`.** `packages/rompom/default.nix` deliberately omits it; with
+  abort, `catch_unwind` never runs and this whole mechanism is dead code in the shipped
+  binary.
+- **Panics skip the retry logic.** They are deterministic bugs, not transient failures.
+
+`install_panic_hook()` (called from `main` before `Ui::new`) records the panic location in
+a thread-local and suppresses the default stderr output, which would otherwise be written
+over the ratatui interface. Panics outside a step handler are therefore silent.
+
 ### Thread counts
 - **Main pool**: `ss.user_info.maxthreads + N_EXTRA_MAIN_WORKERS` (fallback 1 + 8 = 9 total).
   Handles all steps except `WaitModal`. Extra workers keep downloads and packaging running while
