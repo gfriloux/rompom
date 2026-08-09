@@ -25,7 +25,7 @@ use screenscraper::ScreenScraper;
 use crate::{
   conf::System,
   queue::{Semaphore, TaskQueue},
-  rom::{Rom, StepKind, StepStatus},
+  rom::{Rom, Step, StepKind, StepStatus},
   state::SystemState,
   ui::ModalRequest,
 };
@@ -136,6 +136,9 @@ fn execute_step(rom_arc: Arc<Mutex<Rom>>, step_idx: usize, ctx: &WorkerContext) 
     let rom = rom_arc.lock().unwrap();
     if rom.pipeline[step_idx].status == StepStatus::Skipped {
       drop(rom);
+      // A skipped leaf still ends the ROM — that is how a pipeline cut short by an
+      // upstream failure releases its slot in `remaining`.
+      finish_rom(&rom_arc, step_idx, ctx);
       do_dispatch(&rom_arc, step_idx, &ctx.queue);
       return;
     }
@@ -224,6 +227,8 @@ fn execute_step(rom_arc: Arc<Mutex<Rom>>, step_idx: usize, ctx: &WorkerContext) 
     }
   };
 
+  let failed = matches!(final_status, StepStatus::Failed(_));
+
   // Record completion timestamp and final status.
   {
     let mut rom = rom_arc.lock().unwrap();
@@ -232,8 +237,69 @@ fn execute_step(rom_arc: Arc<Mutex<Rom>>, step_idx: usize, ctx: &WorkerContext) 
     step.status = final_status;
   }
 
+  // A definitive failure must not let the rest of the pipeline run: SaveState would
+  // persist state for work that never happened. The successors are marked Skipped and
+  // still dispatched, so their wait_for counters unwind normally and the leaf is
+  // reached — which is what releases this ROM from `remaining`.
+  if failed {
+    skip_successors(&mut rom_arc.lock().unwrap().pipeline, step_idx);
+  }
+
+  finish_rom(&rom_arc, step_idx, ctx);
+
   // DAG routing: decrement successors' wait_for and enqueue those that are ready.
   do_dispatch(&rom_arc, step_idx, &ctx.queue);
+}
+
+/// Decrements the run's outstanding-ROM counter when this step ends the ROM's pipeline,
+/// and shuts the queue down once no ROM is left.
+///
+/// A step with no successors is a pipeline leaf — `SaveState` in both DAGs — so reaching
+/// a terminal status there means the ROM is done, whatever that status is.
+///
+/// This used to live at the end of `handle_save_state`, which only accounted for the
+/// happy path. A ROM that never got there left `remaining` above zero and the queue
+/// never shut down: the run hung with every ROM apparently finished. Moving it here is
+/// what makes `skip_successors` safe to use at all.
+fn finish_rom(rom_arc: &Arc<Mutex<Rom>>, step_idx: usize, ctx: &WorkerContext) {
+  {
+    let mut rom = rom_arc.lock().unwrap();
+    if !rom.pipeline[step_idx].next.is_empty() || rom.finished {
+      return;
+    }
+    // Both branches of the DAG can reach the leaf; only the first one counts.
+    rom.finished = true;
+  }
+
+  if ctx.remaining.fetch_sub(1, Ordering::SeqCst) == 1 {
+    ctx.queue.shutdown();
+  }
+}
+
+/// Marks every step downstream of a definitively failed one as `Skipped`.
+///
+/// Successors used to be dispatched as if nothing had happened, so `SaveState` still ran
+/// after a failed download and persisted the sha1 of a ROM that was never written — the
+/// next run then considered it up to date and never retried it. The UI counted the same
+/// ROM once as an error and once as a success.
+///
+/// The walk tracks visited indices rather than testing for `Skipped`, because `WaitModal`
+/// starts out `Skipped` by default: stopping there would leave everything behind it
+/// untouched.
+/// Takes the pipeline rather than the `Rom` so the DAG walk can be tested on a
+/// hand-built one — constructing a `Rom` would mean constructing a `RomBar`, and with it
+/// the whole terminal UI.
+fn skip_successors(pipeline: &mut [Step], step_idx: usize) {
+  let mut visited = std::collections::HashSet::new();
+  let mut stack = pipeline[step_idx].next.clone();
+
+  while let Some(idx) = stack.pop() {
+    if !visited.insert(idx) {
+      continue;
+    }
+    pipeline[idx].status = StepStatus::Skipped;
+    stack.extend(pipeline[idx].next.iter().copied());
+  }
 }
 
 /// Decrement `wait_for` for each successor of `step_idx`.
@@ -304,6 +370,164 @@ mod tests {
       !msg.contains("src/first.rs"),
       "stale location leaked into {msg:?}"
     );
+  }
+
+  /// The folder DAG, with the real shape that matters here: WaitModal starts Skipped,
+  /// BuildPackage forks into two branches, and both rejoin on the SaveState leaf.
+  ///
+  ///   0 ComputeHashes → 1 LookupSS → 2 WaitModal → 3 BuildPackage → 4 CopyRom ─┐
+  ///                                                              → 5 Medias ───┴→ 6 SaveState
+  fn folder_pipeline() -> Vec<Step> {
+    use crate::rom::StepData;
+    vec![
+      Step::new(
+        StepKind::ComputeHashes,
+        StepStatus::Pending,
+        StepData::ComputeHashes {
+          sha1: None,
+          md5: None,
+          crc32: None,
+          size: 0,
+          mtime: 0,
+        },
+        vec![1],
+        0,
+      ),
+      Step::new(
+        StepKind::LookupSS,
+        StepStatus::Pending,
+        StepData::LookupSS {
+          jeu: Box::new(None),
+          candidates: Vec::new(),
+        },
+        vec![2],
+        1,
+      ),
+      // Skipped by default — the trap this walk has to get past.
+      Step::new(
+        StepKind::WaitModal,
+        StepStatus::Skipped,
+        StepData::WaitModal {
+          jeu: Box::new(None),
+        },
+        vec![3],
+        1,
+      ),
+      Step::new(
+        StepKind::BuildPackage,
+        StepStatus::Pending,
+        StepData::BuildPackage {
+          medias: Box::new(None),
+          romname: None,
+          pkgver: 0,
+        },
+        vec![4, 5],
+        1,
+      ),
+      Step::new(
+        StepKind::CopyRom,
+        StepStatus::Pending,
+        StepData::CopyRom,
+        vec![6],
+        1,
+      ),
+      Step::new(
+        StepKind::DownloadMedias,
+        StepStatus::Pending,
+        StepData::DownloadMedias,
+        vec![6],
+        1,
+      ),
+      Step::new(
+        StepKind::SaveState,
+        StepStatus::Pending,
+        StepData::SaveState,
+        vec![],
+        2,
+      ),
+    ]
+  }
+
+  /// A failed download must not let SaveState run: it would persist the sha1 of a ROM
+  /// that was never written, and the next run would consider it up to date and never
+  /// retry it.
+  #[test]
+  fn a_failed_step_skips_everything_downstream() {
+    let mut pipeline = folder_pipeline();
+    skip_successors(&mut pipeline, 4); // CopyRom failed
+
+    assert_eq!(
+      pipeline[6].status,
+      StepStatus::Skipped,
+      "SaveState must not run"
+    );
+    // The other branch and everything upstream are untouched.
+    assert_eq!(pipeline[5].status, StepStatus::Pending);
+    assert_eq!(pipeline[3].status, StepStatus::Pending);
+    assert_eq!(pipeline[0].status, StepStatus::Pending);
+  }
+
+  /// The walk has to be transitive: failing early must cut the whole tail, not just the
+  /// immediate successor.
+  #[test]
+  fn skipping_is_transitive_across_both_branches() {
+    let mut pipeline = folder_pipeline();
+    skip_successors(&mut pipeline, 3); // BuildPackage failed
+
+    for idx in [4, 5, 6] {
+      assert_eq!(
+        pipeline[idx].status,
+        StepStatus::Skipped,
+        "step {idx} should have been cut"
+      );
+    }
+  }
+
+  /// The reason the walk tracks visited indices instead of testing for Skipped:
+  /// WaitModal is Skipped from the start, so a status-based guard would stop dead there
+  /// and leave BuildPackage, both downloads and SaveState free to run after a failed
+  /// lookup.
+  #[test]
+  fn skipping_passes_through_a_step_that_was_already_skipped() {
+    let mut pipeline = folder_pipeline();
+    assert_eq!(pipeline[2].status, StepStatus::Skipped, "precondition");
+
+    skip_successors(&mut pipeline, 1); // LookupSS failed
+
+    for idx in [2, 3, 4, 5, 6] {
+      assert_eq!(
+        pipeline[idx].status,
+        StepStatus::Skipped,
+        "step {idx} should have been cut past the already-skipped WaitModal"
+      );
+    }
+  }
+
+  /// Failing on the leaf itself has nothing downstream to cut, and must not wander.
+  #[test]
+  fn failing_on_the_leaf_changes_nothing() {
+    let mut pipeline = folder_pipeline();
+    let before: Vec<_> = pipeline.iter().map(|s| s.status.clone()).collect();
+
+    skip_successors(&mut pipeline, 6);
+
+    let after: Vec<_> = pipeline.iter().map(|s| s.status.clone()).collect();
+    assert_eq!(before, after);
+  }
+
+  /// SaveState is the single leaf of both DAGs, which is what makes "leaf reached"
+  /// equivalent to "ROM finished" in finish_rom. If a pipeline ever grew a second leaf,
+  /// the counter would be released early — this pins the assumption.
+  #[test]
+  fn the_pipeline_has_exactly_one_leaf() {
+    let pipeline = folder_pipeline();
+    let leaves: Vec<usize> = pipeline
+      .iter()
+      .enumerate()
+      .filter(|(_, s)| s.next.is_empty())
+      .map(|(i, _)| i)
+      .collect();
+    assert_eq!(leaves, vec![6]);
   }
 
   /// This is the half of the fix that is easy to miss. Catching the unwind is not

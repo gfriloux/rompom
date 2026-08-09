@@ -2,7 +2,7 @@ use std::{
   collections::HashMap,
   fs,
   io::Write as _,
-  sync::{atomic::Ordering, Arc, Mutex},
+  sync::{Arc, Mutex},
 };
 
 use crate::{
@@ -93,9 +93,9 @@ pub(crate) fn handle_save_state(
     rom.bar.finish(package_unchanged);
   }
 
-  if ctx.remaining.fetch_sub(1, Ordering::SeqCst) == 1 {
-    ctx.queue.shutdown();
-  }
+  // `remaining` is decremented by execute_step when the pipeline leaf is reached, not
+  // here: a ROM whose pipeline was cut short by a failure never runs this handler, and
+  // used to leave the counter stuck above zero.
 
   Ok(StepStatus::Done)
 }

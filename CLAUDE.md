@@ -243,7 +243,26 @@ LookupSS → WaitModal* → BuildPackage → DownloadRom ────┐
   on disk (`media_skipped`), downloads otherwise (`media_done`), or marks unavailable if SS has none.
 - **`SaveState`** — writes `RomStateEntry` into shared `SystemState` (flushed to disk by
   `main.rs` after all workers join). Persists `extra_disc_sha1s` for multi-disc games.
-  Emits `bar.finish()`. Decrements `remaining` counter; shuts down the queue when it reaches 0.
+  Emits `bar.finish()`. It does **not** touch `remaining` — see below.
+
+### Failure propagation and run completion
+
+A step that exhausts its retries is `Failed`, and `execute_step` then marks **every step
+downstream of it** as `Skipped` (`skip_successors`). Successors used to be dispatched as
+though nothing had happened, so `SaveState` still ran after a failed download and
+persisted the sha1 of a ROM that was never written — the next run saw it as up to date and
+never retried it. The UI counted that ROM once as an error and once as a success.
+
+The walk tracks visited indices rather than testing for `Skipped`, because `WaitModal`
+starts out `Skipped` by default; a status-based guard would stop there and leave the rest
+of the pipeline free to run.
+
+`remaining` is decremented by **`finish_rom` in `execute_step`**, when a step with no
+successors reaches a terminal status — not by `handle_save_state`. `SaveState` is the
+single leaf of both DAGs, so "leaf reached" means "ROM done" whether it ended `Done`,
+`Skipped` or `Failed`. Keeping the decrement in the handler would strand the counter for
+any ROM cut short by a failure, and the queue would never shut down. `Rom::finished`
+guards against a double decrement, since both branches of the DAG converge on that leaf.
 
 ### Panic containment
 
@@ -369,6 +388,8 @@ dispatches it via `do_dispatch`.
 - `package_unchanged: bool` — true when ROM + medias + description.xml all unchanged; drives
   `finish(unchanged)` → `=` in the Completed panel
 - `debug_log: Vec<String>` — per-ROM decision lines, written by SaveState when `--debug`
+- `finished: bool` — set once the pipeline leaf is reached, so `remaining` is decremented
+  exactly once per ROM whatever the outcome
 
 ## PKGBUILD generation
 

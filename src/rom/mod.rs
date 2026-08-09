@@ -47,6 +47,12 @@ pub struct Rom {
   /// Per-step decision log lines, appended throughout the pipeline.
   /// Written to `<system>.debug.log` at the end of `SaveState` when `--debug` is set.
   pub debug_log: Vec<String>,
+  /// True once this ROM has left the pipeline, whatever the outcome.
+  ///
+  /// The run's `remaining` counter must be decremented exactly once per ROM, and a
+  /// pipeline can reach its leaf by several routes (completed, or skipped after a
+  /// failure upstream). This flag is what makes it once and not twice.
+  pub finished: bool,
 }
 
 impl Rom {
@@ -148,6 +154,7 @@ impl Rom {
       package_unchanged: false,
       extra_disc_sha1s: Vec::new(),
       debug_log: Vec::new(),
+      finished: false,
     }))
   }
 
@@ -250,6 +257,7 @@ impl Rom {
       package_unchanged: false,
       extra_disc_sha1s,
       debug_log: Vec::new(),
+      finished: false,
     }))
   }
 }
