@@ -558,7 +558,7 @@ Call `summary()` before dropping `Ui`, print after (terminal is restored on drop
 
 **Modal types (public, in `ui/mod.rs`):**
 - `ModalCandidate { name: String, game_id: String, year: Option<String> }` — one search result row
-- `ModalRequest { filename, sha1, candidates, response: Sender<ModalResponse>, fetch_by_id: Box<dyn Fn(u32) -> Option<String> + Send> }` — sent by a worker, blocks on `response`
+- `ModalRequest { filename, sha1, candidates, response: Sender<ModalResponse>, fetch_by_id: Box<dyn Fn(u32) -> Result<String, String> + Send> }` — sent by a worker, blocks on `response`
 - `ModalResponse` — `SelectedId(String)` | `ManualId(String)` | `Cancelled`
 
 **Modal UX (handled entirely inside the render thread via `show_modal()`):**
@@ -569,7 +569,16 @@ Call `summary()` before dropping `Ui`, print after (terminal is restored on drop
 - **On entry**: if `interrupted` is already true (Ctrl-C was pressed before the modal request was processed), `show_modal()` sends `Cancelled` immediately without displaying anything
 
 The `fetch_by_id` closure is provided by `handle_wait_modal` in `worker/handlers/discovery.rs` and captures an
-`Arc<ScreenScraper>` clone — it calls `jeuinfo_by_gameid` and returns `Some(name)` on success.
+`Arc<ScreenScraper>` clone — it calls `jeuinfo_by_gameid` and returns `Ok(name)` on success. Its
+`Err` carries the reason shown inline, and returning a `Result` rather than an `Option` is the
+point: a 404 means "retype the ID", anything else means "the ID may well be fine, ScreenScraper
+is not". The reason comes from `lookup_failure()` — never from the library error, which would
+leak the credentials reqwest prints with the request URL.
+
+Once the user has chosen, `handle_wait_modal` fetches the game one last time. A failure there
+**fails the step** instead of falling back to `None`: the fallback discarded the identification
+the user had just typed and packaged the ROM with an empty `description.xml`. Only
+`ModalResponse::Cancelled` legitimately yields `None`.
 
 ### `summary.rs`
 

@@ -129,15 +129,15 @@ pub(super) fn show_modal(
                   .unwrap();
 
                 match (req.fetch_by_id)(game_id) {
-                  Some(name) => {
+                  Ok(name) => {
                     mode = ModalMode::Confirming {
                       game_id: input.clone(),
                       game_name: name,
                     };
                     input_status = None;
                   }
-                  None => {
-                    input_status = Some("ID not found on ScreenScraper".to_string());
+                  Err(reason) => {
+                    input_status = Some(reason);
                   }
                 }
               }

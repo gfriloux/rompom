@@ -390,8 +390,12 @@ pub(crate) fn handle_wait_modal(
       fetch_by_id: Box::new(move |game_id| {
         ss_for_closure
           .jeuinfo_by_gameid(system_id, game_id)
-          .ok()
           .map(|j| j.find_name(NAME_REGIONS).to_string())
+          .map_err(|e| match lookup_failure(e.failure()) {
+            // 404 — the ID is wrong, and retyping it is exactly the right move.
+            None => "ID not found on ScreenScraper".to_string(),
+            Some(step_error) => step_error.to_string(),
+          })
       }),
     })
     .map_err(|e| StepError::Fatal(format!("modal channel closed: {}", e)))?;
@@ -403,17 +407,30 @@ pub(crate) fn handle_wait_modal(
   ctx.modal_sem.release();
 
   // ── Resolve JeuInfo from the user's response ───────────────────────────
+  //
+  // Cancelling is a decision: `None` means "package this ROM without metadata".
+  // A failed fetch is not — swallowing it here would discard the identification the
+  // user just typed, write an empty description.xml over a good one and bump pkgver
+  // for it. Ctrl-C mid-fetch used to land in the same hole, via `return None`.
   let jeu = match response {
-    ModalResponse::SelectedId(id) | ModalResponse::ManualId(id) => {
-      id.parse::<u32>().ok().and_then(|gid| {
+    ModalResponse::SelectedId(id) | ModalResponse::ManualId(id) => match id.parse::<u32>() {
+      Err(_) => None,
+      Ok(gid) => {
         if !ctx.ss_sem.acquire() {
-          return None; // interrupted
+          return Err(StepError::Interrupted);
         }
-        let result = ctx.ss.jeuinfo_by_gameid(ctx.system.id, gid).ok();
+        let result = ctx.ss.jeuinfo_by_gameid(ctx.system.id, gid);
         ctx.ss_sem.release();
-        result
-      })
-    }
+        match result {
+          Ok(j) => Some(j),
+          Err(e) => {
+            return Err(lookup_failure(e.failure()).unwrap_or_else(|| {
+              StepError::Fatal(format!("ScreenScraper does not know game ID {}", gid))
+            }))
+          }
+        }
+      }
+    },
     ModalResponse::Cancelled => None,
   };
 

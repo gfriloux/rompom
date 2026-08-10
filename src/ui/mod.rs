@@ -63,7 +63,11 @@ pub struct ModalRequest {
   pub candidates: Vec<ModalCandidate>,
   pub response: channel::Sender<ModalResponse>,
   /// Called when the user types a game ID manually and presses Enter.
-  pub fetch_by_id: Box<dyn Fn(u32) -> Option<String> + Send>,
+  ///
+  /// `Err` carries the reason to show inline. It matters that it is not an `Option`:
+  /// "ScreenScraper has no game 12345" and "ScreenScraper is unreachable" ask the user
+  /// for opposite things — retype the ID, or stop typing and check the network.
+  pub fetch_by_id: Box<dyn Fn(u32) -> Result<String, String> + Send>,
 }
 
 /// User response from the modal.
