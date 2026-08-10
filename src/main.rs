@@ -174,6 +174,37 @@ fn print_usage(program: &str, opts: &getopts::Options) {
   print!("{}", opts.usage(&brief));
 }
 
+/// The sample config at the repository root, embedded at compile time so the starter
+/// file and the documented example can never drift apart.
+const CONFIG_TEMPLATE: &str = include_str!("../rompom.yml");
+
+/// Writes a starter `rompom.yml`, refusing to touch one that is already there.
+///
+/// `create_new` rather than `exists()` then `write`: this file holds the user's
+/// ScreenScraper password, and the check and the write have to be the same operation for
+/// the refusal to be worth anything.
+fn init_config(path: &Path) -> Result<(), String> {
+  if let Some(parent) = path.parent() {
+    fs::create_dir_all(parent)
+      .map_err(|e| format!("could not create {}: {}", parent.display(), e))?;
+  }
+
+  match fs::OpenOptions::new()
+    .write(true)
+    .create_new(true)
+    .open(path)
+  {
+    Ok(mut file) => file
+      .write_all(CONFIG_TEMPLATE.as_bytes())
+      .map_err(|e| format!("could not write {}: {}", path.display(), e)),
+    Err(e) if e.kind() == io::ErrorKind::AlreadyExists => Err(format!(
+      "{} already exists — rompom will not overwrite it",
+      path.display()
+    )),
+    Err(e) => Err(format!("could not create {}: {}", path.display(), e)),
+  }
+}
+
 /// Prints every system in the loaded config with its ScreenScraper id and where its ROMs
 /// come from.
 ///
@@ -242,6 +273,11 @@ fn main() {
   );
   opts.optflag(
     "",
+    "init",
+    "write a starter rompom.yml, if there is not one already",
+  );
+  opts.optflag(
+    "",
     "list-systems",
     "list the systems declared in rompom.yml and exit",
   );
@@ -270,6 +306,20 @@ fn main() {
   // `just version-check` is what guarantees this is the version that was released.
   if matches.opt_present("version") {
     println!("rompom {}", env!("CARGO_PKG_VERSION"));
+    return;
+  }
+
+  if matches.opt_present("init") {
+    let conf_path = confdir.join("rompom.yml");
+    if let Err(e) = init_config(&conf_path) {
+      eprintln!("rompom: {}", e);
+      std::process::exit(EXIT_FAILURE);
+    }
+    println!(
+      "Wrote {}.\nFill in the screenscraper.dev and screenscraper.user credentials, then \
+       give a system a source block.",
+      conf_path.display()
+    );
     return;
   }
 
