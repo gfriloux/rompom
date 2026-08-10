@@ -76,6 +76,8 @@ fn disc_indicator(stem: &str) -> Option<(String, u32)> {
 /// - Disc 1 becomes the primary entry (with the virtual `filename` = base + ext).
 /// - Disc 2+ become `extra_discs` on that entry.
 /// - Single-disc sources pass through unchanged.
+/// - A group where two files claim the **same** disc number is refused outright, and
+///   its files pass through as individual packages.
 pub(crate) fn group_multi_disc(sources: Vec<RomSourceData>) -> Vec<RomSourceData> {
   // ── Step 1: classify each source ───────────────────────────────────────
   struct Parsed {
@@ -157,6 +159,17 @@ pub(crate) fn group_multi_disc(sources: Vec<RomSourceData>) -> Vec<RomSourceData
   for ((base, ext), mut discs) in groups {
     // Sort by disc number so disc 1 is always first.
     discs.sort_by_key(|(n, _)| *n);
+
+    // Two files claiming the same disc number — mixed spellings in one library, or the
+    // same file listed by two Internet Archive items. There is no way to tell which one
+    // belongs in the playlist, and the wrong guess produces an .m3u that misbehaves only
+    // once someone is holding a controller. The group is refused: each file goes out on
+    // its own, under its own name, which is visible in the Completed panel as two
+    // packages where one was expected.
+    if discs.windows(2).any(|pair| pair[0].0 == pair[1].0) {
+      result.extend(discs.into_iter().map(|(_, p)| p.source));
+      continue;
+    }
 
     // Virtual logical filename: base name + extension (no disc indicator).
     let virtual_filename = if ext.is_empty() {
@@ -429,6 +442,43 @@ mod tests {
     assert_eq!(out.len(), 1);
     assert_eq!(out[0].filename, "Riven (Disc 1).chd");
     assert!(out[0].extra_discs.is_empty());
+  }
+
+  /// Mixed spellings in one library — Redump writes `(Disc 2)`, another set writes
+  /// `(Disk 2)` — reduce to the same base and the same number. rompom cannot know which
+  /// one belongs in the playlist, so it refuses the group instead of building a .m3u
+  /// that lists disc 2 twice and never disc 3.
+  #[test]
+  fn two_files_claiming_the_same_disc_number_are_not_grouped() {
+    let out = group_multi_disc(vec![
+      source("Lunar (Disc 1).chd"),
+      source("Lunar (Disc 2).chd"),
+      source("Lunar (Disk 2).chd"),
+    ]);
+
+    assert_eq!(
+      names(&out),
+      [
+        "Lunar (Disc 1).chd",
+        "Lunar (Disc 2).chd",
+        "Lunar (Disk 2).chd"
+      ]
+    );
+    assert!(out.iter().all(|s| s.extra_discs.is_empty()));
+  }
+
+  /// The same file listed by two Internet Archive items. Refusing is the same answer,
+  /// and it must not silently drop one of the two.
+  #[test]
+  fn a_duplicated_disc_one_is_not_grouped_either() {
+    let out = group_multi_disc(vec![
+      source("Riven (Disc 1).chd"),
+      source("Riven (Disc 1).chd"),
+      source("Riven (Disc 2).chd"),
+    ]);
+
+    assert_eq!(out.len(), 3);
+    assert!(out.iter().all(|s| s.extra_discs.is_empty()));
   }
 
   /// Grouped and ungrouped entries share the output. Nothing may be dropped on the way.

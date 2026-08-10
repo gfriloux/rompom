@@ -184,10 +184,16 @@ Resolve the system's `source` to a list of files:
 
 **Multi-disc grouping** (`group_multi_disc()` in `collect.rs`): after collection, files whose
 stems contain a disc indicator (`(Disc N)`, `(Disk N)`, `(CD N)`, numbering from 0 or 1) and
-share the same base name and extension are merged into a single `RomSourceData`. The detector
-scans all parenthesised groups so region tags before the disc indicator are handled correctly
-(e.g. `"Enemy Zero (USA) (Disc 0).zip"`). The primary entry gets a virtual `filename` without
-the disc indicator; disc 2+ become `extra_discs`. Single-disc files pass through unchanged.
+share the same base name and extension are merged into a single `RomSourceData`. The primary
+entry gets a virtual `filename` without the disc indicator; disc 2+ become `extra_discs`.
+Single-disc files pass through unchanged.
+
+The base name is the stem **minus the disc group**, so parenthesised tags on either side of
+the indicator survive and keep releases apart — `"Enemy Zero (USA) (Disc 0).zip"` and
+`"Lunar (Disc 1) (USA).chd"` both yield a base carrying `(USA)`. Two files claiming the
+**same** disc number (mixed `(Disc 2)` / `(Disk 2)` spellings, or one file listed by two IA
+items) make the whole group **refused**: each file becomes its own package rather than a
+`.m3u` that lists one disc twice and never the next.
 
 Build a `Vec<RomSourceData>` (raw data, no bar yet). Once total is known, convert to
 `Vec<Arc<Mutex<Rom>>>` with bars created via `ui.new_rom_bar()`.
