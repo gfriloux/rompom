@@ -1,6 +1,6 @@
 mod update;
 
-use serde_derive::Deserialize;
+use serde::Deserialize;
 use std::{fs, io, path::PathBuf};
 
 use snafu::{Backtrace, ResultExt, Snafu};
