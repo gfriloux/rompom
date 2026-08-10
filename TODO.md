@@ -134,7 +134,7 @@ correction est arrivée avec ses tests : le dépôt est passé de 0 à 34 tests.
 - [ ] **P2.5 — Documentation** : Nerd Fonts requis (+ fallback `--ascii`, les icônes
   sont centralisées dans `MEDIA_ICONS`), fichiers créés dans le cwd
   (state.yml/run.yml/debug.log), conséquence de supprimer state.yml, lien tier de
-  compte SS ↔ maxthreads. Se combine avec PLAN_DOCUMENTATION.md. *(petit)*
+  compte SS ↔ maxthreads. *(petit)*
 - [ ] **P2.6 — Mode non-interactif `--plain`** + `--resume=yes|no` : aucune détection
   de tty aujourd'hui (`Ui::new` fait raw mode inconditionnellement) ; 3 bloqueurs
   CI : prompt resume, TUI, modale. Indispensable pour le cas d'usage CI du README. *(moyen/gros)*
@@ -177,8 +177,17 @@ correction est arrivée avec ses tests : le dépôt est passé de 0 à 34 tests.
   `Auth`/`ScreenScraper`.
 - [ ] Migration clap ; regrouper les fichiers d'état dans `.rompom/` (avec migration) ;
   checks Nix clippy + cargo test + `--edition 2021` sur le check rustfmt.
-- [ ] Features planifiées : contribution SS (PLAN_SS_ROM_CONTRIBUTION.md — après P0,
-  ajoute un step au DAG) ; refonte README (PLAN_DOCUMENTATION.md, avec P2.5).
+- [ ] **Contribution SS** — soumettre l'association `checksum → game_id` à ScreenScraper
+  quand l'utilisateur identifie une ROM à la main via la modale. Ajoute un step
+  `ContributeRomToSS` au DAG entre `WaitModal` et `BuildPackage` (fire-and-forget : un
+  échec de contribution ne fait pas échouer le packaging), plus une fonction
+  `contribute_rom(...)` dans la lib `screenscraper`. Tout est déjà disponible au retour de
+  la modale (sha1/md5/crc32, filename, size, system.id, game_id choisi).
+  **Bloqué** : le compteur `romasso` de `UserInfo` prouve que SS supporte la fonction,
+  mais la route API n'est pas dans la doc v2 — aucun `modiftypeinfo` de `botProposition.php`
+  ne couvre l'association de checksum. Débloquer par le forum/Discord SS, ou en observant
+  les requêtes d'un autre scraper. Hors périmètre : contribution de jeu complet, et
+  multi-disques (les disques 2+ n'ont pas de game_id distinct).
 
 ---
 

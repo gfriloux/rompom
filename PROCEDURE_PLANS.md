@@ -23,9 +23,11 @@ Dès qu'une version ou une feature est évoquée, créer :
 Les plans vivent **dans `.claude/plans/`**, jamais à la racine. Un plan obsolète est
 **supprimé**, pas dupliqué en `_v2`/`_v3`.
 
-Les documents de cadrage déjà présents à la racine (`TODO.md`, `PLAN_DOCUMENTATION.md`,
-`PLAN_SS_ROM_CONTRIBUTION.md`, `PLAN_STATE_MACHINE.md`) sont la **roadmap**, pas des plans
-d'exécution : un plan de version en dérive et les référence.
+`TODO.md`, à la racine, est la **roadmap** — pas un plan d'exécution : un plan de version
+en dérive et le référence. C'est le seul document de cadrage à la racine ; les plans de
+cadrage historiques (`PLAN_DOCUMENTATION.md`, `PLAN_SS_ROM_CONTRIBUTION.md`,
+`PLAN_STATE_MACHINE.md`) ont été supprimés le 2026-08-10, une fois réalisés ou repliés
+dans `TODO.md`.
 
 ### Contenu minimal de `plan.md`
 
