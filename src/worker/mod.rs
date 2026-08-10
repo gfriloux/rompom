@@ -2,6 +2,7 @@ mod handlers;
 mod helpers;
 mod run_state;
 
+pub(crate) use helpers::lookup_failure;
 pub use run_state::{
   apply_run_state, collect_run_state, load_run_state, restore_bar_for_resumed_rom, save_run_state,
   RunState,

@@ -22,7 +22,7 @@ use std::{
 
 use glob::Pattern;
 use internet_archive::metadata::Metadata;
-use screenscraper::ScreenScraper;
+use screenscraper::{ApiFailure, ScreenScraper};
 
 use crate::conf::{Conf, Source};
 use crate::queue::{Semaphore, TaskQueue};
@@ -31,7 +31,7 @@ use crate::rom::{
 };
 use crate::state::SystemState;
 use crate::ui::Ui;
-use crate::worker::WorkerContext;
+use crate::worker::{lookup_failure, WorkerContext};
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
@@ -568,10 +568,24 @@ fn main() {
     Ok(ss) => ss,
     Err(e) => {
       drop(ui);
+      // Never print `e`. On a transport failure its Display carries the request URL,
+      // and the credentials travel in that URL's query string.
+      let reason = lookup_failure(e.failure())
+        .map(|failure| failure.to_string())
+        .unwrap_or_else(|| "ScreenScraper does not know this account".to_string());
+      let advice = match e.failure() {
+        ApiFailure::Transport => "Check your network connection, then try again.",
+        ApiFailure::ThreadLimit | ApiFailure::ServerBusy | ApiFailure::ApiClosed => {
+          "ScreenScraper is busy — try again later."
+        }
+        ApiFailure::QuotaExceeded | ApiFailure::KoQuotaExceeded => {
+          "Your ScreenScraper quota is spent for today."
+        }
+        _ => "Check the screenscraper.user and screenscraper.dev credentials in your config.",
+      };
       eprintln!(
-        "rompom: could not authenticate against ScreenScraper: {}\n\
-         Check the screenscraper.user and screenscraper.dev credentials in your config.",
-        e
+        "rompom: could not authenticate against ScreenScraper: {}\n{}",
+        reason, advice
       );
       std::process::exit(1);
     }
