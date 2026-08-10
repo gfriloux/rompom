@@ -103,6 +103,27 @@ run start. Each ROM gets a block of decision lines:
 - `[BuildPackage]` — per-media sha1 comparison (ok / CHANGED), description.xml check,
   final verdict (package_changed / package_unchanged)
 
+### Other flags
+
+Argument handling lives in `main.rs` (scope `cli`). Exit codes: **0** the run happened
+(individual ROMs may still have failed — see `Summary.failures`), **1** it could not run
+(no config dir, unreadable config, unknown system, system with no `source`, ScreenScraper
+refusing the credentials), **2** the command line was wrong.
+
+- `--version` / `-V` — answered before anything is read from disk, so it works with no config.
+- `--init` — writes a starter `rompom.yml` from the repo sample (`include_str!`), with
+  `create_new` so it can never overwrite an existing one (that file holds the credentials).
+- `--list-systems` — name, id and source per system; systems with no `source` are marked.
+- `--resume yes|no` — answers the interrupted-run prompt. Without it, EOF on stdin means
+  **no**, and in plain mode the question is not asked at all.
+- `--plain` — see *Non-interactive mode* under Terminal UI.
+- `--ascii` — swaps `MEDIA_ICONS_NERD` for `MEDIA_ICONS_ASCII`.
+
+`--ascii` and `--plain` are process-wide flags (`ui::use_ascii_icons()`,
+`ui::use_plain_output()`), read back through `ui::media_icons()` and `ui::is_plain()`.
+They are set once from the command line and can only ever hold one value, so threading
+them through `Ui`, `render` and `Summary` would be three parameters carrying a constant.
+
 ## Internal libs
 
 - **screenscraper**: `https://github.com/gfriloux/screenscraper` (local: `../screenscraper`)
@@ -527,6 +548,27 @@ Serialization uses `quick_xml::se::Serializer` with 2-space indentation — no m
   and `build_pkgbuild`; returns whether description.xml was written.
 
 ## Terminal UI
+
+### Non-interactive mode (`--plain`)
+
+`ui::is_plain()` is true when `--plain` was given **or** stdout is not a terminal. `Ui::new`
+then returns early: no raw mode, no alternate screen, no render thread, and the
+`ModalRequest` receiver is dropped. `RomBar::complete()` prints one line per finished ROM
+(`plain_line()`) instead, and `Summary::print()` closes the run as it always did — it never
+depended on ratatui.
+
+Three things follow from there, and each was a blocker for the CI use case:
+- **The resume prompt** is not asked; without `--resume` the answer is **no**. `ask_resume()`
+  also treats EOF as no, because `read_line` returns `Ok(0)` on closed stdin and the empty
+  answer used to match the default *yes*.
+- **Ctrl-C** goes back to being an ordinary `SIGINT` — there is no render thread polling for
+  keys, and the `ctrlc` handler in `main` already covers it.
+- **`WaitModal`** cannot run: `handle_wait_modal` returns `StepError::Fatal` naming what is
+  needed, rather than blocking forever on a modal nobody will answer. Guessing an
+  identification instead would write a wrong `description.xml`, bump its `pkgver` and
+  persist a wrong `ss_game_id` — the damage P1.1 closed.
+
+The interactive interface below is what runs on a terminal.
 
 Built with `ratatui` + `crossterm`. The screen is split into two zones:
 

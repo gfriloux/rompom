@@ -71,6 +71,13 @@ single casual setup, Skraper is simpler.
 - A **ScreenScraper developer account** — register at [screenscraper.fr](https://www.screenscraper.fr).
   Both a user account and a developer account are required. The developer account unlocks
   concurrent API threads, which rompom uses to process ROMs in parallel.
+  **Your account tier sets the pace of the whole run**: ScreenScraper reports a
+  `maxthreads` value, and rompom sizes its ScreenScraper semaphore from it. A tier
+  allowing one thread means one lookup at a time, whatever the machine — downloads and
+  packaging still run in parallel around it, but identification is the bottleneck.
+- A **Nerd Font** in your terminal — the media columns are Nerd Font glyphs and render as
+  identical empty boxes without one. `--ascii` replaces them with letters if you would
+  rather not install a font.
 - **makepkg** — to build the generated PKGBUILDs. Available natively on Arch-based systems,
   or via [rom-builder](https://github.com/gfriloux/rom-builder), a Docker image that provides
   a ready-to-use build environment.
@@ -349,6 +356,24 @@ package() { true; }
 ```
 
 Installing `set-castlevania` pulls all listed games in one command.
+
+### Files rompom writes
+
+All three land in the **current working directory**, not next to the ROMs and not under
+`$XDG_STATE_HOME` — so running rompom from two different directories gives two
+independent histories of the same system.
+
+| file | what it is |
+|---|---|
+| `<system>.state.yml` | what the last run found: ScreenScraper game ids, ROM and media sha1s. Rewritten every 30 s and once at the end. |
+| `<system>.run.yml` | only while a run is interrupted — the per-ROM step statuses the resume prompt reads. Deleted when the run completes or when you decline to resume. |
+| `<system>.debug.log` | only with `--debug`. Truncated at the start of each run. |
+
+**Deleting `state.yml` is not free.** It is the only record of what has already been done:
+without it every ROM looks new, so every ROM and every media asset is downloaded again,
+every `description.xml` is rewritten, and every `pkgver` is bumped — which republishes the
+entire library to anyone tracking your repository. Move it aside rather than delete it if
+you are only trying something out.
 
 ## Limitations & known issues
 
