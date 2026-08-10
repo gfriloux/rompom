@@ -93,6 +93,50 @@ Convention : `☐` à faire · `☑` passé · `☒` échoué · `⊘` non joué
 
 ---
 
-## Résultats
+## Résultats — exécution du 2026-08-10
 
-*(rempli à l'exécution, avant la release)*
+Environnement : dépôt de dev, `nix develop`, `XDG_CONFIG_HOME` sur une config jetable avec
+deux systèmes (`withsource` sur un dossier vide, `nosource` sans bloc `source`) et des
+credentials ScreenScraper factices. **Pas de compte ScreenScraper, pas de Nerd Font, pas de
+Batocera, pas de terminal de contrôle** dans cet environnement — d'où les `⊘` ci-dessous.
+
+### Joués et passés
+
+| test | résultat observé |
+|---|---|
+| 2.1 argument inconnu | `rompom: Unrecognized option: 'systm'` + usage, **exit 2**, pas de panique |
+| 2.2 système inconnu | message pointant `--list-systems`, **exit 1** |
+| 2.3 système sans source | message disant quoi ajouter, **exit 1** |
+| 2.4 `--version` | `rompom 0.17.0` (= `Cargo.toml` au moment du test), **exit 0** |
+| 2.5 `--list-systems` | les deux systèmes, id et source ; `nosource` marqué `(no source — cannot be run)` |
+| 2.6 `--help` | les 8 drapeaux présents (`--init --list-systems --plain --resume --ascii --version --debug --update-config`) |
+| 3.1 `--init` sur config absente | fichier écrit, message d'instruction, **exit 0** |
+| 3.2 `--init` sur config présente | refus nommant le chemin, **exit 1**, sha1 du fichier **inchangé** |
+| 3.3 `lang` invalide | `unsupported language code fr-FR … ScreenScraper serves synopses in: de, en, es, fr, it, pt`, **exit 1** |
+| 5.1 stdout redirigé | **0 séquence d'échappement** dans le fichier de sortie |
+| 5.2 `--plain` forcé | idem |
+| 5.3b `--resume maybe` | `--resume expects yes or no, got "maybe"`, **exit 2** |
+
+5.1 et 5.2 sortent en 1 : le run va jusqu'à `ScreenScraper::new`, qui refuse les
+credentials factices. C'est le chemin voulu — `Ui::new` a bien été traversé en mode plain.
+
+### Trouvé en jouant les tests
+
+**`enable_raw_mode()` échouait déjà avant v0.18** dans cet environnement : il n'y a pas de
+terminal de contrôle (`/dev/tty` inouvrable), donc l'`unwrap()` de `Ui::new` paniquait sur
+le thread de rendu — et `install_panic_hook()` supprimant la sortie de panique, le run
+allait au bout **sans rien afficher et sans rien signaler**. Vérifié en rejouant le même
+scénario sur l'état pré-G2. C'est ce qui a fait corriger le commentaire de
+`use_plain_output()`, qui annonçait un échec bruyant.
+
+### Non joués — et pourquoi
+
+| test | raison |
+|---|---|
+| §1 (1.1 → 1.3, hachage) | demande une vraie bibliothèque de ROMs et un `state.yml` d'un run précédent. **Compensé** : le contre-test temporaire a comparé l'ancienne et la nouvelle implémentation sur de vrais fichiers avant la bascule, et `src/hash.rs` garde les vecteurs publiés + un cas multi-chunk. |
+| 4.1 → 4.4 (rendu TUI) | pas de terminal de contrôle ici : la TUI ne peut pas s'afficher. `--ascii` et le statut retry sont à relire à l'œil dans un vrai terminal. |
+| 5.4 → 5.7 (resume hors tty, Ctrl-C plain, run CI complet) | demandent un `run.yml` d'un vrai run interrompu et des credentials. |
+| §6 (bout en bout, `makepkg`, Batocera) | demande compte SS, ROMs, et une installation Batocera. **6.2 et 6.3 sont couverts par les tests unitaires** (`two_regional_releases_do_not_merge_into_one_game`, `two_cd32_games_are_two_packages`) — ce qui reste à vérifier à la main, c'est le `.m3u` réel et le lancement depuis EmulationStation. |
+
+**À jouer par le mainteneur avant de taguer** : 4.1–4.4 dans un terminal avec et sans Nerd
+Font, puis 6.1 et 6.4 sur un vrai système multi-disque.
