@@ -74,6 +74,10 @@ commit_parsers = [
   { message = "^chore\\(deps\\)", group = "<!-- 8 -->Dependencies" },
   { message = "^chore\\(release\\)", skip = true },
   { message = "^chore", group = "<!-- 7 -->Miscellaneous" },
+  # A dependency change is a dependency change whether it was committed as chore or as
+  # build. v0.18.0 split `build(deps): pin every dependency` from `chore(deps): drop
+  # serde_derive` across two sections, and a reader has no way to know they belong together.
+  { message = "^build\\(deps\\)", group = "<!-- 8 -->Dependencies" },
   { message = "^build", group = "<!-- 7 -->Miscellaneous" },
   { message = "^merge", skip = true },
   { message = ".*", skip = true },
