@@ -162,9 +162,11 @@ src/
                               <system>.state.yml in the working directory. Tracks ss_game_id, rom_sha1,
                               rom_mtime, rom_size, per-media sha1s, and extra_disc_sha1s for each ROM.
   ui/
-    mod.rs                  — Ui + RomBar + AppState + all type definitions, modal public types
-    render.rs               — render(), render_completed(), render_active(), render_panel(),
-                              render_modal() and all rendering helpers
+    mod.rs                  — Ui + RomBar + AppState + RomEntry + Cell/Dot, modal public types
+    grid.rs                 — column widths, text fitting, scroll window, elapsed format;
+                              pure arithmetic, and the only testable part of the interface
+    render.rs               — render(), render_banner(), render_grid(), render_modal()
+                              and all rendering helpers
     modal.rs                — show_modal(): blocking event loop for the identification modal
   worker/
     mod.rs                  — WorkerContext, worker_loop_main/blocking, execute_step, do_dispatch
@@ -439,9 +441,9 @@ A ROM restored as finished also gets `Rom::finished = true`, because `main` excl
 from `remaining` — without it a later decrement would underflow the counter and the queue
 would never shut down.
 
-`restore_bar_for_resumed_rom()` follows the same two cases: finished → Completed panel
-(`bar.finish()` / `bar.finish_error()`), otherwise the bar keeps the "queued / Discovering"
-state `new_rom_bar()` set.
+`restore_bar_for_resumed_rom()` follows the same two cases: finished → the row is closed
+(`bar.restored()` then `bar.finish()`, or `bar.finish_error()`), otherwise the row keeps
+the "queued" state `new_rom_bar()` set.
 
 On "no", the file is deleted and a fresh run starts.
 Second Ctrl-C triggers `std::process::exit(1)` immediately.
@@ -480,7 +482,7 @@ Second Ctrl-C triggers `std::process::exit(1)` immediately.
 - `medias: Option<Medias>` — set by BuildPackage; taken by DownloadMedias, restored after
 - `romname: Option<String>` — normalized name, set by BuildPackage
 - `package_unchanged: bool` — true when ROM + medias + description.xml all unchanged; drives
-  `finish(unchanged)` → `=` in the Completed panel
+  `finish(unchanged)` → `unchanged` status and a gray row
 - `debug_log: Vec<String>` — per-ROM decision lines, written by SaveState when `--debug`
 - `finished: bool` — set once the pipeline leaf is reached, so `remaining` is decremented
   exactly once per ROM whatever the outcome
@@ -570,42 +572,62 @@ Three things follow from there, and each was a blocker for the CI use case:
 
 The interactive interface below is what runs on a terminal.
 
-Built with `ratatui` + `crossterm`. The screen is split into two zones:
+Built with `ratatui` + `crossterm`. Spec: `design/tui/handoff.md` + `design/tui/mockups.dc.html`
+(section `turn 4`). One ROM = **one row, at its arrival position, for the whole run**:
 
 ```
-┌─ Completed (X/total) ──────────────────────────────────────────────┐
-│ ████████░░░░░░  X/total                                            │  ← global gauge
-│ ✓ Game A  󰗚 󰕧 󰋩 󰋫 󰹙 󱂬 󰯃 󰊢 󰂺                                    │  ← icons: green=updated, gray=unchanged, red=missing
-│ = Game B                                                           │  ← package_unchanged (nothing changed)
-│ ✗ Game C — error                                                   │  ← newest first
-│ 󰗚 desc  󰕧 video  󰋩 image  󰋫 thumbnail  󰹙 screenshot  …           │  ← icon legend (last line)
-├─ Discovery (N) ──────────────────┬─ Downloads (N) ─────────────────┤
-│ ████░░░  X/total                 │ ██████░  X/total                │  ← per-phase gauge
-│ ⠙ Game D — discovering...        │ ⠸ Game H — downloading...       │
-│ ⠹ Game E — preparing...          │ ⠴ Game I — waiting              │
-└──────────────────────────────────┴─────────────────────────────────┘
+╭─ rompom · snes · 1389 roms ────────────────────────────────────────────────────────╮
+│ progress  ████████████████████████░░░░░░░░░░░░░░░░  60%  ✓ 418 new  = 771 same  …  │
+╰────────────────────────────────────────────────────────────────────────────────────╯
+╭─ roms · arrival order · 1204/1389 ─────────────────────────────────────────────────╮
+│ #     rom                        id   pkg  rom   󰗚  󰕧  󰋩  󰋫  󰹙  󱂬  󰯃  󰊢  󰂺  time    status │
+│ ────────────────────────────────────────────────────────────────────────────────── │
+│ 1198  Yoshi's Island             ✓    ✓    ✓     ●  ●  ●  ●  ●  ●  ●  ●  ○  4.6s    done   │
+│ 1199  Bahamut Lagoon (J)         ✓    ✓    ✗     ·  ·  ·  ·  ·  ·  ·  ·  ·  18.2s   sha1…  │
+│ 1201  Kirby Super Star           =    =    =     ●  ●  ●  ●  ●  ●  ●  ●  ○  0.2s    unch…  │
+│ 1206  Super Mario RPG            ⠹    ·    ·     ·  ·  ·  ·  ·  ·  ·  ·  ·  1.2s    ident… │
+│ 1208  Zelda: Link to the Past    ·    ·    ·     ·  ·  ·  ·  ·  ·  ·  ·  ·  —       queued │
+│ ────────────────────────────────────────────────────────────────────────────────── │
+│ ↑ 1197 above · 181 queued ↓      ● fetched  ● up to date  ○ missing  ◐ …           │
+╰────────────────────────────────────────────────────────────────────────────────────╯
+ ctrl-c stop
 ```
 
-Media icons use three colors:
-- **Green** — downloaded/updated this run
-- **Gray** — already up-to-date (sha1 verified, unchanged)
-- **Red** — not available on ScreenScraper
+The list is **never re-sorted**: a ROM's row index is its arrival order. The window
+scrolls itself to keep the active band on screen (`grid::active_anchor()` +
+`grid::scroll_offset()`), and the footer says what is off screen.
 
-The description icon (`󰗚`) is set by the `BuildPackage` step (not `DownloadMedias`).
-The 8 media icons (`󰕧 󰋩 󰋫 󰹙 󱂬 󰯃 󰊢 󰂺`) are set by `DownloadMedias`.
+**Step cells** (`id`, `pkg`, `rom`) — `Cell` in `ui/mod.rs`:
 
-The **Discovery** panel covers two `RomPhase` variants: `Discovering` (SS lookup) and
-`Packaging` (PKGBUILD generation). The Packaging sub-phase is too fast to warrant its own
-column; ROMs in that state appear with status `preparing...`.
+| glyph | meaning | colour |
+|---|---|---|
+| `·` | not reached | dark gray |
+| spinner | running | cyan (yellow when blocked on the user) |
+| `✓` | done | green |
+| `=` | nothing to do, identical to the last run | dark gray |
+| `✗` | failed | red |
+
+**Media dots** — nine per row, one per `MEDIA_ICONS` entry, named by the header icons.
+`Dot` in `ui/mod.rs`: `●` green fetched now, `●` gray already up to date, `○` red absent
+from ScreenScraper, `◐` in progress, `·` not tried. The first dot (description) is set by
+`BuildPackage`, the eight others by `DownloadMedias`.
 
 ### Key types in `ui/`
 
 **`AppState`** — shared mutable state, protected by `Arc<Mutex<_>>`:
-- `roms: Vec<RomEntry>` — one entry per ROM (`label`, `status`, `phase`,
-  `media_found`, `media_unchanged`, `media_missing`)
-- `completed: Vec<CompletedEntry>` — finished ROMs (label, success, unchanged, `error`,
-  media lists), newest first
-- `total: usize`, `header: String`, `tick: usize` (spinner animation)
+- `roms: Vec<RomEntry>` — one per ROM, index = arrival order = row. **The single source
+  of truth**: the summary, the counters and the plain-mode lines are all derived from it.
+- `total`, `system` (banner title), `header` (shown while collecting), `tick` (spinner),
+  `modal`
+
+**`RomEntry`** — `label` (scraped name, file name until identified), `status`, the three
+`Cell`s, `media: [Dot; 9]`, `started_at` / `finished_at` (the `time` column, and `—` while
+queued), `error`, `unchanged`.
+
+**`grid.rs`** — all the layout arithmetic, and the only part of the interface that can be
+tested: `columns(width)` (widths from the spec), `fit()` / `truncate()` (a value one cell
+too long shifts every column after it on that row), `active_anchor()`, `scroll_offset()`,
+`format_elapsed()`.
 
 **`RomBar`** — public handle given to each `Rom`; holds `Arc<Mutex<AppState>>` + `index`.
 Methods update the shared state; the render thread reads it autonomously.
@@ -613,14 +635,20 @@ Methods update the shared state; the render thread reads it autonomously.
 All other methods take `&self`.
 
 Pipeline transition methods (all called from `worker/handlers/`):
-- Discovery: `discovering()`, `found(name)`, `not_found()`
-- Unidentified ROM modal: `waiting_for_user()` → status=`"waiting for identification..."` (yellow)
-- Enqueue for prepare: `preparing_pending()` → phase=Packaging, status=`"waiting"`
-- Prepare: `preparing()` → status=`"preparing..."`
-- Enqueue for download: `downloading_pending()` → phase=Downloading, status=`"waiting"`
-- Downloads — ROM: `rom_checking()`, `rom_downloading()`, `rom_redownloading()`, `rom_done()`, `rom_skipped()`
-- Downloads — Media: `start_media(kind)`, `media_done(kind)`, `media_skipped(kind)`, `media_unavailable(kind)`
-- End: `finish(unchanged: bool)` → ✓ (green) or `=` (gray), `finish_error(cause)` → ✗ (red)
+- Identification: `discovering()`, `found(name)`, `not_found()` (→ `✗`: the package ships
+  with an empty `description.xml`, which is worth a red cell), `waiting_for_user()`
+- Queueing: `queued_for_packaging()`, `queued_for_download()` — status only, no cell moves
+- Packaging: `preparing()`, `pkg_done(unchanged)`
+- ROM: `rom_checking()`, `rom_downloading()`, `rom_redownloading()`, `rom_done()`, `rom_skipped()`
+- Media: `start_media(kind)`, `media_done(kind)`, `media_skipped(kind)`, `media_unavailable(kind)`
+- Resume: `restored()` — fills the three cells for a ROM whose pipeline came back from
+  `run.yml`; without it a finished ROM shows three `·` under a green name
+- End: `finish(unchanged: bool)`, `finish_error(cause)` — the latter reddens the **first
+  cell that never completed**, not the one that is running: nothing is running on a
+  resumed ROM
+
+The first call on a bar starts that ROM's clock (`started_at`), which is what makes the
+`time` column and the throughput window work without a separate signal.
 
 **`Ui`** — owns the state and spawns the render thread. The thread loops at ~80 ms,
 locks state, draws the frame, then calls `crossterm::event::poll(TICK_MS)` (replaces the old
@@ -664,28 +692,27 @@ have the media present, whether downloaded this run or already up-to-date from a
 `step_avg_durations` (average duration per StepKind, printed at end of run).
 `Summary::print()` outputs the end-of-run report to stdout.
 
-A failed ROM shows `✗ name — cause` in the Completed panel, where the cause is truncated
-to the panel width by `truncate_cause()` and replaces the media icons (they describe a
-package that was never finished). `Summary.failures` keeps the **untruncated** causes and
+A failed ROM shows its cause in the `status` column of its own row, truncated to the
+column width by `grid::truncate()`. `Summary.failures` keeps the **untruncated** causes and
 prints them in a `Failures` section — the TUI is gone by then, so it is the last chance to
 read one. `restore_bar_for_resumed_rom()` looks for the failure anywhere in the restored
 pipeline rather than on the leaf: a ROM cut short upstream has `Skipped` from the broken
 step onwards, leaf included, so reading the leaf alone restored it as a success.
 `MEDIA_ICONS` const in `ui/mod.rs` (shared via `pub(crate)`) defines the canonical order and
-Nerd Font icons for all 9 tracked assets (description first, then 8 media types).
+Nerd Font icons for all 9 tracked assets (description first, then 8 media types); a ROM's
+`media: [Dot; 9]` is indexed by that same order.
 
-### Evolutivity: `RomPhase` + `PANELS`
+### Adding a pipeline stage to the grid
 
-Adding a new pipeline phase requires three changes only:
+The grid has no phase routing to update — a ROM never moves between panels. Adding a
+stage is:
 
-1. Add a variant to `RomPhase` enum
-2. Add an entry to the `PANELS` const (`PanelDef`: `matches`, `past`, `title`, `color`)
-3. Add the corresponding method(s) on `RomBar`
+1. A field on `RomEntry` (a `Cell`, or a `Dot` if it is one more asset)
+2. A method on `RomBar` that sets it
+3. A column in `grid::columns()` and its span in `render::row_line()`
 
-The renderer iterates `PANELS` dynamically — no match arms or layout code to update.
-
-`PanelDef::past` defines which ROMs count as "completed" for the phase gauge
-(e.g. Downloads: `matches!(p, RomPhase::Done { .. })`).
+`PANELS`, `PanelDef`, `RomPhase` and `render_active()` are gone: they existed to decide
+which of two panels a ROM belonged to, and there is only one list now.
 
 ## Nix stack
 

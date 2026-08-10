@@ -549,6 +549,7 @@ fn main() {
   let interrupted = Arc::new(AtomicBool::new(false));
   let queue = TaskQueue::new();
   let ui = Ui::new(Arc::clone(&interrupted), Arc::clone(&queue));
+  ui.set_system(&system_name);
   let sources = match collect_sources(&source, &ui) {
     Ok(sources) => sources,
     Err(message) => {

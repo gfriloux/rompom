@@ -273,8 +273,8 @@ pub(crate) fn handle_lookup_ss(
       rom.jeu = Some(jeu);
       rom.bar.found(&name);
     }
-    // Transition bar to Packaging/waiting (WaitModal will be Skipped).
-    rom_arc.lock().unwrap().bar.preparing_pending();
+    // WaitModal will be Skipped: the ROM is now queued for packaging.
+    rom_arc.lock().unwrap().bar.queued_for_packaging();
     Ok(StepStatus::Done)
   } else {
     // ── Not found: run jeu_recherche and hand off to WaitModal ────────
@@ -459,8 +459,8 @@ pub(crate) fn handle_wait_modal(
     rom_arc.lock().unwrap().bar.not_found();
   }
 
-  // Transition bar to Packaging/waiting regardless of found/cancelled.
-  rom_arc.lock().unwrap().bar.preparing_pending();
+  // Queued for packaging regardless of found/cancelled.
+  rom_arc.lock().unwrap().bar.queued_for_packaging();
 
   // Store jeu also in the WaitModal step data (optional, for telemetry).
   {

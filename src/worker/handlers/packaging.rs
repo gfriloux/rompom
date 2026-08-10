@@ -138,7 +138,9 @@ pub(crate) fn handle_build_package(
       .map_err(StepError::transient)?;
   }
 
-  // Show description.xml icon: green if written/updated, gray if unchanged.
+  rom_arc.lock().unwrap().bar.pkg_done(!package_changed);
+
+  // Show description.xml dot: green if written/updated, gray if unchanged.
   if description_changed {
     rom_arc.lock().unwrap().bar.media_done("description");
   } else {
@@ -156,6 +158,6 @@ pub(crate) fn handle_build_package(
     rom.package_unchanged = !package_changed;
   }
 
-  rom_arc.lock().unwrap().bar.downloading_pending();
+  rom_arc.lock().unwrap().bar.queued_for_download();
   Ok(StepStatus::Done)
 }

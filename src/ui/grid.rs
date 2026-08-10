@@ -1,0 +1,287 @@
+//! Layout arithmetic for the ROM grid.
+//!
+//! Nothing here takes a `Frame` or touches a terminal: column widths, the visible
+//! window and text fitting are decided from numbers alone. That is what makes a
+//! rendering change testable at all — the interface itself cannot be opened from a
+//! process with no controlling terminal.
+
+use std::time::Duration;
+
+use super::{RomEntry, MEDIA_COUNT};
+
+/// Cells taken by one media dot, gap included.
+const MEDIA_CELL: u16 = 3;
+
+/// Column widths for one grid row, in terminal cells.
+///
+/// Every width but `status` comes from the design spec (`design/tui/handoff.md`) and
+/// carries two cells of margin over its longest content, so neighbouring columns never
+/// touch. `status` takes whatever is left.
+pub(crate) struct Columns {
+  pub(crate) index: u16,
+  pub(crate) name: u16,
+  pub(crate) id: u16,
+  pub(crate) pkg: u16,
+  pub(crate) rom: u16,
+  pub(crate) media_cell: u16,
+  pub(crate) time: u16,
+  pub(crate) status: u16,
+}
+
+/// The grid layout for a terminal this wide.
+pub(crate) fn columns(width: u16) -> Columns {
+  let index = 6;
+  let name = 30;
+  let id = 5;
+  let pkg = 5;
+  let rom = 6;
+  let media_cell = MEDIA_CELL;
+  let time = 10;
+  let fixed = index + name + id + pkg + rom + media_cell * MEDIA_COUNT as u16 + time;
+  Columns {
+    index,
+    name,
+    id,
+    pkg,
+    rom,
+    media_cell,
+    time,
+    status: width.saturating_sub(fixed),
+  }
+}
+
+/// Fits `text` into exactly `width` cells: padded with spaces, or cut and marked as cut.
+///
+/// Grid columns are positional — a value one cell too long shifts every column after it
+/// for that row only, which reads as corruption rather than as a long name.
+pub(crate) fn fit(text: &str, width: usize) -> String {
+  let cut = truncate(text, width);
+  let padding = width.saturating_sub(cut.chars().count());
+  format!("{}{}", cut, " ".repeat(padding))
+}
+
+/// Cuts `text` down to `width` cells, appending `…` when something was dropped.
+///
+/// Newlines are flattened first: a download error may well carry one, and a line break
+/// inside a row would push every following row down by one and desynchronise the grid
+/// from its scroll window.
+pub(crate) fn truncate(text: &str, width: usize) -> String {
+  let text = text.replace('\n', " ");
+  match width {
+    0 => String::new(),
+    1 => "…".to_string(),
+    _ if text.chars().count() <= width => text,
+    _ => {
+      let kept: String = text.chars().take(width - 1).collect();
+      format!("{}…", kept.trim_end())
+    }
+  }
+}
+
+/// The row the visible window must keep on screen.
+///
+/// The newest ROM that has started and not finished — that is where the workers are.
+/// With nothing in flight, the first ROM still queued, so the window sits on what is
+/// about to happen rather than on the top of a list nobody is reading any more.
+pub(crate) fn active_anchor(roms: &[RomEntry]) -> usize {
+  if let Some(i) = roms
+    .iter()
+    .rposition(|r| r.started_at.is_some() && r.finished_at.is_none())
+  {
+    return i;
+  }
+  roms
+    .iter()
+    .position(|r| r.started_at.is_none())
+    .unwrap_or_else(|| roms.len().saturating_sub(1))
+}
+
+/// First visible row, so that `anchor` sits a third of the way down the window.
+///
+/// A third rather than the middle: what is below the anchor is the queue, and it is
+/// worth more screen than the ROMs already finished above it.
+pub(crate) fn scroll_offset(len: usize, height: usize, anchor: usize) -> usize {
+  if len <= height || height == 0 {
+    return 0;
+  }
+  let lead = height / 3;
+  anchor.saturating_sub(lead).min(len - height)
+}
+
+/// `4.6s`, `42s`, `3m 10s`, `1h 04m` — one shape per order of magnitude.
+///
+/// Tenths below ten seconds only: past that they are noise, and the column is 10 cells.
+pub(crate) fn format_elapsed(d: Duration) -> String {
+  let secs = d.as_secs_f64();
+  if secs < 10.0 {
+    format!("{:.1}s", secs)
+  } else if secs < 60.0 {
+    format!("{}s", secs as u64)
+  } else if secs < 3600.0 {
+    format!("{}m {:02}s", secs as u64 / 60, secs as u64 % 60)
+  } else {
+    format!("{}h {:02}m", secs as u64 / 3600, (secs as u64 % 3600) / 60)
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use std::time::Instant;
+
+  fn entry(started: bool, finished: bool) -> RomEntry {
+    let mut e = RomEntry::queued("rom.zip");
+    if started {
+      e.started_at = Some(Instant::now());
+    }
+    if finished {
+      e.finished_at = Some(Instant::now());
+    }
+    e
+  }
+
+  /// The eight fixed columns are the spec's, and `status` is whatever a wide terminal
+  /// has left over.
+  #[test]
+  fn the_fixed_columns_come_from_the_spec() {
+    let c = columns(120);
+    assert_eq!(
+      (c.index, c.name, c.id, c.pkg, c.rom, c.media_cell, c.time),
+      (6, 30, 5, 5, 6, 3, 10)
+    );
+    // 6 + 30 + 5 + 5 + 6 + 9×3 + 10 = 89
+    assert_eq!(c.status, 120 - 89);
+  }
+
+  /// Below the fixed width there is nothing left for the status — and no underflow.
+  /// Folding the grid is what actually fixes this case; not panicking is the floor.
+  #[test]
+  fn a_narrow_terminal_leaves_no_status_and_does_not_underflow() {
+    assert_eq!(columns(80).status, 0);
+    assert_eq!(columns(0).status, 0);
+  }
+
+  /// A value shorter than its column is padded, so the next column starts where the
+  /// header says it does.
+  #[test]
+  fn a_short_value_is_padded_to_its_column() {
+    assert_eq!(fit("ok", 6), "ok    ");
+    assert_eq!(fit("", 3), "   ");
+  }
+
+  /// A value longer than its column is cut to exactly the column width — one cell over
+  /// would shift every column after it on that row alone.
+  #[test]
+  fn a_long_value_is_cut_to_exactly_its_column() {
+    let cut = fit("Zombies Ate My Neighbors and Then Some", 20);
+    assert_eq!(cut.chars().count(), 20);
+    assert!(cut.ends_with('…'));
+  }
+
+  /// A cause that fits is shown as is — no gratuitous ellipsis.
+  #[test]
+  fn a_short_cause_is_left_alone() {
+    assert_eq!(truncate("host unreachable", 40), "host unreachable");
+    assert_eq!(truncate("exact", 5), "exact");
+  }
+
+  /// Past the column width the line would run over the border and push the ROM name out
+  /// of view, so the cause is cut and marked as cut.
+  #[test]
+  fn a_long_cause_is_cut_and_says_so() {
+    let cause = "too many unrecognised ROMs today — ScreenScraper says come back tomorrow";
+    let cut = truncate(cause, 20);
+    assert_eq!(cut.chars().count(), 20);
+    assert!(cut.ends_with('…'));
+    assert!(cause.starts_with(cut.trim_end_matches('…')));
+  }
+
+  /// A narrow terminal must not panic on the arithmetic, and must not emit a bare
+  /// dangling ellipsis wider than the space it was given.
+  #[test]
+  fn a_narrow_column_does_not_overflow() {
+    assert_eq!(truncate("anything", 0), "");
+    assert_eq!(truncate("anything", 1), "…");
+    assert_eq!(truncate("anything", 2).chars().count(), 2);
+  }
+
+  /// When the cut lands just after a space, keeping it renders as a gap floating before
+  /// the ellipsis. Cutting mid-word is left alone — the ellipsis says enough.
+  #[test]
+  fn the_cut_does_not_leave_a_dangling_space() {
+    assert_eq!(truncate("could not reach it", 11), "could not…");
+    assert_eq!(truncate("could not reach it", 12), "could not r…");
+  }
+
+  /// Causes reach the grid from `StepStatus::Failed`, and a panic message carries the
+  /// panic location, which contains no newline — but a download error may well. A row
+  /// that spans two lines desynchronises the grid from its scroll window.
+  #[test]
+  fn newlines_would_break_the_row_layout() {
+    assert_eq!(truncate("first\nsecond", 40), "first second");
+    assert_eq!(fit("first\nsecond", 12), "first second");
+  }
+
+  /// The workers are at the newest in-flight ROM, so that is what the window follows.
+  #[test]
+  fn the_anchor_is_the_newest_rom_in_flight() {
+    let roms = vec![
+      entry(true, true),
+      entry(true, false),
+      entry(true, false),
+      entry(false, false),
+    ];
+    assert_eq!(active_anchor(&roms), 2);
+  }
+
+  /// Between two batches nothing is in flight; the window then sits on what is about to
+  /// start rather than on the finished ROMs above it.
+  #[test]
+  fn with_nothing_in_flight_the_anchor_is_the_first_queued_rom() {
+    let roms = vec![entry(true, true), entry(true, true), entry(false, false)];
+    assert_eq!(active_anchor(&roms), 2);
+  }
+
+  /// End of run: everything is finished, and the anchor must still be a valid index.
+  #[test]
+  fn a_finished_run_anchors_on_the_last_row() {
+    let roms = vec![entry(true, true), entry(true, true)];
+    assert_eq!(active_anchor(&roms), 1);
+    assert_eq!(active_anchor(&[]), 0);
+  }
+
+  /// A list that fits on screen never scrolls, whatever the anchor says.
+  #[test]
+  fn a_list_that_fits_never_scrolls() {
+    assert_eq!(scroll_offset(5, 20, 4), 0);
+    assert_eq!(scroll_offset(20, 20, 19), 0);
+  }
+
+  /// The anchor sits a third of the way down, and the window never runs past the end of
+  /// the list — the rows below the anchor are the queue, and they are worth showing.
+  #[test]
+  fn the_window_puts_the_anchor_a_third_of_the_way_down() {
+    assert_eq!(scroll_offset(100, 30, 50), 40);
+    // Near the top there is nothing to scroll past.
+    assert_eq!(scroll_offset(100, 30, 5), 0);
+    // Near the end the window stops at the last full page.
+    assert_eq!(scroll_offset(100, 30, 99), 70);
+  }
+
+  /// A zero-height window is what a terminal one line tall gives us.
+  #[test]
+  fn a_zero_height_window_does_not_divide_by_zero() {
+    assert_eq!(scroll_offset(100, 0, 50), 0);
+  }
+
+  /// One shape per order of magnitude, and the widest still fits the 10-cell column.
+  #[test]
+  fn elapsed_time_changes_shape_with_its_magnitude() {
+    assert_eq!(format_elapsed(Duration::from_millis(4600)), "4.6s");
+    assert_eq!(format_elapsed(Duration::from_secs(42)), "42s");
+    assert_eq!(format_elapsed(Duration::from_secs(190)), "3m 10s");
+    assert_eq!(format_elapsed(Duration::from_secs(2472)), "41m 12s");
+    assert_eq!(format_elapsed(Duration::from_secs(3840)), "1h 04m");
+    assert!(format_elapsed(Duration::from_secs(359_999)).chars().count() <= 10);
+  }
+}

@@ -1,3 +1,4 @@
+mod grid;
 mod modal;
 mod render;
 
@@ -8,7 +9,7 @@ use std::{
     Arc, Mutex,
   },
   thread,
-  time::Duration,
+  time::{Duration, Instant},
 };
 
 use crossbeam_channel as channel;
@@ -17,7 +18,7 @@ use crossterm::{
   execute,
   terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use ratatui::{backend::CrosstermBackend, style::Color, Terminal};
+use ratatui::{backend::CrosstermBackend, Terminal};
 
 use crate::queue::TaskQueue;
 use crate::summary::Summary;
@@ -29,11 +30,13 @@ use render::render;
 
 const SPINNER_FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const TICK_MS: u64 = 80;
-/// Height (in terminal lines) reserved for the active-phase panels at the bottom.
-const PANEL_HEIGHT: u16 = 12;
+
+/// How many assets a ROM is tracked against: the description plus eight media types.
+pub(crate) const MEDIA_COUNT: usize = 9;
 
 /// The canonical order of the nine tracked assets, and the Nerd Font glyph for each.
-/// This order is the order icons appear in the Completed log and in the summary.
+/// This order is the order of the media columns in the grid and of the coverage block
+/// in the summary.
 ///
 /// Without a Nerd Font installed these render as tofu — nine identical boxes — which is
 /// the whole interface's worth of information gone. `--ascii` swaps the table.
@@ -50,8 +53,8 @@ const MEDIA_ICONS_NERD: &[(&str, &str)] = &[
 ];
 
 /// One ASCII letter per asset, same order. The letters are not all initials — marquee
-/// and manual collide — so the legend line is what makes them readable, and it is
-/// generated from this very table.
+/// and manual collide — so the coverage block of the summary is what makes them
+/// readable, and it is generated from this very table.
 const MEDIA_ICONS_ASCII: &[(&str, &str)] = &[
   ("description", "D"),
   ("video", "V"),
@@ -83,6 +86,14 @@ pub(crate) fn media_icons() -> &'static [(&'static str, &'static str)] {
   } else {
     MEDIA_ICONS_NERD
   }
+}
+
+/// Position of an asset in the canonical order, which is the index of its grid column.
+///
+/// Both tables list the same nine kinds in the same order, so the index does not depend
+/// on which one is in force.
+fn media_index(kind: &str) -> Option<usize> {
+  MEDIA_ICONS_NERD.iter().position(|&(k, _)| k == kind)
 }
 
 /// Set once by `main`, from `--plain` or from stdout not being a terminal.
@@ -138,49 +149,47 @@ pub enum ModalResponse {
   Cancelled,
 }
 
-// ── Phase ──────────────────────────────────────────────────────────────────
+// ── Grid alphabet ──────────────────────────────────────────────────────────
 
-/// Pipeline phase for a ROM.
+/// State of one pipeline stage in a grid row: identification, packaging, ROM transfer.
 ///
-/// To add a new phase:
-///   1. Add a variant here.
-///   2. Add an entry in `PANELS`.
-///   3. Add the corresponding method(s) on `RomBar`.
-#[derive(Clone, PartialEq)]
-enum RomPhase {
-  Discovering,
-  Packaging,
-  Downloading,
-  Done { success: bool },
+/// This replaces the old `RomPhase`, which said *where* a ROM was so it could be routed
+/// to one panel or the other. The grid asks a different question — a ROM sits on one
+/// line for the whole run, and each column says how far that one stage got.
+#[derive(Clone, Copy, PartialEq)]
+pub(crate) enum Cell {
+  /// Not reached yet.
+  Todo,
+  /// Running now.
+  Running,
+  /// Running, but blocked on the user rather than on the machine.
+  Waiting,
+  Done,
+  /// Nothing to do: identical to the last run.
+  Unchanged,
+  Failed,
 }
 
-// ── Panel descriptors ──────────────────────────────────────────────────────
-
-/// Associates a display title, accent color, phase matcher, and completion predicate.
-/// The renderer iterates `PANELS` dynamically — no match arms to update.
-struct PanelDef {
-  matches: fn(&RomPhase) -> bool,
-  /// Returns true if a ROM has already passed through (or past) this phase.
-  past: fn(&RomPhase) -> bool,
-  title: &'static str,
-  color: Color,
+/// State of one media asset in a grid row.
+#[derive(Clone, Copy, PartialEq)]
+pub(crate) enum Dot {
+  /// Not attempted yet.
+  Todo,
+  Running,
+  /// Fetched during this run.
+  Fresh,
+  /// Already on disk with the right sha1.
+  Unchanged,
+  /// ScreenScraper has none.
+  Missing,
 }
 
-/// Ordered active-phase panels.
-const PANELS: &[PanelDef] = &[
-  PanelDef {
-    matches: |p| matches!(p, RomPhase::Discovering | RomPhase::Packaging),
-    past: |p| matches!(p, RomPhase::Downloading | RomPhase::Done { .. }),
-    title: "Discovery",
-    color: Color::Cyan,
-  },
-  PanelDef {
-    matches: |p| matches!(p, RomPhase::Downloading),
-    past: |p| matches!(p, RomPhase::Done { .. }),
-    title: "Downloads",
-    color: Color::Green,
-  },
-];
+impl Dot {
+  /// Whether the package ends up with this asset, however it got there.
+  fn present(self) -> bool {
+    matches!(self, Dot::Fresh | Dot::Unchanged)
+  }
+}
 
 // ── Modal internal state ───────────────────────────────────────────────────
 
@@ -196,7 +205,7 @@ enum ModalMode {
 }
 
 /// Display state stored in `AppState` so the render function can draw the modal.
-struct ModalDisplayState {
+pub(crate) struct ModalDisplayState {
   filename: String,
   sha1: Option<String>,
   candidates: Vec<ModalCandidate>,
@@ -209,38 +218,78 @@ struct ModalDisplayState {
 
 // ── App state ──────────────────────────────────────────────────────────────
 
-struct RomEntry {
-  label: String,
-  status: String,
-  phase: RomPhase,
-  media_found: Vec<String>,
-  media_unchanged: Vec<String>,
-  media_missing: Vec<String>,
-}
-
-/// One entry in the Completed log.
-pub(crate) struct CompletedEntry {
+/// One ROM, for the whole run. There is exactly one of these per ROM and it never
+/// moves: its index in `AppState::roms` is its arrival order, which is its row.
+pub(crate) struct RomEntry {
+  /// Scraped name once identified, file name until then.
   pub(crate) label: String,
-  pub(crate) success: bool,
-  pub(crate) unchanged: bool,
-  /// Why this ROM failed. `None` on success, and on a failure restored from a
-  /// `run.yml` written before the cause was recorded.
+  pub(crate) status: String,
+  pub(crate) id: Cell,
+  pub(crate) pkg: Cell,
+  pub(crate) rom: Cell,
+  pub(crate) media: [Dot; MEDIA_COUNT],
+  /// When the first step touched this ROM. `None` while it is still queued, which is
+  /// what the `time` column shows as `—`.
+  pub(crate) started_at: Option<Instant>,
+  pub(crate) finished_at: Option<Instant>,
+  /// Why it failed. `None` on success, and on a failure restored from a `run.yml`
+  /// written before the cause was recorded.
   pub(crate) error: Option<String>,
-  pub(crate) media_found: Vec<String>,
-  pub(crate) media_unchanged: Vec<String>,
-  pub(crate) media_missing: Vec<String>,
+  /// Nothing changed since the last run: ROM, media and description.xml all identical.
+  pub(crate) unchanged: bool,
 }
 
-struct AppState {
-  roms: Vec<RomEntry>,
-  total: usize,
-  /// Finished ROM entries, newest first.
-  completed: Vec<CompletedEntry>,
-  /// Shown in the completed panel when no ROM has finished yet.
-  header: String,
-  tick: usize,
+impl RomEntry {
+  /// A ROM as it enters the grid: on screen, in arrival order, nothing done yet.
+  pub(crate) fn queued(file_name: &str) -> Self {
+    RomEntry {
+      label: file_name.to_string(),
+      status: "queued".to_string(),
+      id: Cell::Todo,
+      pkg: Cell::Todo,
+      rom: Cell::Todo,
+      media: [Dot::Todo; MEDIA_COUNT],
+      started_at: None,
+      finished_at: None,
+      error: None,
+      unchanged: false,
+    }
+  }
+
+  pub(crate) fn finished(&self) -> bool {
+    self.finished_at.is_some()
+  }
+
+  pub(crate) fn failed(&self) -> bool {
+    self.error.is_some()
+  }
+
+  /// Wall-clock time spent on this ROM so far, or in total once it is finished.
+  pub(crate) fn elapsed(&self) -> Option<Duration> {
+    let start = self.started_at?;
+    Some(match self.finished_at {
+      Some(end) => end.saturating_duration_since(start),
+      None => start.elapsed(),
+    })
+  }
+}
+
+pub(crate) struct AppState {
+  pub(crate) roms: Vec<RomEntry>,
+  pub(crate) total: usize,
+  /// The system being scraped, for the banner title.
+  pub(crate) system: String,
+  /// Shown in place of the grid while the sources are still being collected.
+  pub(crate) header: String,
+  pub(crate) tick: usize,
   /// When set, the render function draws the modal overlay.
-  modal: Option<ModalDisplayState>,
+  pub(crate) modal: Option<ModalDisplayState>,
+}
+
+impl AppState {
+  pub(crate) fn done(&self) -> usize {
+    self.roms.iter().filter(|r| r.finished()).count()
+  }
 }
 
 // ── Public types ───────────────────────────────────────────────────────────
@@ -272,24 +321,33 @@ pub struct Ui {
 // ── RomBar ─────────────────────────────────────────────────────────────────
 
 impl RomBar {
+  /// Sets the status phrase, and starts the clock if this is the first thing that ever
+  /// happened to this ROM.
   fn set_status(&self, status: impl Into<String>) {
-    self.state.lock().unwrap().roms[self.index].status = status.into();
-  }
-
-  fn transition(&self, phase: RomPhase, status: impl Into<String>) {
     let mut s = self.state.lock().unwrap();
-    s.roms[self.index].phase = phase;
-    s.roms[self.index].status = status.into();
+    let entry = &mut s.roms[self.index];
+    entry.status = status.into();
+    if entry.started_at.is_none() {
+      entry.started_at = Some(Instant::now());
+    }
   }
 
-  // Phase 1 — Discovery
+  fn set_media(&self, kind: &str, dot: Dot) {
+    if let Some(i) = media_index(kind) {
+      self.state.lock().unwrap().roms[self.index].media[i] = dot;
+    }
+  }
+
+  // ── Identification ──────────────────────────────────────────────────────
+
   pub fn discovering(&self) {
-    self.set_status("discovering...");
+    self.state.lock().unwrap().roms[self.index].id = Cell::Running;
+    self.set_status("identifying");
   }
 
   /// The step failed on something transient and will be tried again after a backoff.
   ///
-  /// Without this the bar kept whatever status it had while the worker slept 1, then 2,
+  /// Without this the row kept whatever status it had while the worker slept 1, then 2,
   /// then 4 seconds. From the outside the ROM was simply frozen, and a run slowed down
   /// by a flaky network looked identical to one blocked on something else entirely.
   pub fn retrying(&self, attempt: u8, max: u8) {
@@ -298,116 +356,158 @@ impl RomBar {
 
   pub fn found(&mut self, name: &str) {
     let mut s = self.state.lock().unwrap();
-    s.roms[self.index].label = name.to_string();
-    s.roms[self.index].status = "found".to_string();
+    let entry = &mut s.roms[self.index];
+    entry.label = name.to_string();
+    entry.id = Cell::Done;
+    entry.status = "identified".to_string();
   }
 
+  /// The user skipped identification: the package is built without metadata.
+  ///
+  /// Marked failed rather than done — the ROM completes, but its `description.xml` is
+  /// empty and that is worth a red cell on the row for the rest of the run.
   pub fn not_found(&self) {
-    self.set_status("not found");
+    self.state.lock().unwrap().roms[self.index].id = Cell::Failed;
+    self.set_status("not identified");
   }
 
-  /// The worker is waiting for the user to identify the ROM in the modal.
+  /// The worker is blocked on the user, not on the machine.
   pub fn waiting_for_user(&self) {
-    self.set_status("waiting for identification...");
+    self.state.lock().unwrap().roms[self.index].id = Cell::Waiting;
+    self.set_status("to identify");
   }
 
-  // Phase 2 — Packaging
-  pub fn preparing_pending(&self) {
-    self.transition(RomPhase::Packaging, "waiting");
+  // ── Packaging ───────────────────────────────────────────────────────────
+
+  pub fn queued_for_packaging(&self) {
+    self.set_status("queued");
   }
 
   pub fn preparing(&self) {
-    self.set_status("preparing...");
+    self.state.lock().unwrap().roms[self.index].pkg = Cell::Running;
+    self.set_status("packaging");
   }
 
-  // Phase 3 — ROM download
-  pub fn downloading_pending(&self) {
-    self.transition(RomPhase::Downloading, "waiting");
+  /// The PKGBUILD step is over: written, or left alone because nothing changed.
+  pub fn pkg_done(&self, unchanged: bool) {
+    self.state.lock().unwrap().roms[self.index].pkg = if unchanged {
+      Cell::Unchanged
+    } else {
+      Cell::Done
+    };
+  }
+
+  // ── ROM transfer ────────────────────────────────────────────────────────
+
+  pub fn queued_for_download(&self) {
+    self.set_status("queued");
   }
 
   pub fn rom_checking(&self) {
-    self.set_status("checking...");
+    self.state.lock().unwrap().roms[self.index].rom = Cell::Running;
+    self.set_status("checking ROM");
   }
 
   pub fn rom_downloading(&self) {
-    self.transition(RomPhase::Downloading, "downloading ROM...");
+    self.state.lock().unwrap().roms[self.index].rom = Cell::Running;
+    self.set_status("downloading ROM");
   }
 
   pub fn rom_redownloading(&self) {
-    self.transition(
-      RomPhase::Downloading,
-      "checksum mismatch, re-downloading...",
-    );
+    self.state.lock().unwrap().roms[self.index].rom = Cell::Running;
+    self.set_status("checksum mismatch, re-downloading");
   }
 
   pub fn rom_done(&self) {
-    self.set_status("ROM ✓");
+    self.state.lock().unwrap().roms[self.index].rom = Cell::Done;
   }
 
   pub fn rom_skipped(&self) {
-    self.set_status("ROM ✓ (already exists)");
+    self.state.lock().unwrap().roms[self.index].rom = Cell::Unchanged;
   }
 
-  // Phase 3 — Media downloads
+  // ── Media ───────────────────────────────────────────────────────────────
+
   pub fn start_media(&self, kind: &str) {
-    self.set_status(format!("{} — downloading...", kind));
+    self.set_media(kind, Dot::Running);
+    self.set_status(format!("{} — downloading", kind));
   }
 
   pub fn media_done(&self, kind: &str) {
-    let mut s = self.state.lock().unwrap();
-    s.roms[self.index].status = format!("{} ✓", kind);
-    s.roms[self.index].media_found.push(kind.to_string());
+    self.set_media(kind, Dot::Fresh);
+    self.set_status(format!("{} ✓", kind));
   }
 
   pub fn media_skipped(&self, kind: &str) {
-    let mut s = self.state.lock().unwrap();
-    s.roms[self.index].status = format!("{} — unchanged", kind);
-    s.roms[self.index].media_unchanged.push(kind.to_string());
+    self.set_media(kind, Dot::Unchanged);
+    self.set_status(format!("{} — unchanged", kind));
   }
 
   pub fn media_unavailable(&self, kind: &str) {
-    let mut s = self.state.lock().unwrap();
-    s.roms[self.index].status = format!("{} — not available", kind);
-    s.roms[self.index].media_missing.push(kind.to_string());
+    self.set_media(kind, Dot::Missing);
+    self.set_status(format!("{} — not available", kind));
   }
 
-  // End
+  // ── End ─────────────────────────────────────────────────────────────────
+
+  /// This ROM finished during the run that was interrupted, and its pipeline was
+  /// restored from `run.yml` rather than executed.
+  ///
+  /// Without this the row would keep three `·` cells under a green name: a finished ROM
+  /// that looks like it never started.
+  pub fn restored(&self) {
+    let mut s = self.state.lock().unwrap();
+    let entry = &mut s.roms[self.index];
+    entry.id = Cell::Done;
+    entry.pkg = Cell::Done;
+    entry.rom = Cell::Done;
+    entry.started_at = Some(Instant::now());
+  }
+
   pub fn finish(&self, unchanged: bool) {
-    self.complete(CompletedFrom::Success { unchanged });
+    self.complete(None, unchanged);
   }
 
   /// `cause` is what `StepStatus::Failed` carried. It is the only trace of the failure
   /// that survives the run: the step is gone from memory by the time the summary prints.
   pub fn finish_error(&self, cause: &str) {
-    self.complete(CompletedFrom::Failure { cause });
+    self.complete(Some(cause), false);
   }
 
-  /// Moves this ROM into the Completed log, and in plain mode says so on stdout.
+  /// Closes the row, and in plain mode says so on stdout.
   ///
   /// The line is built under the lock and printed after it: `println!` takes the stdout
   /// lock, and holding both while nine workers are finishing is a queue nobody needs.
-  fn complete(&self, outcome: CompletedFrom<'_>) {
+  fn complete(&self, cause: Option<&str>, unchanged: bool) {
     let line = {
       let mut s = self.state.lock().unwrap();
-      let entry = &s.roms[self.index];
-      let (success, unchanged, error) = match outcome {
-        CompletedFrom::Success { unchanged } => (true, unchanged, None),
-        CompletedFrom::Failure { cause } => (false, false, Some(cause.to_string())),
-      };
-      let completed = CompletedEntry {
-        label: entry.label.clone(),
-        success,
-        unchanged,
-        error,
-        media_found: entry.media_found.clone(),
-        media_unchanged: entry.media_unchanged.clone(),
-        media_missing: entry.media_missing.clone(),
-      };
-      s.roms[self.index].phase = RomPhase::Done { success };
-      s.completed.insert(0, completed);
+      let done = s.done() + 1;
+      let total = s.total;
+      let entry = &mut s.roms[self.index];
+
+      entry.finished_at = Some(Instant::now());
+      entry.unchanged = unchanged;
+      match cause {
+        Some(cause) => {
+          entry.error = Some(cause.to_string());
+          entry.status = cause.replace('\n', " ");
+          // The first stage that never completed is the one that broke. Testing for
+          // "still running" instead would leave a row restored from `run.yml` with no
+          // red cell at all: nothing is running on a resumed ROM.
+          if let Some(cell) = [&mut entry.id, &mut entry.pkg, &mut entry.rom]
+            .into_iter()
+            .find(|c| !matches!(**c, Cell::Done | Cell::Unchanged))
+          {
+            *cell = Cell::Failed;
+          }
+        }
+        None => {
+          entry.status = if unchanged { "unchanged" } else { "done" }.to_string();
+        }
+      }
 
       if is_plain() {
-        Some(plain_line(&s.completed[0], s.completed.len(), s.total))
+        Some(plain_line(entry, done, total))
       } else {
         None
       }
@@ -419,19 +519,13 @@ impl RomBar {
   }
 }
 
-/// Which of the two endings a ROM reached, so `complete` can build the entry once.
-enum CompletedFrom<'a> {
-  Success { unchanged: bool },
-  Failure { cause: &'a str },
-}
-
 /// One line per finished ROM, for `--plain`.
 ///
-/// Carries the same three things the Completed panel does — the marker, the name, and
-/// then either which assets the package has or why it failed — plus the running count,
-/// which the panel gets from its gauge.
-fn plain_line(entry: &CompletedEntry, done: usize, total: usize) -> String {
-  let marker = if !entry.success {
+/// Carries the same three things a grid row does — the marker, the name, and then
+/// either which assets the package has or why it failed — plus the running count,
+/// which the interface gets from its gauge.
+fn plain_line(entry: &RomEntry, done: usize, total: usize) -> String {
+  let marker = if entry.failed() {
     "✗"
   } else if entry.unchanged {
     "="
@@ -439,7 +533,7 @@ fn plain_line(entry: &CompletedEntry, done: usize, total: usize) -> String {
     "✓"
   };
 
-  let tail = if !entry.success {
+  let tail = if entry.failed() {
     entry
       .error
       .as_deref()
@@ -448,11 +542,9 @@ fn plain_line(entry: &CompletedEntry, done: usize, total: usize) -> String {
   } else {
     let present: Vec<&str> = media_icons()
       .iter()
-      .filter(|(kind, _)| {
-        entry.media_found.iter().any(|k| k == kind)
-          || entry.media_unchanged.iter().any(|k| k == kind)
-      })
-      .map(|&(_, icon)| icon)
+      .enumerate()
+      .filter(|(i, _)| entry.media[*i].present())
+      .map(|(_, &(_, icon))| icon)
       .collect();
     if present.is_empty() {
       String::new()
@@ -471,7 +563,7 @@ impl Ui {
     let state = Arc::new(Mutex::new(AppState {
       roms: Vec::new(),
       total: 0,
-      completed: Vec::new(),
+      system: String::new(),
       header: String::from("Collecting..."),
       tick: 0,
       modal: None,
@@ -544,24 +636,23 @@ impl Ui {
     }
   }
 
+  /// Names the run in the banner title.
+  pub fn set_system(&self, name: &str) {
+    self.state.lock().unwrap().system = name.to_string();
+  }
+
   pub fn fetching_metadata(&self, item: &str) {
     self.state.lock().unwrap().header = format!("Fetching metadata: {}", item);
   }
 
-  /// `_index` is ignored — the bar index is assigned from `roms.len()`.
-  /// `total` is recorded so the completed panel can show `done/total`.
+  /// `_index` is ignored — the row index is assigned from `roms.len()`, which is the
+  /// arrival order the grid is ordered by.
+  /// `total` is recorded so the banner can show `done/total`.
   pub fn new_rom_bar(&self, _index: usize, total: usize, filename: &str) -> RomBar {
     let mut s = self.state.lock().unwrap();
     s.total = total;
     let bar_index = s.roms.len();
-    s.roms.push(RomEntry {
-      label: filename.to_string(),
-      status: "queued".to_string(),
-      phase: RomPhase::Discovering,
-      media_found: Vec::new(),
-      media_unchanged: Vec::new(),
-      media_missing: Vec::new(),
-    });
+    s.roms.push(RomEntry::queued(filename));
     RomBar {
       state: Arc::clone(&self.state),
       index: bar_index,
@@ -577,33 +668,27 @@ impl Ui {
   /// Extract end-of-run statistics. Call before dropping `Ui`, print after.
   pub fn summary(&self) -> Summary {
     let s = self.state.lock().unwrap();
-    let success = s.completed.iter().filter(|e| e.success).count();
-    let unchanged = s.completed.iter().filter(|e| e.unchanged).count();
-    let errors = s.completed.iter().filter(|e| !e.success).count();
+    let finished = || s.roms.iter().filter(|r| r.finished());
+    let success = finished().filter(|r| !r.failed()).count();
+    let unchanged = finished().filter(|r| !r.failed() && r.unchanged).count();
+    let errors = finished().filter(|r| r.failed()).count();
     let media_stats = media_icons()
       .iter()
-      .map(|&(kind, icon)| {
-        let found = s
-          .completed
-          .iter()
-          .filter(|e| {
-            e.media_found.iter().any(|k| k == kind) || e.media_unchanged.iter().any(|k| k == kind)
-          })
+      .enumerate()
+      .map(|(i, &(kind, icon))| {
+        let found = finished()
+          .filter(|r| !r.failed() && r.media[i].present())
           .count();
         (kind, icon, found)
       })
       .collect();
-    // Oldest first: the panel shows newest first because it scrolls, but a printed
-    // list reads in the order the run produced it.
-    let failures = s
-      .completed
-      .iter()
-      .rev()
-      .filter(|e| !e.success)
-      .map(|e| {
+    // In arrival order: the grid is read top to bottom, and so is a printed list.
+    let failures = finished()
+      .filter(|r| r.failed())
+      .map(|r| {
         (
-          e.label.clone(),
-          e.error
+          r.label.clone(),
+          r.error
             .clone()
             .unwrap_or_else(|| "unknown cause".to_string()),
         )
