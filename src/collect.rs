@@ -10,6 +10,14 @@ use std::{
 
 use crate::rom::{DiscFile, RomSource, RomSourceData};
 
+/// Above this, the number is not a disc.
+///
+/// `(CD32)` is the Amiga CD32 platform tag and `cd` is a disc prefix, so it parsed as
+/// disc 32 and merged every CD32 game in a folder into one package. The largest disc
+/// counts that actually shipped are in the teens, so the bound both rejects the platform
+/// tags — CD32, CD64 — and leaves every real release alone.
+const MAX_DISC: u32 = 20;
+
 /// The disc number in one parenthesised group, `None` if it is not a disc indicator.
 ///
 /// `inner` is the text between the parentheses — `"Disc 1"`, `"USA"`, `"CD 2"`.
@@ -26,6 +34,7 @@ fn disc_number(inner: &str) -> Option<u32> {
     .collect::<String>()
     .parse()
     .ok()
+    .filter(|n| *n <= MAX_DISC)
 }
 
 /// Detect `(Disc N)` / `(Disk N)` / `(CD N)` patterns in a filename stem.
@@ -442,6 +451,51 @@ mod tests {
     assert_eq!(out.len(), 1);
     assert_eq!(out[0].filename, "Riven (Disc 1).chd");
     assert!(out[0].extra_discs.is_empty());
+  }
+
+  /// `(CD32)` is the Amiga CD32 platform tag, not disc 32. Two CD32 games in one folder
+  /// used to reduce to the same base and merge into a single package.
+  #[test]
+  fn the_cd32_platform_tag_is_not_a_disc_number() {
+    assert_eq!(disc_indicator("Alien Breed 3D (CD32)"), None);
+    assert_eq!(disc_indicator("Banshee (Europe) (CD32)"), None);
+    assert_eq!(disc_indicator("Microcosm (CD32)"), None);
+  }
+
+  /// The short `(CD1)` spelling still counts — it is the number, not the missing space,
+  /// that tells a disc from a platform.
+  #[test]
+  fn the_short_cd_spelling_still_counts_as_a_disc() {
+    assert_eq!(disc_indicator("Myst (CD1)"), Some(("Myst".to_string(), 1)));
+    assert_eq!(disc_indicator("Myst (CD 2)"), Some(("Myst".to_string(), 2)));
+  }
+
+  /// Nothing ships on twenty-one discs. Beyond that the number is part of a tag that
+  /// happens to start with the same letters.
+  #[test]
+  fn an_implausible_disc_number_is_not_a_disc() {
+    assert_eq!(disc_indicator("Game (Disc 99)"), None);
+    assert_eq!(disc_indicator("Game (CD64)"), None);
+    // The boundary itself stays usable.
+    assert_eq!(
+      disc_indicator("Game (Disc 20)"),
+      Some(("Game".to_string(), 20))
+    );
+  }
+
+  /// The grouping consequence: an Amiga CD32 folder is a folder of single-disc games.
+  #[test]
+  fn two_cd32_games_are_two_packages() {
+    let out = group_multi_disc(vec![
+      source("Alien Breed 3D (CD32).zip"),
+      source("Banshee (CD32).zip"),
+    ]);
+
+    assert_eq!(
+      names(&out),
+      ["Alien Breed 3D (CD32).zip", "Banshee (CD32).zip"]
+    );
+    assert!(out.iter().all(|s| s.extra_discs.is_empty()));
   }
 
   /// Mixed spellings in one library — Redump writes `(Disc 2)`, another set writes

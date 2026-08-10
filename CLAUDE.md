@@ -183,7 +183,8 @@ Resolve the system's `source` to a list of files:
   (computed later in the `ComputeHashes` step).
 
 **Multi-disc grouping** (`group_multi_disc()` in `collect.rs`): after collection, files whose
-stems contain a disc indicator (`(Disc N)`, `(Disk N)`, `(CD N)`, numbering from 0 or 1) and
+stems contain a disc indicator (`(Disc N)`, `(Disk N)`, `(CD N)`, numbering from 0 or 1,
+`N <= MAX_DISC` so `(CD32)` reads as the Amiga platform tag it is) and
 share the same base name and extension are merged into a single `RomSourceData`. The primary
 entry gets a virtual `filename` without the disc indicator; disc 2+ become `extra_discs`.
 Single-disc files pass through unchanged.
