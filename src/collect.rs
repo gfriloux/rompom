@@ -10,48 +10,60 @@ use std::{
 
 use crate::rom::{DiscFile, RomSource, RomSourceData};
 
+/// The disc number in one parenthesised group, `None` if it is not a disc indicator.
+///
+/// `inner` is the text between the parentheses — `"Disc 1"`, `"USA"`, `"CD 2"`.
+fn disc_number(inner: &str) -> Option<u32> {
+  let lower = inner.to_lowercase();
+  let rest = ["disc", "disk", "cd"]
+    .iter()
+    .find_map(|prefix| lower.strip_prefix(prefix))?;
+  let rest = rest.strip_prefix(' ').unwrap_or(rest);
+
+  rest
+    .chars()
+    .take_while(|c| c.is_ascii_digit())
+    .collect::<String>()
+    .parse()
+    .ok()
+}
+
 /// Detect `(Disc N)` / `(Disk N)` / `(CD N)` patterns in a filename stem.
 ///
-/// Scans all parenthesised groups (e.g. a stem may also contain `(USA)` before
-/// the disc indicator) and returns `(base_name, disc_number)` for the last
-/// matching group found, `None` if no disc indicator is present.
+/// Scans all parenthesised groups and returns `(base_name, disc_number)` for the last
+/// matching group found, `None` if no disc indicator is present. The base name is the
+/// stem **without that group** — the other groups all stay, wherever they sit.
 ///
 /// Examples:
 /// - `"Enemy Zero (USA) (Disc 0)"` → `Some(("Enemy Zero (USA)", 0))`
 /// - `"Panzer Dragoon Saga (Disc 1)"` → `Some(("Panzer Dragoon Saga", 1))`
+/// - `"Lunar (Disc 1) (Europe)"` → `Some(("Lunar (Europe)", 1))`
 fn disc_indicator(stem: &str) -> Option<(String, u32)> {
   let mut result: Option<(String, u32)> = None;
   let mut search_from = 0;
 
   while let Some(rel) = stem[search_from..].find('(') {
-    let paren = search_from + rel;
-    let after = &stem[paren + 1..];
-    let lower = after.to_lowercase();
+    let open = search_from + rel;
+    search_from = open + 1;
 
-    let num_offset = if lower.starts_with("disc ") || lower.starts_with("disk ") {
-      5
-    } else if lower.starts_with("disc") || lower.starts_with("disk") {
-      4
-    } else if lower.starts_with("cd ") {
-      3
-    } else if lower.starts_with("cd") {
-      2
-    } else {
-      search_from = paren + 1;
+    let Some(close_rel) = stem[open + 1..].find(')') else {
+      continue;
+    };
+    let close = open + 1 + close_rel;
+
+    let Some(num) = disc_number(&stem[open + 1..close]) else {
       continue;
     };
 
-    let digits: String = after[num_offset..]
-      .chars()
-      .take_while(|c| c.is_ascii_digit())
-      .collect();
-
-    if let Ok(num) = digits.parse::<u32>() {
-      let base = stem[..paren].trim_end().to_string();
-      result = Some((base, num));
+    let mut base = stem[..open].trim_end().to_string();
+    let tail = stem[close + 1..].trim();
+    if !tail.is_empty() {
+      if !base.is_empty() {
+        base.push(' ');
+      }
+      base.push_str(tail);
     }
-
-    search_from = paren + 1;
+    result = Some((base, num));
   }
 
   result
@@ -279,6 +291,55 @@ mod tests {
       disc_indicator("Panzer Dragoon Saga (USA) (Disc 1)"),
       Some(("Panzer Dragoon Saga (USA)".to_string(), 1))
     );
+  }
+
+  /// And so does one that comes after. The base used to be everything *before* the disc
+  /// group, so a trailing `(USA)` was simply dropped.
+  #[test]
+  fn a_region_tag_after_the_indicator_stays_in_the_base_too() {
+    assert_eq!(
+      disc_indicator("Lunar (Disc 1) (USA)"),
+      Some(("Lunar (USA)".to_string(), 1))
+    );
+    assert_eq!(
+      disc_indicator("Lunar (Disc 2) (Europe)"),
+      Some(("Lunar (Europe)".to_string(), 2))
+    );
+    assert_eq!(
+      disc_indicator("Lunar (Rev 1) (Disc 1) (USA)"),
+      Some(("Lunar (Rev 1) (USA)".to_string(), 1))
+    );
+  }
+
+  /// The whole point of the base name: two regional releases must not merge. They used
+  /// to share the base `"Lunar"` and came out as one package whose .m3u played disc 1 in
+  /// English and disc 2 in French.
+  #[test]
+  fn two_regional_releases_do_not_merge_into_one_game() {
+    let out = group_multi_disc(vec![
+      source("Lunar (Disc 1) (USA).chd"),
+      source("Lunar (Disc 2) (Europe).chd"),
+    ]);
+
+    assert_eq!(
+      names(&out),
+      ["Lunar (Disc 1) (USA).chd", "Lunar (Disc 2) (Europe).chd"]
+    );
+    assert!(out.iter().all(|s| s.extra_discs.is_empty()));
+  }
+
+  /// The same tag on both discs is the ordinary case and must still group — and the
+  /// virtual name keeps the region, because that is what the package is called.
+  #[test]
+  fn the_same_tag_on_both_discs_still_groups() {
+    let out = group_multi_disc(vec![
+      source("Lunar (Disc 1) (USA).chd"),
+      source("Lunar (Disc 2) (USA).chd"),
+    ]);
+
+    assert_eq!(out.len(), 1);
+    assert_eq!(out[0].filename, "Lunar (USA).chd");
+    assert_eq!(out[0].extra_discs.len(), 1);
   }
 
   // ── group_multi_disc ─────────────────────────────────────────────────────
