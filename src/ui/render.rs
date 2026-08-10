@@ -7,7 +7,7 @@ use ratatui::{
 };
 
 use super::{
-  AppState, CompletedEntry, ModalDisplayState, ModalMode, PanelDef, RomEntry, MEDIA_ICONS, PANELS,
+  media_icons, AppState, CompletedEntry, ModalDisplayState, ModalMode, PanelDef, RomEntry, PANELS,
   PANEL_HEIGHT, SPINNER_FRAMES,
 };
 
@@ -89,7 +89,7 @@ fn render_completed(frame: &mut Frame, area: Rect, state: &AppState) {
 
   frame.render_widget(List::new(items), chunks[1]);
 
-  let legend_spans: Vec<Span> = MEDIA_ICONS
+  let legend_spans: Vec<Span> = media_icons()
     .iter()
     .flat_map(|&(kind, icon)| {
       [
@@ -162,7 +162,7 @@ fn completed_item(entry: &CompletedEntry, width: usize) -> ListItem<'static> {
   //   green   = downloaded (new or updated)
   //   gray    = already up-to-date (unchanged)
   //   red     = not available on ScreenScraper
-  for &(kind, icon) in MEDIA_ICONS {
+  for &(kind, icon) in media_icons() {
     let style = if entry.media_found.iter().any(|k| k == kind) {
       Style::default().fg(Color::Green)
     } else if entry.media_unchanged.iter().any(|k| k == kind) {

@@ -273,6 +273,11 @@ fn main() {
   );
   opts.optflag(
     "",
+    "ascii",
+    "use ASCII letters instead of Nerd Font icons for the media columns",
+  );
+  opts.optflag(
+    "",
     "init",
     "write a starter rompom.yml, if there is not one already",
   );
@@ -307,6 +312,12 @@ fn main() {
   if matches.opt_present("version") {
     println!("rompom {}", env!("CARGO_PKG_VERSION"));
     return;
+  }
+
+  // Before anything can render, and before the summary is built: both read the table
+  // through `ui::media_icons()`.
+  if matches.opt_present("ascii") {
+    ui::use_ascii_icons();
   }
 
   if matches.opt_present("init") {

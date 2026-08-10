@@ -32,9 +32,12 @@ const TICK_MS: u64 = 80;
 /// Height (in terminal lines) reserved for the active-phase panels at the bottom.
 const PANEL_HEIGHT: u16 = 12;
 
-/// Canonical media types with their display icon.
-/// Order here is the order icons appear in the Completed log and summary.
-pub(crate) const MEDIA_ICONS: &[(&str, &str)] = &[
+/// The canonical order of the nine tracked assets, and the Nerd Font glyph for each.
+/// This order is the order icons appear in the Completed log and in the summary.
+///
+/// Without a Nerd Font installed these render as tofu — nine identical boxes — which is
+/// the whole interface's worth of information gone. `--ascii` swaps the table.
+const MEDIA_ICONS_NERD: &[(&str, &str)] = &[
   ("description", "󰗚"),
   ("video", "󰕧"),
   ("image", "󰋩"),
@@ -45,6 +48,42 @@ pub(crate) const MEDIA_ICONS: &[(&str, &str)] = &[
   ("wheel", "󰊢"),
   ("manual", "󰂺"),
 ];
+
+/// One ASCII letter per asset, same order. The letters are not all initials — marquee
+/// and manual collide — so the legend line is what makes them readable, and it is
+/// generated from this very table.
+const MEDIA_ICONS_ASCII: &[(&str, &str)] = &[
+  ("description", "D"),
+  ("video", "V"),
+  ("image", "I"),
+  ("thumbnail", "T"),
+  ("screenshot", "S"),
+  ("bezel", "B"),
+  ("marquee", "Q"),
+  ("wheel", "W"),
+  ("manual", "M"),
+];
+
+/// Set once by `main` when `--ascii` is given, before any thread reads it.
+static ASCII_ICONS: AtomicBool = AtomicBool::new(false);
+
+/// Switches the process to the ASCII table.
+///
+/// Process-wide rather than threaded through `Ui`, `render` and `Summary`, because the
+/// choice is made once on the command line and never changes: carrying it through three
+/// layers would be three parameters that can only ever hold one value.
+pub fn use_ascii_icons() {
+  ASCII_ICONS.store(true, Ordering::Relaxed);
+}
+
+/// The icon table in force — the renderer and the summary both go through this.
+pub(crate) fn media_icons() -> &'static [(&'static str, &'static str)] {
+  if ASCII_ICONS.load(Ordering::Relaxed) {
+    MEDIA_ICONS_ASCII
+  } else {
+    MEDIA_ICONS_NERD
+  }
+}
 
 // ── Modal public types ─────────────────────────────────────────────────────
 
@@ -451,7 +490,7 @@ impl Ui {
     let success = s.completed.iter().filter(|e| e.success).count();
     let unchanged = s.completed.iter().filter(|e| e.unchanged).count();
     let errors = s.completed.iter().filter(|e| !e.success).count();
-    let media_stats = MEDIA_ICONS
+    let media_stats = media_icons()
       .iter()
       .map(|&(kind, icon)| {
         let found = s

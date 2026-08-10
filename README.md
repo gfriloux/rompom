@@ -216,6 +216,7 @@ rompom -s atomiswave
 | `--init` | write a starter `rompom.yml` — refuses if one is already there |
 | `--list-systems` | list the systems declared in `rompom.yml` with their id and source, then exit |
 | `--update-config` | interactive migration of an outdated `rompom.yml` |
+| `--ascii` | replace the Nerd Font media icons with ASCII letters |
 | `--debug` | write `<system>.debug.log` with the per-ROM pipeline decisions |
 | `-h`, `--help` | usage |
 | `-V`, `--version` | version, and nothing else — works without a config file |
