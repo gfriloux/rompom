@@ -2,7 +2,10 @@ use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 
-use crate::rom::{Rom, Step, StepStatus};
+use crate::{
+  rom::{Rom, Step, StepStatus},
+  state::write_with_rotation,
+};
 
 // ── Run state ─────────────────────────────────────────────────────────────
 //
@@ -64,10 +67,14 @@ pub fn collect_run_state(roms: &[Arc<Mutex<Rom>>]) -> RunState {
 }
 
 /// Write a `RunState` to `<system_name>.run.yml`.
+///
+/// Through the same write-rename as `state.yml`: this file is written while the process
+/// is already shutting down, and a truncated one is worse than none — the resume prompt
+/// would offer to continue a run whose statuses it cannot read.
 pub fn save_run_state(system_name: &str, state: &RunState) -> std::io::Result<()> {
   let path = format!("{}.run.yml", system_name);
   let yaml = serde_yaml::to_string(state).map_err(std::io::Error::other)?;
-  std::fs::write(path, yaml)
+  write_with_rotation(&path, &yaml)
 }
 
 /// Load a `RunState` from disk.
@@ -160,13 +167,27 @@ fn restore_finished_pipeline(pipeline: &mut [Step], run_entry: &RunRomEntry) -> 
 /// and any other ROM restarts from the first step, which is the "queued / Discovering"
 /// state `new_rom_bar()` already set.
 pub fn restore_bar_for_resumed_rom(rom: &Rom) {
-  let leaf = &rom.pipeline[rom.pipeline.len() - 1];
-
-  match &leaf.status {
-    StepStatus::Done | StepStatus::Skipped => rom.bar.finish(false),
-    StepStatus::Failed(_) => rom.bar.finish_error(),
-    _ => {}
+  // Look for the failure anywhere in the pipeline, not just on the leaf. A ROM cut
+  // short upstream has its failure on the step that broke and `Skipped` everywhere
+  // after it — including the leaf — so reading the leaf alone restored it into the
+  // Completed panel as a success.
+  if let Some(cause) = failure_cause(&rom.pipeline) {
+    rom.bar.finish_error(&cause);
+    return;
   }
+
+  let leaf = &rom.pipeline[rom.pipeline.len() - 1];
+  if matches!(leaf.status, StepStatus::Done | StepStatus::Skipped) {
+    rom.bar.finish(false);
+  }
+}
+
+/// The cause carried by the first failed step of a pipeline, if any.
+fn failure_cause(pipeline: &[Step]) -> Option<String> {
+  pipeline.iter().find_map(|step| match &step.status {
+    StepStatus::Failed(cause) => Some(cause.clone()),
+    _ => None,
+  })
 }
 
 #[cfg(test)]
@@ -364,6 +385,54 @@ mod tests {
     assert!(finished);
     assert!(matches!(p[4].status, StepStatus::Failed(_)));
     assert!(p.iter().all(|s| s.status != StepStatus::Pending));
+  }
+
+  /// The failure sits on the step that broke, and everything after it — the leaf
+  /// included — is Skipped. Reading the leaf alone therefore said "Done" and restored a
+  /// failed ROM into the Completed panel as a success, cause and all lost.
+  #[test]
+  fn a_resumed_failure_is_found_off_the_leaf() {
+    use RunStepStatus as R;
+    let mut p = pipeline();
+
+    restore_finished_pipeline(
+      &mut p,
+      &entry(vec![
+        R::Done,
+        R::Done,
+        R::Skipped,
+        R::Done,
+        R::Failed("daily ScreenScraper scrape quota exceeded".to_string()),
+        R::Done,
+        R::Skipped,
+      ]),
+    );
+
+    assert!(matches!(p.last().unwrap().status, StepStatus::Skipped));
+    assert_eq!(
+      failure_cause(&p).as_deref(),
+      Some("daily ScreenScraper scrape quota exceeded")
+    );
+  }
+
+  /// A ROM that simply finished must not be reported as failed.
+  #[test]
+  fn a_clean_pipeline_has_no_cause() {
+    use RunStepStatus as R;
+    let mut p = pipeline();
+    restore_finished_pipeline(
+      &mut p,
+      &entry(vec![
+        R::Done,
+        R::Done,
+        R::Skipped,
+        R::Done,
+        R::Done,
+        R::Done,
+        R::Done,
+      ]),
+    );
+    assert_eq!(failure_cause(&p), None);
   }
 
   /// A step still in flight when the interrupt landed, in a pipeline whose leaf did

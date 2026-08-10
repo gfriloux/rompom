@@ -5,7 +5,7 @@
 }:
 pkgs.pkgsStatic.rustPlatform.buildRustPackage {
   pname = "rompom";
-  version = "0.16.0";
+  version = "0.17.0";
 
   src = builtins.path {
     path = ../..;
@@ -20,7 +20,7 @@ pkgs.pkgsStatic.rustPlatform.buildRustPackage {
     lockFile = ../../Cargo.lock;
     outputHashes = {
       "internet_archive-0.2.0" = "sha256-W80Y7x0e1t5zpMSdE6mVXqzF7088CJh3UwaRPcTV658=";
-      "screenscraper-0.6.0" = "sha256-FIFSnDOjIycPYLgRkyfA0OY8jCIV9/W5kVto0+zeMAk=";
+      "screenscraper-0.7.0" = "sha256-iQpVyZmBXB90N+93Waoo0yDIc0+UZR+xJc61S9ETdoI=";
     };
   };
 

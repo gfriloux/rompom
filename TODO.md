@@ -58,9 +58,21 @@ correction est arrivée avec ses tests : le dépôt est passé de 0 à 34 tests.
 
 ## P1 — Robustesse et confiance
 
-- [ ] **P1.1 — Erreur réseau SS ≠ « jeu non trouvé »** : `jeuinfo(...).ok()`
-  (`discovery.rs:249-256`) avale timeout/500/quota → modale d'identification
-  injustifiée ; le retry de LookupSS est du code mort. *(petit côté rompom)*
+- [x] **P1.1 — Erreur réseau SS ≠ « jeu non trouvé »** — *fait le 2026-08-10*, après la
+  sortie de `screenscraper` v0.7.0. `lookup_failure()` traduit `ApiFailure` en
+  `StepError` : seul le 404 ouvre la modale. Trois trous non prévus au diagnostic, tous
+  trouvés en lisant le code : `jeu_recherche(...).unwrap_or_default()` ouvrait une modale
+  **vide** sur échec réseau ; le `jeuinfo_by_gameid` d'après-modale faisait `.ok()`, donc
+  une coupure à cet instant jetait l'identification que l'utilisateur venait de saisir et
+  écrasait le `description.xml` par un vide ; et un Ctrl-C dans la même fenêtre tombait
+  dans le même trou via un `return None`.
+  - **Fuite de credentials trouvée au passage** (corrigée) : `reqwest::Error` ajoute
+    ` for url (<url complète>)` à son `Display` (reqwest-0.11.27, `src/error.rs:205`) et
+    `base_query()` passe `devpassword`/`sspassword` en paramètres d'URL. `main.rs`
+    imprimait cette erreur telle quelle : perdre le réseau au démarrage écrivait les deux
+    mots de passe sur stderr. rompom ne cite plus jamais l'erreur de la lib — il compose
+    sa propre phrase à partir de `ApiFailure`, et un test le vérifie.
+  - Ancien diagnostic, conservé pour mémoire :
   - **Bloqué par la lib `screenscraper`** (constaté le 2026-08-09, avant de coder) :
     l'API ScreenScraper signale ses erreurs par **code HTTP** — `404` jeu introuvable,
     `429` trop de threads, `430` quota journalier, `423` API fermée, `403` identifiants
@@ -75,16 +87,19 @@ correction est arrivée avec ses tests : le dépôt est passé de 0 à 34 tests.
     `cargoLock.outputHashes` du paquet Nix. *(décision à prendre : touche un second dépôt)*
   - **Fix partiel possible sans la lib** : traiter `Error::Request` (timeout, DNS,
     connexion refusée) comme transitoire. Ne couvre que le timeout des trois cas cités.
-- [ ] **P1.2 — Afficher les erreurs des ROMs échouées** : `StepStatus::Failed(msg)`
-  existe mais `finish_error()` ne prend pas le message ; le summary n'imprime qu'un
-  compteur. → Panneau Completed `✗ rom — cause` + liste des échecs dans
-  `Summary::print()`. *(petit/moyen)*
-- [ ] **P1.3 — Messages d'erreur config** : `ReadConfiguration`/`ParseConfiguration`
-  sans `#[snafu(display)]` (`conf/mod.rs:100-113`) → l'erreur serde_yaml
-  (ligne/colonne) et le chemin sont perdus. *(petit)*
+- [x] **P1.2 — Afficher les erreurs des ROMs échouées** — *fait le 2026-08-10*.
+  Panneau Completed `✗ rom — cause` (tronquée à la largeur, à la place des icônes médias)
+  et section `Failures` non tronquée dans `Summary::print()`. Trouvé en chemin :
+  `restore_bar_for_resumed_rom()` ne lisait que la feuille du pipeline, or une ROM coupée
+  en amont a `Skipped` partout après le step cassé — feuille comprise. Un échec repris
+  depuis `run.yml` réapparaissait donc en **succès**.
+- [x] **P1.3 — Messages d'erreur config** — *fait le 2026-08-10*. `#[snafu(display)]` sur
+  les quatre variantes, `path` ajouté à `ParseConfiguration`. Une erreur YAML donne
+  maintenant le fichier, le champ et la ligne. Au passage : `--update-config` rapportait
+  ses échecs de **sérialisation** sous `ParseConfiguration` — d'où une variante
+  `SerializeConfiguration` distincte.
 - [ ] **P1.4 — Cargo.toml** : pinner les 10 dépendances `*` (valeurs du lock, reqwest
-  est à 0.11.27), supprimer la section `[target.x86_64...]` invalide (ignorée par
-  cargo — elle produit un `unused manifest key` à chaque build), ajouter
+  est à 0.11.27), ajouter
   `[profile.release]` (opt-level=z, LTO — aujourd'hui seulement dans le Nix), retirer
   `serde_derive` redondant. *(petit)*
   - **Dette de sécurité associée**, révélée par `just audit` le 2026-08-09 et acceptée
@@ -111,12 +126,18 @@ correction est arrivée avec ses tests : le dépôt est passé de 0 à 34 tests.
   `read_pkgver()` + round-trip `SystemState`. Puis `apply_run_state()`
   (invariant anti-underflow). Extraire `disc_indicator`/`group_multi_disc` vers
   `src/collect.rs` au passage. *(petit chacun)*
-- [ ] **P1.7 — `./launcher` OpenBOR écrit en CWD** (`package.rs:181`) : chemin partagé
-  entre workers concurrents → l'écrire dans le répertoire de la ROM. *(petit)*
-- [ ] **P1.8 — Durabilité de l'état** : flush périodique du state (un crash ≠ Ctrl-C
-  perd tout → re-bump de tous les pkgver) ; write-rename pour run.yml ; warning si
-  state.yml existe mais est illisible (aujourd'hui ignoré en silence,
-  `state.rs:29-31`). *(petit)*
+- [x] **P1.7 — `./launcher` OpenBOR écrit en CWD** — *fait le 2026-08-10*. Écrit
+  maintenant dans le répertoire de la ROM.
+  - **À creuser (bug distinct, non corrigé)** : ce fichier `launcher` n'est référencé
+    **nulle part** — ni dans les `sources` du PKGBUILD, ni dans un `package()`. Et
+    `apply_game_path()` pose `game.path = ./{name}.sh` pour le système 214, donc
+    EmulationStation cherche un `.sh` que rien ne produit. Le packaging OpenBOR est
+    probablement cassé de bout en bout ; à instruire avec un vrai jeu OpenBOR avant de
+    décider quoi corriger. *(moyen)*
+- [x] **P1.8 — Durabilité de l'état** — *fait le 2026-08-10*. Flush toutes les 30 s par
+  un thread dédié (sérialisation sous le verrou, écriture hors verrou) ; `run.yml` passe
+  par le même `write_with_rotation()` que `state.yml` ; `SystemState::load()` rend un
+  avertissement, imprimé **avant** `Ui::new()` pour qu'il soit lisible.
 
 ## P2 — Simplicité d'utilisation
 
@@ -134,7 +155,7 @@ correction est arrivée avec ses tests : le dépôt est passé de 0 à 34 tests.
 - [ ] **P2.5 — Documentation** : Nerd Fonts requis (+ fallback `--ascii`, les icônes
   sont centralisées dans `MEDIA_ICONS`), fichiers créés dans le cwd
   (state.yml/run.yml/debug.log), conséquence de supprimer state.yml, lien tier de
-  compte SS ↔ maxthreads. Se combine avec PLAN_DOCUMENTATION.md. *(petit)*
+  compte SS ↔ maxthreads. *(petit)*
 - [ ] **P2.6 — Mode non-interactif `--plain`** + `--resume=yes|no` : aucune détection
   de tty aujourd'hui (`Ui::new` fait raw mode inconditionnellement) ; 3 bloqueurs
   CI : prompt resume, TUI, modale. Indispensable pour le cas d'usage CI du README. *(moyen/gros)*
@@ -162,8 +183,11 @@ correction est arrivée avec ses tests : le dépôt est passé de 0 à 34 tests.
   les 8 blocs de `build_pkgbuild` (table-driven).
 - [ ] Utiliser `m.url` au lieu de reconstruire les URLs SS à la main dans
   `build_pkgbuild` (cassera au premier changement de format d'URL SS).
-- [ ] `enum StepError { Interrupted, Transient, Fatal }` au lieu de la sentinelle
-  `Err("interrupted")`.
+- [x] `enum StepError { Interrupted, Transient, Fatal }` au lieu de la sentinelle
+  `Err("interrupted")` — *fait le 2026-08-10*, remonté dans le lot v0.17 parce que P1.1
+  en dépend : sans la distinction transitoire/définitif, un quota dépassé brûlait 3
+  tentatives et 7 s de backoff par ROM. La décision vit dans `disposition()`, pure et
+  testée.
 - [ ] Nettoyer le code mort : `StepData` quasi entier, `Phase`/`StepKind::phase()`,
   `Package.name` ≡ `Package.rom`.
 - [ ] Fuite de permit `modal_sem` sur chemin d'erreur (`discovery.rs:355-384`) → guard
@@ -172,13 +196,27 @@ correction est arrivée avec ses tests : le dépôt est passé de 0 à 34 tests.
 - [ ] Templates : `mkdir -p 0700 -p` (voulu : `-m 0700`) et `ls *.pdf,` (virgule
   parasite) dans multidisc/psx/ps2-package.jinja. *(le `sed` Sega CD cassable par `|`
   est corrigé — `sed_pattern()`, cf. P0.1)*
+- [ ] **Lib `screenscraper` — assainir le `Display` de `Error::Request`.** La variante
+  porte un `source: reqwest::Error` dont le `Display` ajoute l'URL complète, credentials
+  compris. rompom est protégé (il ne cite plus l'erreur), mais le prochain consommateur
+  ne le saura pas. Correctif amont : `.without_url()` sur l'erreur avant de la stocker
+  (reqwest l'expose, `src/error.rs:80`). *(petit, dépôt voisin)*
 - [ ] Migration rustls (rompom + screenscraper + internetarchive) → supprime openssl
   vendored + perl du Nix. Remplacer `serde_yaml` (archivé). `Debug` masqué sur
   `Auth`/`ScreenScraper`.
 - [ ] Migration clap ; regrouper les fichiers d'état dans `.rompom/` (avec migration) ;
   checks Nix clippy + cargo test + `--edition 2021` sur le check rustfmt.
-- [ ] Features planifiées : contribution SS (PLAN_SS_ROM_CONTRIBUTION.md — après P0,
-  ajoute un step au DAG) ; refonte README (PLAN_DOCUMENTATION.md, avec P2.5).
+- [ ] **Contribution SS** — soumettre l'association `checksum → game_id` à ScreenScraper
+  quand l'utilisateur identifie une ROM à la main via la modale. Ajoute un step
+  `ContributeRomToSS` au DAG entre `WaitModal` et `BuildPackage` (fire-and-forget : un
+  échec de contribution ne fait pas échouer le packaging), plus une fonction
+  `contribute_rom(...)` dans la lib `screenscraper`. Tout est déjà disponible au retour de
+  la modale (sha1/md5/crc32, filename, size, system.id, game_id choisi).
+  **Bloqué** : le compteur `romasso` de `UserInfo` prouve que SS supporte la fonction,
+  mais la route API n'est pas dans la doc v2 — aucun `modiftypeinfo` de `botProposition.php`
+  ne couvre l'association de checksum. Débloquer par le forum/Discord SS, ou en observant
+  les requêtes d'un autre scraper. Hors périmètre : contribution de jeu complet, et
+  multi-disques (les disques 2+ n'ont pas de game_id distinct).
 
 ---
 

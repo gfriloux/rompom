@@ -7,7 +7,7 @@ use std::{
 use checksums::{hash_file, Algorithm};
 use internet_archive::download::{Download, DownloadMethod};
 
-use crate::rom::{Rom, RomSource, StepStatus};
+use crate::rom::{Rom, RomSource, StepError, StepStatus};
 
 use super::super::{helpers::media_filename, WorkerContext};
 
@@ -21,7 +21,7 @@ pub(crate) fn handle_copy_rom(
   rom_arc: &Arc<Mutex<Rom>>,
   _step_idx: usize,
   _ctx: &WorkerContext,
-) -> Result<StepStatus, String> {
+) -> Result<StepStatus, StepError> {
   let (filename, sha1_expected, local_path, rom_unchanged, extra_discs) = {
     let rom = rom_arc.lock().unwrap();
     let local_path = match &rom.source.source {
@@ -53,7 +53,7 @@ pub(crate) fn handle_copy_rom(
 
   // Output directory is derived from the logical/virtual filename.
   let directory = Path::new(&filename).with_extension("");
-  fs::create_dir_all(&directory).map_err(|e| e.to_string())?;
+  fs::create_dir_all(&directory).map_err(StepError::transient)?;
 
   if rom_unchanged {
     rom_arc.lock().unwrap().bar.rom_skipped();
@@ -61,14 +61,14 @@ pub(crate) fn handle_copy_rom(
   }
 
   // Helper: copy one disc file unless it already matches the expected sha1.
-  let copy_disc = |local: &Path, dest: &Path, sha1_exp: &str| -> Result<bool, String> {
+  let copy_disc = |local: &Path, dest: &Path, sha1_exp: &str| -> Result<bool, StepError> {
     if dest.exists() {
       let actual = hash_file(dest, Algorithm::SHA1).to_lowercase();
       if actual == sha1_exp {
         return Ok(false); // already good
       }
     }
-    fs::copy(local, dest).map_err(|e| e.to_string())?;
+    fs::copy(local, dest).map_err(StepError::transient)?;
     Ok(true) // copied
   };
 
@@ -111,7 +111,7 @@ pub(crate) fn handle_download_rom(
   rom_arc: &Arc<Mutex<Rom>>,
   _step_idx: usize,
   _ctx: &WorkerContext,
-) -> Result<StepStatus, String> {
+) -> Result<StepStatus, StepError> {
   let (filename, file_name_in_item, metadata, rom_unchanged, extra_discs) = {
     let rom = rom_arc.lock().unwrap();
     let (metadata, file_name) = match &rom.source.source {
@@ -135,7 +135,7 @@ pub(crate) fn handle_download_rom(
 
   // Output directory derived from the logical/virtual filename.
   let directory = Path::new(&filename).with_extension("");
-  fs::create_dir_all(&directory).map_err(|e| e.to_string())?;
+  fs::create_dir_all(&directory).map_err(StepError::transient)?;
 
   if rom_unchanged {
     rom_arc.lock().unwrap().bar.rom_skipped();
@@ -151,7 +151,7 @@ pub(crate) fn handle_download_rom(
     .unwrap_or_else(|| filename.clone());
   let dest1 = directory.join(&disc1_local_name);
 
-  let dl1 = Download::new(&metadata, &file_name_in_item).map_err(|e| e.to_string())?;
+  let dl1 = Download::new(&metadata, &file_name_in_item).map_err(StepError::transient)?;
   if dest1.exists() {
     rom_arc.lock().unwrap().bar.rom_checking();
     match dl1.verify_sha1(&dest1) {
@@ -162,8 +162,8 @@ pub(crate) fn handle_download_rom(
         rom_arc.lock().unwrap().bar.rom_redownloading();
         dl1
           .fetch(&dest1, DownloadMethod::Https)
-          .map_err(|e| e.to_string())?;
-        dl1.verify_sha1(&dest1).map_err(|e| e.to_string())?;
+          .map_err(StepError::transient)?;
+        dl1.verify_sha1(&dest1).map_err(StepError::transient)?;
         rom_arc.lock().unwrap().bar.rom_done();
       }
     }
@@ -171,21 +171,21 @@ pub(crate) fn handle_download_rom(
     rom_arc.lock().unwrap().bar.rom_downloading();
     dl1
       .fetch(&dest1, DownloadMethod::Https)
-      .map_err(|e| e.to_string())?;
-    dl1.verify_sha1(&dest1).map_err(|e| e.to_string())?;
+      .map_err(StepError::transient)?;
+    dl1.verify_sha1(&dest1).map_err(StepError::transient)?;
     rom_arc.lock().unwrap().bar.rom_done();
   }
 
   // ── Extra discs (disc 2, 3, …) ────────────────────────────────────────
   for (ia_path, local_name) in &extra_discs {
     let dest = directory.join(local_name);
-    let dl = Download::new(&metadata, ia_path).map_err(|e| e.to_string())?;
+    let dl = Download::new(&metadata, ia_path).map_err(StepError::transient)?;
     if dest.exists() && dl.verify_sha1(&dest).is_ok() {
       continue; // already valid
     }
     dl.fetch(&dest, DownloadMethod::Https)
-      .map_err(|e| e.to_string())?;
-    dl.verify_sha1(&dest).map_err(|e| e.to_string())?;
+      .map_err(StepError::transient)?;
+    dl.verify_sha1(&dest).map_err(StepError::transient)?;
   }
 
   Ok(StepStatus::Done)
@@ -204,7 +204,7 @@ pub(crate) fn handle_download_medias(
   rom_arc: &Arc<Mutex<Rom>>,
   _step_idx: usize,
   ctx: &WorkerContext,
-) -> Result<StepStatus, String> {
+) -> Result<StepStatus, StepError> {
   let (filename, medias) = {
     let mut rom = rom_arc.lock().unwrap();
     let filename = rom.source.filename.clone();
@@ -236,7 +236,7 @@ pub(crate) fn handle_download_medias(
               .ss
               .media_download(m)
               .fetch(&dest)
-              .map_err(|e| format!("media {}: {}", kind, e))?;
+              .map_err(|e| StepError::Transient(format!("media {}: {}", kind, e)))?;
             rom_arc.lock().unwrap().bar.media_done(kind);
           } else {
             rom_arc.lock().unwrap().bar.media_skipped(kind);

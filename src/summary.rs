@@ -6,6 +6,11 @@ pub struct Summary {
   pub success: usize,
   pub unchanged: usize,
   pub errors: usize,
+  /// (rom label, cause) for every ROM that failed, oldest first.
+  ///
+  /// The Completed panel truncates its causes to the panel width; this list does not.
+  /// It is the last chance to read one — the TUI is gone by the time this prints.
+  pub failures: Vec<(String, String)>,
   /// (kind, icon, roms_with_this_media) — canonical order from MEDIA_ICONS.
   pub media_stats: Vec<(&'static str, &'static str, usize)>,
   /// Average wall-clock time per step kind, in canonical pipeline order.
@@ -19,6 +24,14 @@ impl Summary {
     println!("  ✓  {:>4}  updated", self.success - self.unchanged);
     println!("  =  {:>4}  unchanged", self.unchanged);
     println!("  ✗  {:>4}  errors\n", self.errors);
+
+    if !self.failures.is_empty() {
+      println!("Failures");
+      for (label, cause) in &self.failures {
+        println!("  ✗  {} — {}", label, cause);
+      }
+      println!();
+    }
 
     if self.success > 0 {
       println!("Media coverage");

@@ -12,6 +12,35 @@ git-cliff; they are preserved verbatim, with far more detail, in
 [SemVer]: https://semver.org/
 [Conventional Commits]: https://www.conventionalcommits.org/
 
+## [0.17.0] — 2026-08-10
+
+### Features
+
+- **ui**: Show why a ROM failed, in the panel and in the summary ([`9366433`](https://github.com/gfriloux/rompom/commit/93664337517275dbbc5d15e96f99c75107bfbfc4))
+- **modal**: Tell a wrong game ID from a network failure ([`4e0558a`](https://github.com/gfriloux/rompom/commit/4e0558ad20f1c4b79036e0c9d04ed09f39d4545c))
+
+### Bug fixes
+
+- **state**: Survive a crash without losing the run's state ([`b0a2571`](https://github.com/gfriloux/rompom/commit/b0a25712af25e2cf96364bc3550badd0d35eaf85))
+- **package**: Write the OpenBOR launcher into the ROM directory ([`96e6130`](https://github.com/gfriloux/rompom/commit/96e6130ae898a3cc893107c1df23beb8db1964e4))
+- **conf**: Name the file and the line when the configuration is unreadable ([`f8b0bfe`](https://github.com/gfriloux/rompom/commit/f8b0bfe2e5a6472e14bfba01d03ba898d6874ddb))
+- **main**: Stop printing ScreenScraper credentials on a failed connection ([`f27ab41`](https://github.com/gfriloux/rompom/commit/f27ab414bae9100f36bd13d943baf49b4beb040e))
+- **discovery**: Stop treating a ScreenScraper outage as an unknown game ([`18280c2`](https://github.com/gfriloux/rompom/commit/18280c26f37e9fee99a46d9e0dbb24fef267b2cf))
+
+### Refactoring
+
+- **worker**: Type step failures instead of string sentinels ([`fb5683a`](https://github.com/gfriloux/rompom/commit/fb5683a329e64adefa90dcbb1238f0fb82c8bd48))
+
+### Miscellaneous
+
+- **plans**: Record the v0.17.0 checks that were actually run ([`fe7c8cd`](https://github.com/gfriloux/rompom/commit/fe7c8cd6f9fb334e508a2a64854a045a860ea490))
+- **plans**: Record what P1.1 turned up ([`e66e6b9`](https://github.com/gfriloux/rompom/commit/e66e6b9164e3c2a5d37bf988b6f4ee01b82db8d8))
+- **plans**: Retire the root plans and open the v0.17.0 plan ([`bb1f64c`](https://github.com/gfriloux/rompom/commit/bb1f64c34a43778dab9903bbd2076efb0a47c0dc))
+
+### Dependencies
+
+- **deps**: Bump screenscraper to v0.7.0 ([`b925e01`](https://github.com/gfriloux/rompom/commit/b925e011f7e73ae563892b95364a396e16f9a21d))
+
 ## [0.16.0] — 2026-08-09
 
 ### Bug fixes

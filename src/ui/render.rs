@@ -80,7 +80,11 @@ fn render_completed(frame: &mut Frame, area: Rect, state: &AppState) {
         .add_modifier(Modifier::ITALIC),
     )]
   } else {
-    state.completed.iter().map(completed_item).collect()
+    state
+      .completed
+      .iter()
+      .map(|entry| completed_item(entry, chunks[1].width as usize))
+      .collect()
   };
 
   frame.render_widget(List::new(items), chunks[1]);
@@ -102,7 +106,25 @@ fn render_completed(frame: &mut Frame, area: Rect, state: &AppState) {
   frame.render_widget(Line::from(legend_spans), chunks[2]);
 }
 
-fn completed_item(entry: &CompletedEntry) -> ListItem<'static> {
+/// Fits a failure cause into what is left of the line.
+///
+/// The Completed panel is a fixed-width list: an untruncated cause would run past the
+/// border and take the ROM's name with it. The full text is kept for `Summary::print()`,
+/// which has a whole terminal line to itself.
+fn truncate_cause(cause: &str, available: usize) -> String {
+  let cause = cause.replace('\n', " ");
+  match available {
+    0 => String::new(),
+    1 => "…".to_string(),
+    _ if cause.chars().count() <= available => cause,
+    _ => {
+      let kept: String = cause.chars().take(available - 1).collect();
+      format!("{}…", kept.trim_end())
+    }
+  }
+}
+
+fn completed_item(entry: &CompletedEntry, width: usize) -> ListItem<'static> {
   let (check, label_color, label_modifier) = if !entry.success {
     ("✗  ", Color::Red, Modifier::BOLD)
   } else if entry.unchanged {
@@ -121,6 +143,20 @@ fn completed_item(entry: &CompletedEntry) -> ListItem<'static> {
     ),
     Span::raw("  "),
   ];
+
+  // A failed ROM shows its cause instead of its media icons. The icons describe a
+  // package that was never finished, and both would not fit on the line anyway — the
+  // cause is the one thing the user can act on.
+  if !entry.success {
+    if let Some(ref cause) = entry.error {
+      let used = check.chars().count() + entry.label.chars().count() + 2;
+      let cause = truncate_cause(cause, width.saturating_sub(used));
+      if !cause.is_empty() {
+        spans.push(Span::styled(cause, Style::default().fg(Color::DarkGray)));
+      }
+    }
+    return ListItem::new(Line::from(spans));
+  }
 
   // Media icons in canonical order:
   //   green   = downloaded (new or updated)
@@ -443,4 +479,51 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
       Constraint::Percentage((100 - percent_x) / 2),
     ])
     .split(vert[1])[1]
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  /// A cause that fits is shown as is — no gratuitous ellipsis.
+  #[test]
+  fn a_short_cause_is_left_alone() {
+    assert_eq!(truncate_cause("host unreachable", 40), "host unreachable");
+    assert_eq!(truncate_cause("exact", 5), "exact");
+  }
+
+  /// Past the panel width the line would run over the border and push the ROM name out
+  /// of view, so the cause is cut and marked as cut.
+  #[test]
+  fn a_long_cause_is_cut_and_says_so() {
+    let cause = "too many unrecognised ROMs today — ScreenScraper says come back tomorrow";
+    let cut = truncate_cause(cause, 20);
+    assert_eq!(cut.chars().count(), 20);
+    assert!(cut.ends_with('…'));
+    assert!(cause.starts_with(cut.trim_end_matches('…')));
+  }
+
+  /// A narrow terminal must not panic on the arithmetic, and must not emit a bare
+  /// dangling ellipsis wider than the space it was given.
+  #[test]
+  fn a_narrow_panel_does_not_overflow() {
+    assert_eq!(truncate_cause("anything", 0), "");
+    assert_eq!(truncate_cause("anything", 1), "…");
+    assert_eq!(truncate_cause("anything", 2).chars().count(), 2);
+  }
+
+  /// When the cut lands just after a space, keeping it renders as a gap floating before
+  /// the ellipsis. Cutting mid-word is left alone — the ellipsis says enough.
+  #[test]
+  fn the_cut_does_not_leave_a_dangling_space() {
+    assert_eq!(truncate_cause("could not reach it", 11), "could not…");
+    assert_eq!(truncate_cause("could not reach it", 12), "could not r…");
+  }
+
+  /// Causes reach the panel from `StepStatus::Failed`, and a panic message carries the
+  /// panic location, which contains no newline — but a download error may well.
+  #[test]
+  fn newlines_would_break_the_list_layout() {
+    assert_eq!(truncate_cause("first\nsecond", 40), "first second");
+  }
 }

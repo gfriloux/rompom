@@ -2,6 +2,7 @@ mod handlers;
 mod helpers;
 mod run_state;
 
+pub(crate) use helpers::lookup_failure;
 pub use run_state::{
   apply_run_state, collect_run_state, load_run_state, restore_bar_for_resumed_rom, save_run_state,
   RunState,
@@ -25,7 +26,7 @@ use screenscraper::ScreenScraper;
 use crate::{
   conf::System,
   queue::{Semaphore, TaskQueue},
-  rom::{Rom, Step, StepKind, StepStatus},
+  rom::{Rom, Step, StepError, StepKind, StepStatus},
   state::SystemState,
   ui::ModalRequest,
 };
@@ -130,6 +131,33 @@ pub fn worker_loop_blocking(ctx: Arc<WorkerContext>) {
 
 // ── Step execution ─────────────────────────────────────────────────────────
 
+/// What `execute_step` does with a handler that came back with an error.
+#[derive(Debug, PartialEq, Eq)]
+enum Disposition {
+  /// Put the step back in the queue as if it had never run, without dispatching.
+  Requeue,
+  /// Retry after this delay.
+  Retry(std::time::Duration),
+  /// Give up: the step is `Failed` and everything downstream is skipped.
+  Fail,
+}
+
+/// Decides what to do with a failed step. Pure, so the policy is testable without a
+/// queue, a worker pool or a network.
+///
+/// The backoff doubles with each attempt (1s, 2s, 4s, 8s, …), which only makes sense
+/// for a failure that time can fix — hence `Fatal` short-circuiting it.
+fn disposition(error: &StepError, retry_count: u8, max_retries: u8) -> Disposition {
+  match error {
+    StepError::Interrupted => Disposition::Requeue,
+    StepError::Fatal(_) => Disposition::Fail,
+    StepError::Transient(_) if retry_count < max_retries => {
+      Disposition::Retry(std::time::Duration::from_secs(1u64 << retry_count))
+    }
+    StepError::Transient(_) => Disposition::Fail,
+  }
+}
+
 fn execute_step(rom_arc: Arc<Mutex<Rom>>, step_idx: usize, ctx: &WorkerContext) {
   // Fast path: Skipped steps are no-ops — dispatch successors and return.
   {
@@ -173,8 +201,8 @@ fn execute_step(rom_arc: Arc<Mutex<Rom>>, step_idx: usize, ctx: &WorkerContext) 
     StepKind::SaveState => handle_save_state(&rom_arc, step_idx, ctx),
   });
 
-  let (result, panicked) = match panic::catch_unwind(handler) {
-    Ok(result) => (result, false),
+  let result = match panic::catch_unwind(handler) {
+    Ok(result) => result,
     Err(payload) => {
       // Catching the unwind is only half the job. A handler almost always panics
       // while holding one of these locks, which poisons them — and every lock() in
@@ -183,47 +211,49 @@ fn execute_step(rom_arc: Arc<Mutex<Rom>>, step_idx: usize, ctx: &WorkerContext) 
       rom_arc.clear_poison();
       ctx.state.clear_poison();
       rom_arc.lock().unwrap().bar.clear_poison();
-      (Err(panic_message(&*payload)), true)
+      // A panic is a bug, not a hiccup: an index out of bounds or an unwrap on None
+      // lands the same way every time. Fatal, so the retry budget is not spent
+      // reaching the identical failure five times over.
+      Err(StepError::Fatal(panic_message(&*payload)))
     }
   };
 
   // Resolve final step status, handling retries.
   let final_status = match result {
-    // Handler was cancelled mid-way (semaphore acquire returned false).
-    // Reset to Pending so the step re-runs on resume; no dispatch.
-    Err(ref msg) if msg == "interrupted" => {
-      rom_arc.lock().unwrap().pipeline[step_idx].status = StepStatus::Pending;
-      return;
-    }
     Ok(s) => s,
-    Err(msg) => {
+    Err(error) => {
       let (retry_count, max_retries) = {
         let rom = rom_arc.lock().unwrap();
         let step = &rom.pipeline[step_idx];
         (step.retry_count, step.max_retries())
       };
-      // A panic is a bug, not a hiccup: an index out of bounds or an unwrap on None
-      // will land the same way every time. Retrying it only spends the backoff delay
-      // to reach the same failure, so panics go straight to Failed.
-      if !panicked && retry_count < max_retries {
-        // Increment retry counter and re-enqueue with exponential backoff.
-        {
-          let mut rom = rom_arc.lock().unwrap();
-          rom.pipeline[step_idx].retry_count += 1;
-          rom.pipeline[step_idx].status = StepStatus::Pending;
+      match disposition(&error, retry_count, max_retries) {
+        // Cancelled mid-way (semaphore acquire returned false). Reset to Pending so
+        // the step re-runs on resume, and dispatch nothing — its successors must not
+        // see a predecessor that never ran.
+        Disposition::Requeue => {
+          rom_arc.lock().unwrap().pipeline[step_idx].status = StepStatus::Pending;
+          return;
         }
-        // Sleep 2^retry_count seconds (1s, 2s, 4s, 8s, …) before retrying.
-        let delay = std::time::Duration::from_secs(1u64 << retry_count);
-        std::thread::sleep(delay);
-        ctx.queue.push(Arc::clone(&rom_arc), step_idx);
-        return;
+        Disposition::Retry(delay) => {
+          {
+            let mut rom = rom_arc.lock().unwrap();
+            rom.pipeline[step_idx].retry_count += 1;
+            rom.pipeline[step_idx].status = StepStatus::Pending;
+          }
+          std::thread::sleep(delay);
+          ctx.queue.push(Arc::clone(&rom_arc), step_idx);
+          return;
+        }
+        Disposition::Fail => {
+          let cause = error.to_string();
+          {
+            let rom = rom_arc.lock().unwrap();
+            rom.bar.finish_error(&cause);
+          }
+          StepStatus::Failed(cause)
+        }
       }
-      // Exhausted retries: mark as failed and notify the UI.
-      {
-        let rom = rom_arc.lock().unwrap();
-        rom.bar.finish_error();
-      }
-      StepStatus::Failed(msg)
     }
   };
 
@@ -323,6 +353,90 @@ fn do_dispatch(rom_arc: &Arc<Mutex<Rom>>, step_idx: usize, queue: &Arc<TaskQueue
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  // ── disposition ──────────────────────────────────────────────────────────
+
+  /// Ctrl-C is not a failure: the step must go back into the queue untouched, whatever
+  /// it has already spent of its retry budget, and without being counted as an attempt.
+  #[test]
+  fn an_interrupted_step_is_requeued_whatever_the_budget() {
+    assert_eq!(
+      disposition(&StepError::Interrupted, 0, 3),
+      Disposition::Requeue
+    );
+    assert_eq!(
+      disposition(&StepError::Interrupted, 3, 3),
+      Disposition::Requeue
+    );
+  }
+
+  /// The whole point of the type. A daily quota (430) or wrong credentials (403) will
+  /// answer the same thing on every attempt, and ScreenScraper answers 431 to members
+  /// who accumulate failed lookups — so retrying actively makes the run worse.
+  #[test]
+  fn a_fatal_error_fails_on_the_spot_with_the_budget_untouched() {
+    assert_eq!(
+      disposition(&StepError::Fatal("quota exceeded".into()), 0, 5),
+      Disposition::Fail
+    );
+  }
+
+  /// A transient error spends its budget, then fails like any other.
+  #[test]
+  fn a_transient_error_retries_until_the_budget_is_spent() {
+    let err = StepError::Transient("connection reset".into());
+    for attempt in 0..3 {
+      assert!(
+        matches!(disposition(&err, attempt, 3), Disposition::Retry(_)),
+        "attempt {} should still retry",
+        attempt
+      );
+    }
+    assert_eq!(disposition(&err, 3, 3), Disposition::Fail);
+  }
+
+  /// Backoff doubles: 1s, 2s, 4s, 8s, 16s. `DownloadRom` allows 5 retries, so the
+  /// shift must still be in range at retry_count = 4.
+  #[test]
+  fn the_backoff_doubles_at_every_attempt() {
+    let err = StepError::Transient("timeout".into());
+    let delays: Vec<u64> = (0..5)
+      .map(|n| match disposition(&err, n, 5) {
+        Disposition::Retry(d) => d.as_secs(),
+        other => panic!("expected a retry at {}, got {:?}", n, other),
+      })
+      .collect();
+    assert_eq!(delays, vec![1, 2, 4, 8, 16]);
+  }
+
+  /// Most steps declare no retries at all (`max_retries() == 0`). They must fail on the
+  /// first transient error rather than shifting by zero and sleeping.
+  #[test]
+  fn a_step_with_no_retry_budget_fails_immediately() {
+    assert_eq!(
+      disposition(&StepError::Transient("disk full".into()), 0, 0),
+      Disposition::Fail
+    );
+    assert_eq!(StepKind::BuildPackage.max_retries(), 0);
+    assert_eq!(StepKind::SaveState.max_retries(), 0);
+  }
+
+  /// The message must survive into `StepStatus::Failed`, which is what the Completed
+  /// panel and the summary will read. `Interrupted` never gets that far, and says so.
+  #[test]
+  fn the_cause_survives_the_display() {
+    assert_eq!(
+      StepError::Transient("host unreachable".into()).to_string(),
+      "host unreachable"
+    );
+    assert_eq!(
+      StepError::Fatal("daily quota exceeded".into()).to_string(),
+      "daily quota exceeded"
+    );
+    assert_eq!(StepError::Interrupted.to_string(), "interrupted");
+  }
+
+  // ── panic containment ────────────────────────────────────────────────────
 
   /// `unwrap()` on a None/Err — by far the most common way a handler dies — produces a
   /// String payload, while `panic!("literal")` produces a &'static str. Both have to

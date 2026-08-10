@@ -131,7 +131,7 @@ src/
   queue.rs                  — TaskQueue (LIFO, two priority lanes: main + blocking) + Semaphore (interruptible)
   rom/
     mod.rs                  — Rom struct + new_folder() / new_ia() pipeline constructors
-    step.rs                 — Step, StepKind, StepStatus, StepData, Phase
+    step.rs                 — Step, StepKind, StepStatus, StepError, StepData, Phase
     source.rs               — RomSourceData / RomSource / IaSource / FolderSource
   state.rs                  — SystemState + RomStateEntry (serde YAML): per-run state persisted to
                               <system>.state.yml in the working directory. Tracks ss_game_id, rom_sha1,
@@ -242,7 +242,7 @@ LookupSS → WaitModal* → BuildPackage → DownloadRom ────┐
 - **`DownloadMedias`** — iterates 8 canonical media kinds. For each: skips if sha1 already valid
   on disk (`media_skipped`), downloads otherwise (`media_done`), or marks unavailable if SS has none.
 - **`SaveState`** — writes `RomStateEntry` into shared `SystemState` (flushed to disk by
-  `main.rs` after all workers join). Persists `extra_disc_sha1s` for multi-disc games.
+  `main.rs` every 30 s and once more after all workers join). Persists `extra_disc_sha1s` for multi-disc games.
   Emits `bar.finish()`. It does **not** touch `remaining` — see below.
 
 ### Failure propagation and run completion
@@ -264,6 +264,52 @@ single leaf of both DAGs, so "leaf reached" means "ROM done" whether it ended `D
 any ROM cut short by a failure, and the queue would never shut down. `Rom::finished`
 guards against a double decrement, since both branches of the DAG converge on that leaf.
 
+### Failure kinds — `StepError`
+
+A handler returns `Result<StepStatus, StepError>`:
+
+| variant | `execute_step` does |
+|---|---|
+| `Interrupted` | step back to `Pending`, **no dispatch** — it re-runs on resume |
+| `Transient(msg)` | retry while `retry_count < max_retries`, backoff `2^n` seconds |
+| `Fatal(msg)` | `Failed` immediately, whatever the retry budget says |
+
+The decision itself lives in `disposition()`, a pure function returning
+`Requeue` / `Retry(delay)` / `Fail`, so the policy is unit-tested without a queue or a
+network.
+
+`Fatal` exists because retrying is not free. Against ScreenScraper each attempt also
+spends a request, and the API answers **431** ("sort your ROM files out and come back
+tomorrow") to members who pile up failed lookups — so replaying a call that cannot
+succeed, such as an exhausted daily quota (430) or wrong developer credentials (403),
+actively makes the run worse. See `ApiFailure` in the `screenscraper` lib for the
+classification these map from.
+
+This replaced a `Err("interrupted")` string sentinel that `execute_step` recognised by
+comparing the message.
+
+### State durability
+
+`state.yml` is written **every 30 s** by a flusher thread, not only after the workers
+join. A `kill -9`, an OOM or a power cut used to throw away the entire run: every ROM
+came back as new, was re-downloaded and had its `pkgver` bumped again for identical
+content. Only a clean exit and Ctrl-C were ever covered.
+
+A mid-run snapshot is safe because `SaveState` inserts one whole `RomStateEntry` at a
+time under the mutex — a snapshot is always a set of finished ROMs, never half of one.
+The flusher serialises under the lock (`SystemState::to_yaml`) and writes outside it, so
+workers are not held up by the file I/O, and it takes the lock poison-tolerantly.
+
+`state.yml` and `run.yml` both go through `state::write_with_rotation()`: content to
+`<path>.tmp`, the original to `<path>.old`, then `tmp` renamed onto `path`. A reader sees
+one whole file or the other, never a truncated YAML — which would load as an empty state
+and cause the very re-download this is meant to avoid.
+
+`SystemState::load()` returns `(state, Option<warning>)`. An unreadable state file used to
+be swallowed by `.ok()` and look exactly like a first run. The warning is printed **before**
+`Ui::new()`, on a plain terminal, because it means the run about to start will redo work it
+has already done.
+
 ### Panic containment
 
 `execute_step` wraps the handler dispatch in `catch_unwind`. A panicking handler used to
@@ -279,7 +325,8 @@ Three things this depends on:
 - **No `panic = "abort"`.** `packages/rompom/default.nix` deliberately omits it; with
   abort, `catch_unwind` never runs and this whole mechanism is dead code in the shipped
   binary.
-- **Panics skip the retry logic.** They are deterministic bugs, not transient failures.
+- **Panics skip the retry logic.** A caught panic becomes `StepError::Fatal`, so it fails
+  on the spot: an index out of bounds is a deterministic bug, not a transient failure.
 
 `install_panic_hook()` (called from `main` before `Ui::new`) records the panic location in
 a thread-local and suppresses the default stderr output, which would otherwise be written
@@ -319,14 +366,14 @@ Second Ctrl-C calls `std::process::exit(1)`.
 `false` = cancelled). It uses `wait_timeout(50ms)` internally to periodically recheck the
 cancelled flag. `cancel()` sets the flag and calls `notify_all()`.
 
-When `acquire()` returns `false` in a handler, the handler returns `Err("interrupted")`.
-`execute_step` intercepts this specific sentinel before the retry logic, resets the step
-to `Pending`, and returns without calling `do_dispatch` — so the step re-runs on resume
-and its successors are not prematurely decremented.
+When `acquire()` returns `false` in a handler, the handler returns
+`Err(StepError::Interrupted)`. `execute_step` resets the step to `Pending` and returns
+without calling `do_dispatch` — so the step re-runs on resume and its successors are not
+prematurely decremented.
 
 Steps that complete normally just before or during the interrupt window are saved as `Done`
 and are **not** re-run on resume (their work is preserved). Only genuinely cancelled steps
-(whose handler returned `Err("interrupted")`) revert to `Pending`.
+(whose handler returned `StepError::Interrupted`) revert to `Pending`.
 
 ### Interrupted run / resume
 
@@ -444,7 +491,8 @@ All multi-disc templates use `*.{{ ext }}` instead of hardcoding `*.chd`.
 - otherwise: no change (default path)
 
 System launchers (shell scripts invoked by the PKGBUILD) are also template-based:
-- **id 214** (OpenBOR): `assets/templates/launcher/openbor.jinja` → generates `./launcher`
+- **id 214** (OpenBOR): `assets/templates/launcher/openbor.jinja` → generates `launcher`
+  in the ROM's own output directory (never in the current directory — the workers share it)
 
 Media files land in `{romdir}/` (alongside PKGBUILD) so `makepkg` finds them without re-downloading.
 
@@ -502,8 +550,8 @@ column; ROMs in that state appear with status `preparing...`.
 **`AppState`** — shared mutable state, protected by `Arc<Mutex<_>>`:
 - `roms: Vec<RomEntry>` — one entry per ROM (`label`, `status`, `phase`,
   `media_found`, `media_unchanged`, `media_missing`)
-- `completed: Vec<CompletedEntry>` — finished ROMs (label, success, unchanged, media lists),
-  newest first
+- `completed: Vec<CompletedEntry>` — finished ROMs (label, success, unchanged, `error`,
+  media lists), newest first
 - `total: usize`, `header: String`, `tick: usize` (spinner animation)
 
 **`RomBar`** — public handle given to each `Rom`; holds `Arc<Mutex<AppState>>` + `index`.
@@ -519,7 +567,7 @@ Pipeline transition methods (all called from `worker/handlers/`):
 - Enqueue for download: `downloading_pending()` → phase=Downloading, status=`"waiting"`
 - Downloads — ROM: `rom_checking()`, `rom_downloading()`, `rom_redownloading()`, `rom_done()`, `rom_skipped()`
 - Downloads — Media: `start_media(kind)`, `media_done(kind)`, `media_skipped(kind)`, `media_unavailable(kind)`
-- End: `finish(unchanged: bool)` → ✓ (green) or `=` (gray), `finish_error()` → ✗ (red)
+- End: `finish(unchanged: bool)` → ✓ (green) or `=` (gray), `finish_error(cause)` → ✗ (red)
 
 **`Ui`** — owns the state and spawns the render thread. The thread loops at ~80 ms,
 locks state, draws the frame, then calls `crossterm::event::poll(TICK_MS)` (replaces the old
@@ -533,7 +581,7 @@ Call `summary()` before dropping `Ui`, print after (terminal is restored on drop
 
 **Modal types (public, in `ui/mod.rs`):**
 - `ModalCandidate { name: String, game_id: String, year: Option<String> }` — one search result row
-- `ModalRequest { filename, sha1, candidates, response: Sender<ModalResponse>, fetch_by_id: Box<dyn Fn(u32) -> Option<String> + Send> }` — sent by a worker, blocks on `response`
+- `ModalRequest { filename, sha1, candidates, response: Sender<ModalResponse>, fetch_by_id: Box<dyn Fn(u32) -> Result<String, String> + Send> }` — sent by a worker, blocks on `response`
 - `ModalResponse` — `SelectedId(String)` | `ManualId(String)` | `Cancelled`
 
 **Modal UX (handled entirely inside the render thread via `show_modal()`):**
@@ -544,15 +592,32 @@ Call `summary()` before dropping `Ui`, print after (terminal is restored on drop
 - **On entry**: if `interrupted` is already true (Ctrl-C was pressed before the modal request was processed), `show_modal()` sends `Cancelled` immediately without displaying anything
 
 The `fetch_by_id` closure is provided by `handle_wait_modal` in `worker/handlers/discovery.rs` and captures an
-`Arc<ScreenScraper>` clone — it calls `jeuinfo_by_gameid` and returns `Some(name)` on success.
+`Arc<ScreenScraper>` clone — it calls `jeuinfo_by_gameid` and returns `Ok(name)` on success. Its
+`Err` carries the reason shown inline, and returning a `Result` rather than an `Option` is the
+point: a 404 means "retype the ID", anything else means "the ID may well be fine, ScreenScraper
+is not". The reason comes from `lookup_failure()` — never from the library error, which would
+leak the credentials reqwest prints with the request URL.
+
+Once the user has chosen, `handle_wait_modal` fetches the game one last time. A failure there
+**fails the step** instead of falling back to `None`: the fallback discarded the identification
+the user had just typed and packaged the ROM with an empty `description.xml`. Only
+`ModalResponse::Cancelled` legitimately yields `None`.
 
 ### `summary.rs`
 
-`Summary` struct holds: `total`, `success`, `unchanged`, `errors`,
+`Summary` struct holds: `total`, `success`, `unchanged`, `errors`, `failures`,
 `media_stats` (kind, icon, count per type — 9 types including description; counts ROMs that
 have the media present, whether downloaded this run or already up-to-date from a previous run),
 `step_avg_durations` (average duration per StepKind, printed at end of run).
 `Summary::print()` outputs the end-of-run report to stdout.
+
+A failed ROM shows `✗ name — cause` in the Completed panel, where the cause is truncated
+to the panel width by `truncate_cause()` and replaces the media icons (they describe a
+package that was never finished). `Summary.failures` keeps the **untruncated** causes and
+prints them in a `Failures` section — the TUI is gone by then, so it is the last chance to
+read one. `restore_bar_for_resumed_rom()` looks for the failure anywhere in the restored
+pipeline rather than on the leaf: a ROM cut short upstream has `Skipped` from the broken
+step onwards, leaf included, so reading the leaf alone restored it as a success.
 `MEDIA_ICONS` const in `ui/mod.rs` (shared via `pub(crate)`) defines the canonical order and
 Nerd Font icons for all 9 tracked assets (description first, then 8 media types).
 

@@ -22,16 +22,16 @@ use std::{
 
 use glob::Pattern;
 use internet_archive::metadata::Metadata;
-use screenscraper::ScreenScraper;
+use screenscraper::{ApiFailure, ScreenScraper};
 
 use crate::conf::{Conf, Source};
 use crate::queue::{Semaphore, TaskQueue};
 use crate::rom::{
   DiscFile, FolderSource, IaSource, Rom, RomSource, RomSourceData, StepKind, StepStatus,
 };
-use crate::state::SystemState;
+use crate::state::{write_with_rotation, SystemState};
 use crate::ui::Ui;
-use crate::worker::WorkerContext;
+use crate::worker::{lookup_failure, WorkerContext};
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
@@ -39,6 +39,12 @@ use crate::worker::WorkerContext;
 /// Keeps downloads and packaging running while SS slots are saturated.
 const N_EXTRA_MAIN_WORKERS: usize = 8;
 const N_BLOCKING_WORKERS: usize = 2;
+
+/// How often the accumulated ROM state is written to disk mid-run.
+const FLUSH_INTERVAL_MS: u64 = 30_000;
+/// How often the flusher wakes to check whether the run is over. Short enough that it
+/// does not hold up the shutdown by a visible amount.
+const FLUSH_POLL_MS: u64 = 250;
 
 // ── Multi-disc grouping ───────────────────────────────────────────────────
 
@@ -388,7 +394,7 @@ fn main() {
   if matches.opt_present("update-config") {
     let conf_path = format!("{}/rompom.yml", confdir.display());
     if let Err(e) = conf::Conf::update(&conf_path) {
-      eprintln!("Error: {}", e);
+      eprintln!("rompom: {}", e);
       std::process::exit(1);
     }
     return;
@@ -397,7 +403,7 @@ fn main() {
   let conf = match Conf::load(&format!("{}/rompom.yml", confdir.display())) {
     Ok(c) => c,
     Err(e) => {
-      eprintln!("Error: {}", e);
+      eprintln!("rompom: {}", e);
       std::process::exit(1);
     }
   };
@@ -500,6 +506,15 @@ fn main() {
   // See `collect_sources` below: every failure here is reported, not panicked, because
   // the terminal is already in raw mode by this point.
 
+  // Loaded before Ui::new so the warning has a plain terminal to land on. A state file
+  // that cannot be read means the whole run is about to redo work it already did, which
+  // is worth knowing beforehand rather than in the summary.
+  let state_path = format!("{}.state.yml", system_name);
+  let (loaded_state, state_warning) = SystemState::load(&state_path);
+  if let Some(warning) = state_warning {
+    eprintln!("rompom: {}", warning);
+  }
+
   // Must precede Ui::new: from here on the terminal is in raw mode and the default
   // panic output would be written over the interface.
   worker::install_panic_hook();
@@ -568,10 +583,24 @@ fn main() {
     Ok(ss) => ss,
     Err(e) => {
       drop(ui);
+      // Never print `e`. On a transport failure its Display carries the request URL,
+      // and the credentials travel in that URL's query string.
+      let reason = lookup_failure(e.failure())
+        .map(|failure| failure.to_string())
+        .unwrap_or_else(|| "ScreenScraper does not know this account".to_string());
+      let advice = match e.failure() {
+        ApiFailure::Transport => "Check your network connection, then try again.",
+        ApiFailure::ThreadLimit | ApiFailure::ServerBusy | ApiFailure::ApiClosed => {
+          "ScreenScraper is busy — try again later."
+        }
+        ApiFailure::QuotaExceeded | ApiFailure::KoQuotaExceeded => {
+          "Your ScreenScraper quota is spent for today."
+        }
+        _ => "Check the screenscraper.user and screenscraper.dev credentials in your config.",
+      };
       eprintln!(
-        "rompom: could not authenticate against ScreenScraper: {}\n\
-         Check the screenscraper.user and screenscraper.dev credentials in your config.",
-        e
+        "rompom: could not authenticate against ScreenScraper: {}\n{}",
+        reason, advice
       );
       std::process::exit(1);
     }
@@ -579,8 +608,7 @@ fn main() {
 
   let n_disc = ss.user_info.maxthreads as usize;
   let modal_tx = ui.modal_sender();
-  let state_path = format!("{}.state.yml", system_name);
-  let state = Arc::new(Mutex::new(SystemState::load(&state_path)));
+  let state = Arc::new(Mutex::new(loaded_state));
   let ss = Arc::new(ss);
   let system = Arc::new(system);
   let lang = Arc::new(conf.lang);
@@ -669,11 +697,51 @@ fn main() {
     handles.push(thread::spawn(move || worker::worker_loop_blocking(ctx)));
   }
 
+  // Periodic flush. The state used to be written once, after every worker had joined,
+  // so anything short of a clean exit or a Ctrl-C — a kill -9, an OOM, a power cut —
+  // threw away the whole run: every ROM came back as new, was re-downloaded, and had
+  // its pkgver bumped a second time for identical content.
+  //
+  // Flushing mid-run is safe because `SaveState` inserts one whole `RomStateEntry` at a
+  // time under the mutex. A snapshot is therefore always a set of finished ROMs, never
+  // half of one.
+  let flushing = Arc::new(AtomicBool::new(true));
+  let flusher = {
+    let state = Arc::clone(&state);
+    let state_path = state_path.clone();
+    let flushing = Arc::clone(&flushing);
+    thread::spawn(move || {
+      let mut since_flush = 0u64;
+      while flushing.load(Ordering::Relaxed) {
+        thread::sleep(std::time::Duration::from_millis(FLUSH_POLL_MS));
+        since_flush += FLUSH_POLL_MS;
+        if since_flush < FLUSH_INTERVAL_MS {
+          continue;
+        }
+        since_flush = 0;
+        // Serialise under the lock, write without it — workers keep running.
+        //
+        // The lock is taken poison-tolerantly: a handler that panics while holding the
+        // state poisons it for the instant it takes `execute_step` to call
+        // `clear_poison()`. Landing in that window would kill this thread and silently
+        // end the periodic flushing for the rest of the run.
+        let yaml = match state.lock().unwrap_or_else(|e| e.into_inner()).to_yaml() {
+          Ok(yaml) => yaml,
+          Err(_) => continue,
+        };
+        write_with_rotation(&state_path, &yaml).ok();
+      }
+    })
+  };
+
   for h in handles {
     h.join().unwrap();
   }
 
   // ── Post-join ─────────────────────────────────────────────────────────
+
+  flushing.store(false, Ordering::Relaxed);
+  flusher.join().ok();
 
   // Flush accumulated ROM state to disk (partial on interrupt, complete otherwise).
   if let Err(e) = state.lock().unwrap().save_with_rotation(&state_path) {

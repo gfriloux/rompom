@@ -7,12 +7,12 @@ use std::{
 use checksums::{hash_file, Algorithm};
 
 use crate::{
-  rom::{Rom, RomSource, StepData, StepKind, StepStatus},
+  rom::{Rom, RomSource, StepData, StepError, StepKind, StepStatus},
   ui::{ModalCandidate, ModalRequest, ModalResponse},
 };
 
 use super::super::{
-  helpers::{search_name, NAME_REGIONS},
+  helpers::{lookup_failure, search_name, NAME_REGIONS},
   WorkerContext,
 };
 
@@ -26,7 +26,7 @@ pub(crate) fn handle_compute_hashes(
   rom_arc: &Arc<Mutex<Rom>>,
   _step_idx: usize,
   ctx: &WorkerContext,
-) -> Result<StepStatus, String> {
+) -> Result<StepStatus, StepError> {
   let (filename, local_path, extra_disc_paths) = {
     let rom = rom_arc.lock().unwrap();
     let path = match &rom.source.source {
@@ -168,7 +168,7 @@ pub(crate) fn handle_lookup_ss(
   rom_arc: &Arc<Mutex<Rom>>,
   step_idx: usize,
   ctx: &WorkerContext,
-) -> Result<StepStatus, String> {
+) -> Result<StepStatus, StepError> {
   // ── Read source data from rom (release lock before network calls) ──────
   let (filename, sha1, md5, crc32, size, is_ia_source) = {
     let rom = rom_arc.lock().unwrap();
@@ -244,17 +244,26 @@ pub(crate) fn handle_lookup_ss(
 
   // ── SS lookup (semaphore limits concurrency to user's SS tier) ────────
   if !ctx.ss_sem.acquire() {
-    return Err("interrupted".to_string());
+    return Err(StepError::Interrupted);
   }
-  let ji = if let Some(gid) = cached_game_id {
-    ctx.ss.jeuinfo_by_gameid(ctx.system.id, gid).ok()
+  let lookup = if let Some(gid) = cached_game_id {
+    ctx.ss.jeuinfo_by_gameid(ctx.system.id, gid)
   } else {
     ctx
       .ss
       .jeuinfo(ctx.system.id, &filename, size, crc32, md5, sha1)
-      .ok()
   };
   ctx.ss_sem.release();
+
+  // A failed lookup used to be flattened to None by `.ok()`, which meant "ScreenScraper
+  // does not know this game" and opened the identification modal. Only a 404 means that.
+  let ji = match lookup {
+    Ok(jeu) => Some(jeu),
+    Err(e) => match lookup_failure(e.failure()) {
+      Some(step_error) => return Err(step_error),
+      None => None,
+    },
+  };
 
   if let Some(jeu) = ji {
     // ── Found ─────────────────────────────────────────────────────────
@@ -270,13 +279,23 @@ pub(crate) fn handle_lookup_ss(
   } else {
     // ── Not found: run jeu_recherche and hand off to WaitModal ────────
     if !ctx.ss_sem.acquire() {
-      return Err("interrupted".to_string());
+      return Err(StepError::Interrupted);
     }
-    let search_results = ctx
+    let search = ctx
       .ss
-      .jeu_recherche(Some(ctx.system.id), &search_name(&filename))
-      .unwrap_or_default();
+      .jeu_recherche(Some(ctx.system.id), &search_name(&filename));
     ctx.ss_sem.release();
+
+    // `unwrap_or_default()` turned a failed search into zero candidates, so the user
+    // got an empty modal and no idea why. A search that finds nothing legitimately
+    // returns Ok(vec![]) — that is still an empty modal, but an honest one.
+    let search_results = match search {
+      Ok(results) => results,
+      Err(e) => match lookup_failure(e.failure()) {
+        Some(step_error) => return Err(step_error),
+        None => Vec::new(),
+      },
+    };
 
     let display_candidates: Vec<ModalCandidate> = search_results
       .iter()
@@ -328,7 +347,7 @@ pub(crate) fn handle_wait_modal(
   rom_arc: &Arc<Mutex<Rom>>,
   step_idx: usize,
   ctx: &WorkerContext,
-) -> Result<StepStatus, String> {
+) -> Result<StepStatus, StepError> {
   // Read the candidates that LookupSS stored in its step data.
   let (filename, sha1_opt, candidates) = {
     let rom = rom_arc.lock().unwrap();
@@ -353,7 +372,7 @@ pub(crate) fn handle_wait_modal(
 
   // Serialise modal display: only one modal open at a time.
   if !ctx.modal_sem.acquire() {
-    return Err("interrupted".to_string());
+    return Err(StepError::Interrupted);
   }
 
   let (resp_tx, resp_rx) = crossbeam_channel::bounded::<ModalResponse>(1);
@@ -371,30 +390,47 @@ pub(crate) fn handle_wait_modal(
       fetch_by_id: Box::new(move |game_id| {
         ss_for_closure
           .jeuinfo_by_gameid(system_id, game_id)
-          .ok()
           .map(|j| j.find_name(NAME_REGIONS).to_string())
+          .map_err(|e| match lookup_failure(e.failure()) {
+            // 404 — the ID is wrong, and retyping it is exactly the right move.
+            None => "ID not found on ScreenScraper".to_string(),
+            Some(step_error) => step_error.to_string(),
+          })
       }),
     })
-    .map_err(|e| format!("modal channel closed: {}", e))?;
+    .map_err(|e| StepError::Fatal(format!("modal channel closed: {}", e)))?;
 
   let response = resp_rx
     .recv()
-    .map_err(|_| "modal response channel closed".to_string())?;
+    .map_err(|_| StepError::Fatal("modal response channel closed".to_string()))?;
 
   ctx.modal_sem.release();
 
   // ── Resolve JeuInfo from the user's response ───────────────────────────
+  //
+  // Cancelling is a decision: `None` means "package this ROM without metadata".
+  // A failed fetch is not — swallowing it here would discard the identification the
+  // user just typed, write an empty description.xml over a good one and bump pkgver
+  // for it. Ctrl-C mid-fetch used to land in the same hole, via `return None`.
   let jeu = match response {
-    ModalResponse::SelectedId(id) | ModalResponse::ManualId(id) => {
-      id.parse::<u32>().ok().and_then(|gid| {
+    ModalResponse::SelectedId(id) | ModalResponse::ManualId(id) => match id.parse::<u32>() {
+      Err(_) => None,
+      Ok(gid) => {
         if !ctx.ss_sem.acquire() {
-          return None; // interrupted
+          return Err(StepError::Interrupted);
         }
-        let result = ctx.ss.jeuinfo_by_gameid(ctx.system.id, gid).ok();
+        let result = ctx.ss.jeuinfo_by_gameid(ctx.system.id, gid);
         ctx.ss_sem.release();
-        result
-      })
-    }
+        match result {
+          Ok(j) => Some(j),
+          Err(e) => {
+            return Err(lookup_failure(e.failure()).unwrap_or_else(|| {
+              StepError::Fatal(format!("ScreenScraper does not know game ID {}", gid))
+            }))
+          }
+        }
+      }
+    },
     ModalResponse::Cancelled => None,
   };
 

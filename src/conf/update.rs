@@ -15,8 +15,8 @@ use ratatui::{
 use snafu::ResultExt;
 
 use super::{
-  Conf, ConfRaw, ParseConfigurationSnafu, ReadConfigurationSnafu, Result, WriteConfigurationSnafu,
-  SUPPORTED_LANGS,
+  Conf, ConfRaw, ParseConfigurationSnafu, ReadConfigurationSnafu, Result,
+  SerializeConfigurationSnafu, WriteConfigurationSnafu, SUPPORTED_LANGS,
 };
 
 pub(super) fn order_languages_tui() -> Option<Vec<String>> {
@@ -131,7 +131,8 @@ pub(super) fn order_languages_tui() -> Option<Vec<String>> {
 impl Conf {
   pub fn update(file: &str) -> Result<()> {
     let data = fs::read_to_string(file).context(ReadConfigurationSnafu { path: file })?;
-    let raw: ConfRaw = serde_yaml::from_str(data.as_str()).context(ParseConfigurationSnafu)?;
+    let raw: ConfRaw =
+      serde_yaml::from_str(data.as_str()).context(ParseConfigurationSnafu { path: file })?;
 
     let lang_missing = raw.lang.as_ref().is_none_or(|l| l.is_empty());
     let ia_items_present = raw.systems.iter().any(|s| s.ia_items.is_some());
@@ -190,7 +191,7 @@ impl Conf {
     // Migration 2 : ia_items → source.internet_archive
     if ia_items_present {
       let mut value: serde_yaml::Value =
-        serde_yaml::from_str(&data).context(ParseConfigurationSnafu)?;
+        serde_yaml::from_str(&data).context(ParseConfigurationSnafu { path: file })?;
 
       if let Some(systems) = value.get_mut("systems").and_then(|s| s.as_sequence_mut()) {
         for system in systems.iter_mut() {
@@ -234,7 +235,8 @@ impl Conf {
         }
       }
 
-      let updated = serde_yaml::to_string(&value).context(ParseConfigurationSnafu)?;
+      let updated =
+        serde_yaml::to_string(&value).context(SerializeConfigurationSnafu { path: file })?;
       fs::write(file, updated).context(WriteConfigurationSnafu { path: file })?;
       println!("Configuration updated: ia_items migrated to source.internet_archive");
     }

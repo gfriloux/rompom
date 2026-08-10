@@ -2,7 +2,7 @@ mod source;
 mod step;
 
 pub use source::{DiscFile, FolderSource, IaSource, RomSource, RomSourceData};
-pub use step::{Step, StepData, StepKind, StepStatus};
+pub use step::{Step, StepData, StepError, StepKind, StepStatus};
 
 use std::sync::{Arc, Mutex};
 

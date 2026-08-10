@@ -81,6 +81,49 @@ pub enum StepStatus {
   Failed(String),
 }
 
+// ── StepError ─────────────────────────────────────────────────────────────
+
+/// Why a step handler stopped short.
+///
+/// The distinction is what `execute_step` retries on. Retrying is not free: each
+/// attempt costs a backoff delay, and against ScreenScraper it also costs a request.
+/// The API answers 431 — "sort your ROM files out and come back tomorrow" — to members
+/// who pile up failed lookups, so replaying a call that cannot possibly succeed makes
+/// the run worse, not better.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StepError {
+  /// Ctrl-C landed while the handler was waiting on a semaphore. The step goes back
+  /// to `Pending` and its successors are *not* dispatched, so it re-runs on resume.
+  Interrupted,
+  /// Worth another go: a timeout, a rate limit, a server having a bad minute.
+  Transient(String),
+  /// Definitive for this run: exhausted quota, wrong credentials, a bug in rompom.
+  /// Fails on the spot, whatever the retry budget says.
+  Fatal(String),
+}
+
+impl StepError {
+  /// Shorthand for `map_err(StepError::transient)`.
+  pub fn transient(cause: impl std::fmt::Display) -> Self {
+    StepError::Transient(cause.to_string())
+  }
+
+  /// Shorthand for `map_err(StepError::fatal)`.
+  #[allow(dead_code)]
+  pub fn fatal(cause: impl std::fmt::Display) -> Self {
+    StepError::Fatal(cause.to_string())
+  }
+}
+
+impl std::fmt::Display for StepError {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    match self {
+      StepError::Interrupted => write!(f, "interrupted"),
+      StepError::Transient(m) | StepError::Fatal(m) => write!(f, "{}", m),
+    }
+  }
+}
+
 // ── StepData ──────────────────────────────────────────────────────────────
 
 /// Per-step input/output data.
