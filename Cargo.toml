@@ -32,3 +32,21 @@ glob = "0.3.1"
 crossbeam-channel = "0.5"
 minijinja = "2"
 ctrlc = "3"
+
+# Size optimisations for the released binary. These lived in the Nix package as
+# CARGO_PROFILE_RELEASE_* environment variables, which override this table — keeping both
+# would have been two sources of truth with no gate to catch them drifting apart.
+#
+# panic = "abort" is deliberately NOT set. The worker pool catches a panicking step
+# handler and turns it into a failed ROM so the rest of the run completes; aborting kills
+# the process instead, and the catch_unwind becomes dead code in exactly the build users
+# run. That is not a theoretical worry — the Nix package did set it until 2026-08-09.
+#
+# Measured that day on x86_64-unknown-linux-musl: 11 117 480 bytes with panic=abort
+# against 11 600 808 without. Unwinding costs 483 KB (+4.3%) on a binary already dominated
+# by vendored OpenSSL. A run that dies halfway through costs more than 4% of size.
+[profile.release]
+opt-level = "z"
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
