@@ -4,24 +4,31 @@ authors = ["Guillaume Friloux <guillaume@friloux.me>"]
 name = "rompom"
 version = "0.17.0"
 
+# Every version below is the one Cargo.lock already resolves. They used to be `*`,
+# which says "any version ever published": a fresh checkout without the lockfile —
+# `cargo install`, a vendoring tool, a distribution packager — could resolve a major
+# version this code has never been compiled against, and the failure would land on
+# whoever built it rather than here.
 [dependencies]
 screenscraper = { git = "https://github.com/gfriloux/screenscraper", tag = "v0.7.0" }
 #screenscraper = { path = "../screenscraper" }
 internet_archive = { git = "https://github.com/gfriloux/internetarchive", tag = "v0.2.0" }
-checksums = "*"
-chrono = "*"
-dirs = "*"
-getopts = "*"
+checksums = "0.9.1"
+chrono = "0.4.45"
+dirs = "6.0.0"
+getopts = "0.2.24"
 ratatui = "0.29"
 crossterm = "0.28"
 serde = { version = "1.0", features = ["derive"] }
-quick-xml = { version = "*", features = ["serialize"] }
-serde_derive = "*"
-serde_json = "*"
-serde_yaml = "*"
-snafu = "*"
-reqwest = { version = "*", features = ["blocking"] }
-openssl = { version = '*', features = ["vendored"] }
+quick-xml = { version = "0.41.0", features = ["serialize"] }
+serde_derive = "1.0.228"
+serde_json = "1.0.149"
+# 0.9.34+deprecated is the last release: the crate is archived. Pinned so the dead end
+# is visible here rather than discovered at the next `cargo update`.
+serde_yaml = "0.9.34"
+snafu = "0.7.5"
+reqwest = { version = "0.11.27", features = ["blocking"] }
+openssl = { version = "0.10.80", features = ["vendored"] }
 glob = "0.3.1"
 crossbeam-channel = "0.5"
 minijinja = "2"
