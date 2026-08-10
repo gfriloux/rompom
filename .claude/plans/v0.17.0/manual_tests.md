@@ -14,7 +14,7 @@ pour la traçabilité.
 
 ## Phase 2 — `StepError`
 
-- [ ] **(auto)** `Fatal` → `Failed` sans réessai ; `Transient` → réessaie jusqu'à
+- [x] **(auto)** `Fatal` → `Failed` sans réessai ; `Transient` → réessaie jusqu'à
       `max_retries` ; `Interrupted` → step `Pending`, aucun `wait_for` décrémenté.
 - [ ] Run complet sur un petit système (< 10 ROMs) : aucune différence de comportement
       observable par rapport à v0.16.0 — le refactor est mécanique.
@@ -23,7 +23,8 @@ pour la traçabilité.
 
 ## Phase 3 — P1.1
 
-- [ ] **(auto)** table `ApiFailure → StepError`, variante par variante.
+- [x] **(auto)** table `ApiFailure → StepError`, variante par variante — les 13, plus un
+      test que le message ne peut pas porter de credentials.
 - [ ] **ROM réellement inconnue de SS** (fichier renommé en `zzz_unknown_xyz.zip`) :
       la modale s'ouvre, comme aujourd'hui. *C'est le seul cas qui doit encore l'ouvrir.*
 - [ ] **Réseau coupé en plein run** (`nmcli` off, ou `/etc/hosts` renvoyant
@@ -40,7 +41,8 @@ pour la traçabilité.
 
 ## Phase 4 — P1.2
 
-- [ ] **(auto)** `Summary` construit depuis un `AppState` porteur d'échecs ; troncature.
+- [x] **(auto)** troncature de la cause : cas court, cas long, panneau à 0/1/2 colonnes,
+      espace flottant, retour à la ligne. Plus deux tests sur la restauration d'un échec.
 - [ ] Provoquer un échec (réseau coupé sur une ROM) : le panneau Completed affiche
       `✗ Nom du jeu — cause`.
 - [ ] Cause très longue : la ligne ne déborde pas, ne casse pas la mise en page,
@@ -51,9 +53,11 @@ pour la traçabilité.
 
 ## Phase 5 — P1.3
 
-- [ ] `~/.config/rompom.yml` absent → message nommant le chemin attendu.
-- [ ] YAML volontairement cassé (indentation fautive) → message avec le chemin **et**
-      la ligne/colonne remontée par serde_yaml.
+- [x] `~/.config/rompom.yml` absent → message nommant le chemin attendu. *Exécuté* avec
+      `XDG_CONFIG_HOME=/nonexistent` : « cannot read the configuration file
+      /nonexistent/rompom.yml: No such file or directory (os error 2) ».
+- [x] YAML volontairement cassé → *exécuté* : « invalid configuration in /…/rompom.yml:
+      screenscraper.dev: missing field `password` at line 3 column 5 ».
 - [ ] Fichier présent mais illisible (`chmod 000`) → message distinct du précédent.
 
 ## Phase 6 — P1.7
@@ -64,7 +68,8 @@ pour la traçabilité.
 
 ## Phase 7 — P1.8
 
-- [ ] **(auto)** round-trip `SystemState` ; le flush périodique ne perd pas d'entrée.
+- [x] **(auto)** round-trip `SystemState` (mtime/size/ss_game_id/médias/extra discs),
+      fichier absent vs illisible, et l'écriture qui ne laisse ni `.tmp` ni `.old`.
 - [ ] `kill -9` en plein run (≠ Ctrl-C) : au run suivant, les ROMs déjà traitées avant le
       dernier flush ne sont **pas** re-packagées et leur `pkgver` n'est pas re-bumpé.
 - [ ] `state.yml` corrompu à la main → avertissement explicite au démarrage, au lieu du
@@ -74,10 +79,9 @@ pour la traçabilité.
 
 ## Validation finale du lot
 
-- [ ] `nix develop --command just ci` → exit 0.
-- [ ] `nix build` → exit 0.
-- [ ] `just audit` : aucune advisory **nouvelle** par rapport aux ignores justifiés
-      de `.cargo/audit.toml`.
-- [ ] `just changelog-preview` : chaque commit du lot produit une entrée lisible telle
-      quelle dans les notes de release.
+- [x] `nix develop --command just ci` → exit 0, 59 tests. *(2026-08-10)*
+- [x] `nix build` → exit 0.
+- [x] `just audit` : 9 avertissements autorisés, **aucun nouveau** par rapport aux ignores
+      justifiés de `.cargo/audit.toml`.
+- [x] `just changelog-preview` : 11 entrées, lisibles telles quelles.
 - [ ] Run complet sur un système réel de bout en bout, sans interruption.
