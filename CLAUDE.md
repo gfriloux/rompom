@@ -527,8 +527,8 @@ column; ROMs in that state appear with status `preparing...`.
 **`AppState`** — shared mutable state, protected by `Arc<Mutex<_>>`:
 - `roms: Vec<RomEntry>` — one entry per ROM (`label`, `status`, `phase`,
   `media_found`, `media_unchanged`, `media_missing`)
-- `completed: Vec<CompletedEntry>` — finished ROMs (label, success, unchanged, media lists),
-  newest first
+- `completed: Vec<CompletedEntry>` — finished ROMs (label, success, unchanged, `error`,
+  media lists), newest first
 - `total: usize`, `header: String`, `tick: usize` (spinner animation)
 
 **`RomBar`** — public handle given to each `Rom`; holds `Arc<Mutex<AppState>>` + `index`.
@@ -544,7 +544,7 @@ Pipeline transition methods (all called from `worker/handlers/`):
 - Enqueue for download: `downloading_pending()` → phase=Downloading, status=`"waiting"`
 - Downloads — ROM: `rom_checking()`, `rom_downloading()`, `rom_redownloading()`, `rom_done()`, `rom_skipped()`
 - Downloads — Media: `start_media(kind)`, `media_done(kind)`, `media_skipped(kind)`, `media_unavailable(kind)`
-- End: `finish(unchanged: bool)` → ✓ (green) or `=` (gray), `finish_error()` → ✗ (red)
+- End: `finish(unchanged: bool)` → ✓ (green) or `=` (gray), `finish_error(cause)` → ✗ (red)
 
 **`Ui`** — owns the state and spawns the render thread. The thread loops at ~80 ms,
 locks state, draws the frame, then calls `crossterm::event::poll(TICK_MS)` (replaces the old
@@ -582,11 +582,19 @@ the user had just typed and packaged the ROM with an empty `description.xml`. On
 
 ### `summary.rs`
 
-`Summary` struct holds: `total`, `success`, `unchanged`, `errors`,
+`Summary` struct holds: `total`, `success`, `unchanged`, `errors`, `failures`,
 `media_stats` (kind, icon, count per type — 9 types including description; counts ROMs that
 have the media present, whether downloaded this run or already up-to-date from a previous run),
 `step_avg_durations` (average duration per StepKind, printed at end of run).
 `Summary::print()` outputs the end-of-run report to stdout.
+
+A failed ROM shows `✗ name — cause` in the Completed panel, where the cause is truncated
+to the panel width by `truncate_cause()` and replaces the media icons (they describe a
+package that was never finished). `Summary.failures` keeps the **untruncated** causes and
+prints them in a `Failures` section — the TUI is gone by then, so it is the last chance to
+read one. `restore_bar_for_resumed_rom()` looks for the failure anywhere in the restored
+pipeline rather than on the leaf: a ROM cut short upstream has `Skipped` from the broken
+step onwards, leaf included, so reading the leaf alone restored it as a success.
 `MEDIA_ICONS` const in `ui/mod.rs` (shared via `pub(crate)`) defines the canonical order and
 Nerd Font icons for all 9 tracked assets (description first, then 8 media types).
 

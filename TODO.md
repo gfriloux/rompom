@@ -87,10 +87,12 @@ correction est arrivée avec ses tests : le dépôt est passé de 0 à 34 tests.
     `cargoLock.outputHashes` du paquet Nix. *(décision à prendre : touche un second dépôt)*
   - **Fix partiel possible sans la lib** : traiter `Error::Request` (timeout, DNS,
     connexion refusée) comme transitoire. Ne couvre que le timeout des trois cas cités.
-- [ ] **P1.2 — Afficher les erreurs des ROMs échouées** : `StepStatus::Failed(msg)`
-  existe mais `finish_error()` ne prend pas le message ; le summary n'imprime qu'un
-  compteur. → Panneau Completed `✗ rom — cause` + liste des échecs dans
-  `Summary::print()`. *(petit/moyen)*
+- [x] **P1.2 — Afficher les erreurs des ROMs échouées** — *fait le 2026-08-10*.
+  Panneau Completed `✗ rom — cause` (tronquée à la largeur, à la place des icônes médias)
+  et section `Failures` non tronquée dans `Summary::print()`. Trouvé en chemin :
+  `restore_bar_for_resumed_rom()` ne lisait que la feuille du pipeline, or une ROM coupée
+  en amont a `Skipped` partout après le step cassé — feuille comprise. Un échec repris
+  depuis `run.yml` réapparaissait donc en **succès**.
 - [ ] **P1.3 — Messages d'erreur config** : `ReadConfiguration`/`ParseConfiguration`
   sans `#[snafu(display)]` (`conf/mod.rs:100-113`) → l'erreur serde_yaml
   (ligne/colonne) et le chemin sont perdus. *(petit)*

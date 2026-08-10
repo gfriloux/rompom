@@ -246,11 +246,12 @@ fn execute_step(rom_arc: Arc<Mutex<Rom>>, step_idx: usize, ctx: &WorkerContext) 
           return;
         }
         Disposition::Fail => {
+          let cause = error.to_string();
           {
             let rom = rom_arc.lock().unwrap();
-            rom.bar.finish_error();
+            rom.bar.finish_error(&cause);
           }
-          StepStatus::Failed(error.to_string())
+          StepStatus::Failed(cause)
         }
       }
     }

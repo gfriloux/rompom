@@ -165,6 +165,9 @@ pub(crate) struct CompletedEntry {
   pub(crate) label: String,
   pub(crate) success: bool,
   pub(crate) unchanged: bool,
+  /// Why this ROM failed. `None` on success, and on a failure restored from a
+  /// `run.yml` written before the cause was recorded.
+  pub(crate) error: Option<String>,
   pub(crate) media_found: Vec<String>,
   pub(crate) media_unchanged: Vec<String>,
   pub(crate) media_missing: Vec<String>,
@@ -309,6 +312,7 @@ impl RomBar {
       label: entry.label.clone(),
       success: true,
       unchanged,
+      error: None,
       media_found: entry.media_found.clone(),
       media_unchanged: entry.media_unchanged.clone(),
       media_missing: entry.media_missing.clone(),
@@ -317,13 +321,16 @@ impl RomBar {
     s.completed.insert(0, completed);
   }
 
-  pub fn finish_error(&self) {
+  /// `cause` is what `StepStatus::Failed` carried. It is the only trace of the failure
+  /// that survives the run: the step is gone from memory by the time the summary prints.
+  pub fn finish_error(&self, cause: &str) {
     let mut s = self.state.lock().unwrap();
     let entry = &s.roms[self.index];
     let completed = CompletedEntry {
       label: entry.label.clone(),
       success: false,
       unchanged: false,
+      error: Some(cause.to_string()),
       media_found: entry.media_found.clone(),
       media_unchanged: entry.media_unchanged.clone(),
       media_missing: entry.media_missing.clone(),
@@ -448,11 +455,28 @@ impl Ui {
         (kind, icon, found)
       })
       .collect();
+    // Oldest first: the panel shows newest first because it scrolls, but a printed
+    // list reads in the order the run produced it.
+    let failures = s
+      .completed
+      .iter()
+      .rev()
+      .filter(|e| !e.success)
+      .map(|e| {
+        (
+          e.label.clone(),
+          e.error
+            .clone()
+            .unwrap_or_else(|| "unknown cause".to_string()),
+        )
+      })
+      .collect();
     Summary {
       total: s.total,
       success,
       unchanged,
       errors,
+      failures,
       media_stats,
       step_avg_durations: Vec::new(),
     }
