@@ -240,6 +240,10 @@ fn execute_step(rom_arc: Arc<Mutex<Rom>>, step_idx: usize, ctx: &WorkerContext) 
             let mut rom = rom_arc.lock().unwrap();
             rom.pipeline[step_idx].retry_count += 1;
             rom.pipeline[step_idx].status = StepStatus::Pending;
+            let attempt = rom.pipeline[step_idx].retry_count;
+            // Said before the sleep, not after: the whole point is that the bar has
+            // something to show *while* the worker waits out the backoff.
+            rom.bar.retrying(attempt, max_retries);
           }
           std::thread::sleep(delay);
           ctx.queue.push(Arc::clone(&rom_arc), step_idx);

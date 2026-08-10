@@ -229,6 +229,15 @@ impl RomBar {
     self.set_status("discovering...");
   }
 
+  /// The step failed on something transient and will be tried again after a backoff.
+  ///
+  /// Without this the bar kept whatever status it had while the worker slept 1, then 2,
+  /// then 4 seconds. From the outside the ROM was simply frozen, and a run slowed down
+  /// by a flaky network looked identical to one blocked on something else entirely.
+  pub fn retrying(&self, attempt: u8, max: u8) {
+    self.set_status(format!("retrying ({}/{})...", attempt, max));
+  }
+
   pub fn found(&mut self, name: &str) {
     let mut s = self.state.lock().unwrap();
     s.roms[self.index].label = name.to_string();

@@ -273,7 +273,7 @@ fn status_style(status: &str, accent: Color) -> Style {
     Style::default().fg(Color::Red)
   } else if status == "queued" || status == "waiting" {
     Style::default().fg(Color::DarkGray)
-  } else if status.contains("waiting for identification") {
+  } else if status.contains("waiting for identification") || status.starts_with("retrying") {
     Style::default().fg(Color::Yellow)
   } else {
     Style::default().fg(accent)
