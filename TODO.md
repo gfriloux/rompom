@@ -99,8 +99,7 @@ correction est arrivée avec ses tests : le dépôt est passé de 0 à 34 tests.
   ses échecs de **sérialisation** sous `ParseConfiguration` — d'où une variante
   `SerializeConfiguration` distincte.
 - [ ] **P1.4 — Cargo.toml** : pinner les 10 dépendances `*` (valeurs du lock, reqwest
-  est à 0.11.27), supprimer la section `[target.x86_64...]` invalide (ignorée par
-  cargo — elle produit un `unused manifest key` à chaque build), ajouter
+  est à 0.11.27), ajouter
   `[profile.release]` (opt-level=z, LTO — aujourd'hui seulement dans le Nix), retirer
   `serde_derive` redondant. *(petit)*
   - **Dette de sécurité associée**, révélée par `just audit` le 2026-08-09 et acceptée
@@ -135,10 +134,10 @@ correction est arrivée avec ses tests : le dépôt est passé de 0 à 34 tests.
     EmulationStation cherche un `.sh` que rien ne produit. Le packaging OpenBOR est
     probablement cassé de bout en bout ; à instruire avec un vrai jeu OpenBOR avant de
     décider quoi corriger. *(moyen)*
-- [ ] **P1.8 — Durabilité de l'état** : flush périodique du state (un crash ≠ Ctrl-C
-  perd tout → re-bump de tous les pkgver) ; write-rename pour run.yml ; warning si
-  state.yml existe mais est illisible (aujourd'hui ignoré en silence,
-  `state.rs:29-31`). *(petit)*
+- [x] **P1.8 — Durabilité de l'état** — *fait le 2026-08-10*. Flush toutes les 30 s par
+  un thread dédié (sérialisation sous le verrou, écriture hors verrou) ; `run.yml` passe
+  par le même `write_with_rotation()` que `state.yml` ; `SystemState::load()` rend un
+  avertissement, imprimé **avant** `Ui::new()` pour qu'il soit lisible.
 
 ## P2 — Simplicité d'utilisation
 

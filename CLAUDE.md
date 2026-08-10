@@ -242,7 +242,7 @@ LookupSS → WaitModal* → BuildPackage → DownloadRom ────┐
 - **`DownloadMedias`** — iterates 8 canonical media kinds. For each: skips if sha1 already valid
   on disk (`media_skipped`), downloads otherwise (`media_done`), or marks unavailable if SS has none.
 - **`SaveState`** — writes `RomStateEntry` into shared `SystemState` (flushed to disk by
-  `main.rs` after all workers join). Persists `extra_disc_sha1s` for multi-disc games.
+  `main.rs` every 30 s and once more after all workers join). Persists `extra_disc_sha1s` for multi-disc games.
   Emits `bar.finish()`. It does **not** touch `remaining` — see below.
 
 ### Failure propagation and run completion
@@ -287,6 +287,28 @@ classification these map from.
 
 This replaced a `Err("interrupted")` string sentinel that `execute_step` recognised by
 comparing the message.
+
+### State durability
+
+`state.yml` is written **every 30 s** by a flusher thread, not only after the workers
+join. A `kill -9`, an OOM or a power cut used to throw away the entire run: every ROM
+came back as new, was re-downloaded and had its `pkgver` bumped again for identical
+content. Only a clean exit and Ctrl-C were ever covered.
+
+A mid-run snapshot is safe because `SaveState` inserts one whole `RomStateEntry` at a
+time under the mutex — a snapshot is always a set of finished ROMs, never half of one.
+The flusher serialises under the lock (`SystemState::to_yaml`) and writes outside it, so
+workers are not held up by the file I/O, and it takes the lock poison-tolerantly.
+
+`state.yml` and `run.yml` both go through `state::write_with_rotation()`: content to
+`<path>.tmp`, the original to `<path>.old`, then `tmp` renamed onto `path`. A reader sees
+one whole file or the other, never a truncated YAML — which would load as an empty state
+and cause the very re-download this is meant to avoid.
+
+`SystemState::load()` returns `(state, Option<warning>)`. An unreadable state file used to
+be swallowed by `.ok()` and look exactly like a first run. The warning is printed **before**
+`Ui::new()`, on a plain terminal, because it means the run about to start will redo work it
+has already done.
 
 ### Panic containment
 

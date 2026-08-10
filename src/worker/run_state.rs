@@ -2,7 +2,10 @@ use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 
-use crate::rom::{Rom, Step, StepStatus};
+use crate::{
+  rom::{Rom, Step, StepStatus},
+  state::write_with_rotation,
+};
 
 // ── Run state ─────────────────────────────────────────────────────────────
 //
@@ -64,10 +67,14 @@ pub fn collect_run_state(roms: &[Arc<Mutex<Rom>>]) -> RunState {
 }
 
 /// Write a `RunState` to `<system_name>.run.yml`.
+///
+/// Through the same write-rename as `state.yml`: this file is written while the process
+/// is already shutting down, and a truncated one is worse than none — the resume prompt
+/// would offer to continue a run whose statuses it cannot read.
 pub fn save_run_state(system_name: &str, state: &RunState) -> std::io::Result<()> {
   let path = format!("{}.run.yml", system_name);
   let yaml = serde_yaml::to_string(state).map_err(std::io::Error::other)?;
-  std::fs::write(path, yaml)
+  write_with_rotation(&path, &yaml)
 }
 
 /// Load a `RunState` from disk.
