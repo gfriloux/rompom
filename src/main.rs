@@ -161,7 +161,12 @@ fn collect_sources(source: &Source, ui: &Ui) -> Result<Vec<RomSourceData>, Strin
   Ok(sources)
 }
 
-fn print_usage(program: &str, opts: getopts::Options) {
+/// The command line itself is wrong — an unknown flag, a missing value. Kept distinct
+/// from the exit code 1 used for run-time failures, so a script can tell "I invoked it
+/// wrong" from "it tried and could not".
+const EXIT_USAGE: i32 = 2;
+
+fn print_usage(program: &str, opts: &getopts::Options) {
   let brief = format!("Usage: {} -s SYSTEM", program);
   print!("{}", opts.usage(&brief));
 }
@@ -194,13 +199,20 @@ fn main() {
   );
   opts.optflag("h", "help", "print this help menu");
 
+  // getopts already words this well ("Unrecognized option: 'systm'"). Panicking on it
+  // buried that sentence under a backtrace and a thread name, for what is almost always
+  // a typo.
   let matches = match opts.parse(&args[1..]) {
     Ok(m) => m,
-    Err(f) => panic!("{}", f),
+    Err(f) => {
+      eprintln!("rompom: {}", f);
+      print_usage(&program, &opts);
+      std::process::exit(EXIT_USAGE);
+    }
   };
 
   if matches.opt_present("h") {
-    print_usage(&program, opts);
+    print_usage(&program, &opts);
     return;
   }
 
@@ -224,7 +236,7 @@ fn main() {
   let system_name = match matches.opt_str("s") {
     Some(x) => x,
     None => {
-      print_usage(&program, opts);
+      print_usage(&program, &opts);
       return;
     }
   };

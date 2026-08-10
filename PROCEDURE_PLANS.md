@@ -76,6 +76,7 @@ type(scope): message court à l'impératif
 
 | scope | couvre |
 |---|---|
+| `cli` | `main.rs` — arguments, drapeaux, usage, codes de sortie |
 | `conf` | `src/conf/` — chargement, `--update-config` |
 | `collect` | collecte IA/folder, groupement multi-disc (`main.rs`) |
 | `pipeline` | `src/worker/`, `src/rom/`, `src/queue.rs` — DAG, steps, handlers |
