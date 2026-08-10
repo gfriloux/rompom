@@ -58,9 +58,21 @@ correction est arrivée avec ses tests : le dépôt est passé de 0 à 34 tests.
 
 ## P1 — Robustesse et confiance
 
-- [ ] **P1.1 — Erreur réseau SS ≠ « jeu non trouvé »** : `jeuinfo(...).ok()`
-  (`discovery.rs:249-256`) avale timeout/500/quota → modale d'identification
-  injustifiée ; le retry de LookupSS est du code mort. *(petit côté rompom)*
+- [x] **P1.1 — Erreur réseau SS ≠ « jeu non trouvé »** — *fait le 2026-08-10*, après la
+  sortie de `screenscraper` v0.7.0. `lookup_failure()` traduit `ApiFailure` en
+  `StepError` : seul le 404 ouvre la modale. Trois trous non prévus au diagnostic, tous
+  trouvés en lisant le code : `jeu_recherche(...).unwrap_or_default()` ouvrait une modale
+  **vide** sur échec réseau ; le `jeuinfo_by_gameid` d'après-modale faisait `.ok()`, donc
+  une coupure à cet instant jetait l'identification que l'utilisateur venait de saisir et
+  écrasait le `description.xml` par un vide ; et un Ctrl-C dans la même fenêtre tombait
+  dans le même trou via un `return None`.
+  - **Fuite de credentials trouvée au passage** (corrigée) : `reqwest::Error` ajoute
+    ` for url (<url complète>)` à son `Display` (reqwest-0.11.27, `src/error.rs:205`) et
+    `base_query()` passe `devpassword`/`sspassword` en paramètres d'URL. `main.rs`
+    imprimait cette erreur telle quelle : perdre le réseau au démarrage écrivait les deux
+    mots de passe sur stderr. rompom ne cite plus jamais l'erreur de la lib — il compose
+    sa propre phrase à partir de `ApiFailure`, et un test le vérifie.
+  - Ancien diagnostic, conservé pour mémoire :
   - **Bloqué par la lib `screenscraper`** (constaté le 2026-08-09, avant de coder) :
     l'API ScreenScraper signale ses erreurs par **code HTTP** — `404` jeu introuvable,
     `429` trop de threads, `430` quota journalier, `423` API fermée, `403` identifiants
@@ -175,6 +187,11 @@ correction est arrivée avec ses tests : le dépôt est passé de 0 à 34 tests.
 - [ ] Templates : `mkdir -p 0700 -p` (voulu : `-m 0700`) et `ls *.pdf,` (virgule
   parasite) dans multidisc/psx/ps2-package.jinja. *(le `sed` Sega CD cassable par `|`
   est corrigé — `sed_pattern()`, cf. P0.1)*
+- [ ] **Lib `screenscraper` — assainir le `Display` de `Error::Request`.** La variante
+  porte un `source: reqwest::Error` dont le `Display` ajoute l'URL complète, credentials
+  compris. rompom est protégé (il ne cite plus l'erreur), mais le prochain consommateur
+  ne le saura pas. Correctif amont : `.without_url()` sur l'erreur avant de la stocker
+  (reqwest l'expose, `src/error.rs:80`). *(petit, dépôt voisin)*
 - [ ] Migration rustls (rompom + screenscraper + internetarchive) → supprime openssl
   vendored + perl du Nix. Remplacer `serde_yaml` (archivé). `Debug` masqué sur
   `Auth`/`ScreenScraper`.
