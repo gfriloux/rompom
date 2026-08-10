@@ -127,8 +127,14 @@ correction est arrivée avec ses tests : le dépôt est passé de 0 à 34 tests.
   `read_pkgver()` + round-trip `SystemState`. Puis `apply_run_state()`
   (invariant anti-underflow). Extraire `disc_indicator`/`group_multi_disc` vers
   `src/collect.rs` au passage. *(petit chacun)*
-- [ ] **P1.7 — `./launcher` OpenBOR écrit en CWD** (`package.rs:181`) : chemin partagé
-  entre workers concurrents → l'écrire dans le répertoire de la ROM. *(petit)*
+- [x] **P1.7 — `./launcher` OpenBOR écrit en CWD** — *fait le 2026-08-10*. Écrit
+  maintenant dans le répertoire de la ROM.
+  - **À creuser (bug distinct, non corrigé)** : ce fichier `launcher` n'est référencé
+    **nulle part** — ni dans les `sources` du PKGBUILD, ni dans un `package()`. Et
+    `apply_game_path()` pose `game.path = ./{name}.sh` pour le système 214, donc
+    EmulationStation cherche un `.sh` que rien ne produit. Le packaging OpenBOR est
+    probablement cassé de bout en bout ; à instruire avec un vrai jeu OpenBOR avant de
+    décider quoi corriger. *(moyen)*
 - [ ] **P1.8 — Durabilité de l'état** : flush périodique du state (un crash ≠ Ctrl-C
   perd tout → re-bump de tous les pkgver) ; write-rename pour run.yml ; warning si
   state.yml existe mais est illisible (aujourd'hui ignoré en silence,

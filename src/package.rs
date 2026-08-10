@@ -282,7 +282,18 @@ impl Package {
     Ok(true)
   }
 
-  fn write_launcher(&self, system: &System, game: &mut Game, romname: &str) -> Result<()> {
+  /// Writes the system-specific launcher script into the ROM's own directory.
+  ///
+  /// It used to go to `./launcher`, in the process-wide current directory. Every ROM of
+  /// an OpenBOR run therefore wrote to the same path, and the workers run in parallel:
+  /// the file that survived belonged to whichever ROM finished last.
+  fn write_launcher(
+    &self,
+    system: &System,
+    game: &mut Game,
+    romname: &str,
+    directory: &Path,
+  ) -> Result<()> {
     if system.id == 214 {
       let ctx = context! {
         rom => self.rom.replace("'", "'\\''"),
@@ -291,8 +302,9 @@ impl Package {
         include_str!("../assets/templates/launcher/openbor.jinja"),
         &ctx,
       );
-      std::fs::write("./launcher", launcher).context(WriteResultSnafu {
-        filename: "./launcher".to_string(),
+      let path = directory.join("launcher");
+      std::fs::write(&path, launcher).context(WriteResultSnafu {
+        filename: path.display().to_string(),
       })?;
     }
     apply_game_path(system, game, romname, self.is_multi_disc());
@@ -517,10 +529,11 @@ impl Package {
   pub fn build(&mut self, system: &System, lang: &[&str], pkgver: u32) -> Result<bool> {
     let (mut game, romname) = self.make_game(system, lang);
 
-    self.write_launcher(system, &mut game, &romname)?;
-
+    // The directory has to exist before the launcher is written into it.
     let directory = Path::new(&self.rom).with_extension("");
     create_dir_all(&directory).ok();
+
+    self.write_launcher(system, &mut game, &romname, &directory)?;
 
     let description_changed = self.write_description_xml(&game, &directory)?;
     self.build_pkgbuild(system, &game, pkgver)?;

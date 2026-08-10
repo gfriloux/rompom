@@ -469,7 +469,8 @@ All multi-disc templates use `*.{{ ext }}` instead of hardcoding `*.chd`.
 - otherwise: no change (default path)
 
 System launchers (shell scripts invoked by the PKGBUILD) are also template-based:
-- **id 214** (OpenBOR): `assets/templates/launcher/openbor.jinja` → generates `./launcher`
+- **id 214** (OpenBOR): `assets/templates/launcher/openbor.jinja` → generates `launcher`
+  in the ROM's own output directory (never in the current directory — the workers share it)
 
 Media files land in `{romdir}/` (alongside PKGBUILD) so `makepkg` finds them without re-downloading.
 
