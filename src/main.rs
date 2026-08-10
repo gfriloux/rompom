@@ -201,6 +201,7 @@ fn main() {
     "write <system>.debug.log with per-ROM pipeline decisions (useful to diagnose false updates)",
   );
   opts.optflag("h", "help", "print this help menu");
+  opts.optflag("V", "version", "print the version and exit");
 
   // getopts already words this well ("Unrecognized option: 'systm'"). Panicking on it
   // buried that sentence under a backtrace and a thread name, for what is almost always
@@ -216,6 +217,14 @@ fn main() {
 
   if matches.opt_present("h") {
     print_usage(&program, &opts);
+    return;
+  }
+
+  // Answered before anything is read from disk: the first thing asked of a binary in a
+  // bug report is its version, and that has to work on a machine with no config at all.
+  // `just version-check` is what guarantees this is the version that was released.
+  if matches.opt_present("version") {
+    println!("rompom {}", env!("CARGO_PKG_VERSION"));
     return;
   }
 
