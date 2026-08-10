@@ -13,7 +13,7 @@ mod worker;
 use std::{
   collections::HashMap,
   env, fs,
-  io::{self, Write as _},
+  io::{self, IsTerminal as _, Write as _},
   path::Path,
   sync::{
     atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -309,6 +309,11 @@ fn main() {
     "debug",
     "write <system>.debug.log with per-ROM pipeline decisions (useful to diagnose false updates)",
   );
+  opts.optflag(
+    "",
+    "plain",
+    "one line per finished ROM instead of the full-screen interface (implied when stdout is not a terminal)",
+  );
   opts.optopt(
     "",
     "resume",
@@ -362,6 +367,14 @@ fn main() {
   // through `ui::media_icons()`.
   if matches.opt_present("ascii") {
     ui::use_ascii_icons();
+  }
+
+  // stdout not being a terminal is exactly the situation --plain describes, so it
+  // selects itself: piping to a file or a CI log gives a readable transcript instead of
+  // escape sequences wrapped around a frame nobody will look at.
+  let plain = matches.opt_present("plain") || !io::stdout().is_terminal();
+  if plain {
+    ui::use_plain_output();
   }
 
   let resume_flag = match parse_resume_flag(matches.opt_str("resume").as_deref()) {
@@ -480,8 +493,20 @@ fn main() {
           .iter()
           .filter(|r| r.step_statuses.iter().all(|st| st.is_complete()))
           .count();
+        // Nobody to ask in plain mode. Not resuming is the safe default: everything
+        // expensive is already skip-if-valid, so a fresh run re-checks rather than
+        // re-does, while replaying a run.yml of unknown provenance is the surprising one.
         let resume = match resume_flag {
           Some(answer) => answer,
+          None if plain => {
+            println!(
+              "Found interrupted run ({}/{} done) — starting fresh (pass --resume yes to \
+               resume).",
+              done,
+              s.roms.len()
+            );
+            false
+          }
           None => ask_resume(done, s.roms.len()),
         };
         if resume {

@@ -85,6 +85,25 @@ pub(crate) fn media_icons() -> &'static [(&'static str, &'static str)] {
   }
 }
 
+/// Set once by `main`, from `--plain` or from stdout not being a terminal.
+static PLAIN: AtomicBool = AtomicBool::new(false);
+
+/// Drops the full-screen interface for one line per finished ROM.
+///
+/// `Ui::new` unconditionally called `enable_raw_mode().unwrap()`. Where there is no
+/// controlling terminal — a CI runner, a detached process — crossterm cannot open
+/// `/dev/tty` and that unwrap panics on the render thread. `install_panic_hook()`
+/// suppresses panic output so it would not be painted over the interface, so the failure
+/// was completely silent: no interface, no error, and a run that went all the way through
+/// reporting nothing at all.
+pub fn use_plain_output() {
+  PLAIN.store(true, Ordering::Relaxed);
+}
+
+pub(crate) fn is_plain() -> bool {
+  PLAIN.load(Ordering::Relaxed)
+}
+
 // ── Modal public types ─────────────────────────────────────────────────────
 
 /// One game candidate returned by `jeu_recherche`, for display in the modal.
@@ -354,38 +373,95 @@ impl RomBar {
 
   // End
   pub fn finish(&self, unchanged: bool) {
-    let mut s = self.state.lock().unwrap();
-    let entry = &s.roms[self.index];
-    let completed = CompletedEntry {
-      label: entry.label.clone(),
-      success: true,
-      unchanged,
-      error: None,
-      media_found: entry.media_found.clone(),
-      media_unchanged: entry.media_unchanged.clone(),
-      media_missing: entry.media_missing.clone(),
-    };
-    s.roms[self.index].phase = RomPhase::Done { success: true };
-    s.completed.insert(0, completed);
+    self.complete(CompletedFrom::Success { unchanged });
   }
 
   /// `cause` is what `StepStatus::Failed` carried. It is the only trace of the failure
   /// that survives the run: the step is gone from memory by the time the summary prints.
   pub fn finish_error(&self, cause: &str) {
-    let mut s = self.state.lock().unwrap();
-    let entry = &s.roms[self.index];
-    let completed = CompletedEntry {
-      label: entry.label.clone(),
-      success: false,
-      unchanged: false,
-      error: Some(cause.to_string()),
-      media_found: entry.media_found.clone(),
-      media_unchanged: entry.media_unchanged.clone(),
-      media_missing: entry.media_missing.clone(),
-    };
-    s.roms[self.index].phase = RomPhase::Done { success: false };
-    s.completed.insert(0, completed);
+    self.complete(CompletedFrom::Failure { cause });
   }
+
+  /// Moves this ROM into the Completed log, and in plain mode says so on stdout.
+  ///
+  /// The line is built under the lock and printed after it: `println!` takes the stdout
+  /// lock, and holding both while nine workers are finishing is a queue nobody needs.
+  fn complete(&self, outcome: CompletedFrom<'_>) {
+    let line = {
+      let mut s = self.state.lock().unwrap();
+      let entry = &s.roms[self.index];
+      let (success, unchanged, error) = match outcome {
+        CompletedFrom::Success { unchanged } => (true, unchanged, None),
+        CompletedFrom::Failure { cause } => (false, false, Some(cause.to_string())),
+      };
+      let completed = CompletedEntry {
+        label: entry.label.clone(),
+        success,
+        unchanged,
+        error,
+        media_found: entry.media_found.clone(),
+        media_unchanged: entry.media_unchanged.clone(),
+        media_missing: entry.media_missing.clone(),
+      };
+      s.roms[self.index].phase = RomPhase::Done { success };
+      s.completed.insert(0, completed);
+
+      if is_plain() {
+        Some(plain_line(&s.completed[0], s.completed.len(), s.total))
+      } else {
+        None
+      }
+    };
+
+    if let Some(line) = line {
+      println!("{}", line);
+    }
+  }
+}
+
+/// Which of the two endings a ROM reached, so `complete` can build the entry once.
+enum CompletedFrom<'a> {
+  Success { unchanged: bool },
+  Failure { cause: &'a str },
+}
+
+/// One line per finished ROM, for `--plain`.
+///
+/// Carries the same three things the Completed panel does — the marker, the name, and
+/// then either which assets the package has or why it failed — plus the running count,
+/// which the panel gets from its gauge.
+fn plain_line(entry: &CompletedEntry, done: usize, total: usize) -> String {
+  let marker = if !entry.success {
+    "✗"
+  } else if entry.unchanged {
+    "="
+  } else {
+    "✓"
+  };
+
+  let tail = if !entry.success {
+    entry
+      .error
+      .as_deref()
+      .map(|cause| format!("  {}", cause.replace('\n', " ")))
+      .unwrap_or_default()
+  } else {
+    let present: Vec<&str> = media_icons()
+      .iter()
+      .filter(|(kind, _)| {
+        entry.media_found.iter().any(|k| k == kind)
+          || entry.media_unchanged.iter().any(|k| k == kind)
+      })
+      .map(|&(_, icon)| icon)
+      .collect();
+    if present.is_empty() {
+      String::new()
+    } else {
+      format!("  {}", present.join(" "))
+    }
+  };
+
+  format!("[{}/{}] {} {}{}", done, total, marker, entry.label, tail)
 }
 
 // ── Ui ─────────────────────────────────────────────────────────────────────
@@ -408,6 +484,20 @@ impl Ui {
     let queue_r = Arc::clone(&queue);
 
     let (modal_tx, modal_rx) = channel::unbounded::<ModalRequest>();
+
+    // No terminal to draw on, and nothing to poll for keys: Ctrl-C goes back to being an
+    // ordinary SIGINT, which the `ctrlc` handler in `main` already covers. The modal
+    // receiver is dropped with this branch — `handle_wait_modal` never sends in plain
+    // mode, it fails the ROM instead.
+    if is_plain() {
+      drop(modal_rx);
+      return Ui {
+        state,
+        running,
+        render_handle: None,
+        modal_tx,
+      };
+    }
 
     let render_handle = thread::spawn(move || {
       enable_raw_mode().unwrap();

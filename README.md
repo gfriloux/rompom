@@ -216,6 +216,7 @@ rompom -s atomiswave
 | `--init` | write a starter `rompom.yml` — refuses if one is already there |
 | `--list-systems` | list the systems declared in `rompom.yml` with their id and source, then exit |
 | `--update-config` | interactive migration of an outdated `rompom.yml` |
+| `--plain` | one line per finished ROM instead of the full-screen interface — implied when stdout is not a terminal |
 | `--resume yes\|no` | answer the interrupted-run prompt up front instead of being asked |
 | `--ascii` | replace the Nerd Font media icons with ASCII letters |
 | `--debug` | write `<system>.debug.log` with the per-ROM pipeline decisions |
@@ -226,7 +227,25 @@ rompom -s atomiswave
 the names that are accepted, and marks the systems that have no `source` block and
 therefore cannot be run.
 
-rompom opens a terminal UI split into three panels:
+### Non-interactive runs
+
+When stdout is not a terminal — a pipe, a file, a CI job — rompom drops the full-screen
+interface on its own and writes one line per finished ROM instead:
+
+```
+[12/340] ✓ Sonic The Hedgehog  󰗚 󰕧 󰋩 󰋫 󰹙
+[13/340] = Streets of Rage 2
+[14/340] ✗ Some Unknown Game  not identified — needs manual identification
+```
+
+`--plain` forces the same thing inside a real terminal. The end-of-run summary is printed
+either way. A run with no terminal at all needs nothing else:
+
+```
+rompom -s snes --plain --resume no < /dev/null
+```
+
+In a terminal, rompom opens a UI split into three panels:
 
 - **Discovery** — ROM identification in progress: querying ScreenScraper, generating PKGBUILDs
 - **Downloads** — ROM and media asset downloads
