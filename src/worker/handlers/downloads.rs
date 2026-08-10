@@ -4,10 +4,12 @@ use std::{
   sync::{Arc, Mutex},
 };
 
-use checksums::{hash_file, Algorithm};
 use internet_archive::download::{Download, DownloadMethod};
 
-use crate::rom::{Rom, RomSource, StepError, StepStatus};
+use crate::{
+  hash::sha1_file,
+  rom::{Rom, RomSource, StepError, StepStatus},
+};
 
 use super::super::{helpers::media_filename, WorkerContext};
 
@@ -63,8 +65,8 @@ pub(crate) fn handle_copy_rom(
   // Helper: copy one disc file unless it already matches the expected sha1.
   let copy_disc = |local: &Path, dest: &Path, sha1_exp: &str| -> Result<bool, StepError> {
     if dest.exists() {
-      let actual = hash_file(dest, Algorithm::SHA1).to_lowercase();
-      if actual == sha1_exp {
+      // An unreadable destination is not a reason to fail: fall through and rewrite it.
+      if sha1_file(dest).is_ok_and(|actual| actual == sha1_exp) {
         return Ok(false); // already good
       }
     }

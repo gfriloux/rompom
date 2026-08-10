@@ -1,5 +1,6 @@
 mod conf;
 mod emulationstation;
+mod hash;
 mod package;
 mod queue;
 mod rom;

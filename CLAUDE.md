@@ -124,6 +124,8 @@ src/
     mod.rs                  — Config loading (serde_yaml), Conf / System / Source enum
     update.rs               — --update-config TUI: lang selection + ia_items migration
   emulationstation.rs       — Game struct (serde Serialize) + Game::from_jeuinfo(); serialized via quick-xml
+  hash.rs                   — sha1_file / md5_file / crc32_file: streamed, lowercase hex,
+                              io::Result (the old `checksums` crate panicked instead)
   package.rs                — Package + Medias structs
                               build(system, lang, pkgver) → Result<bool> / build_pkgbuild() logic
                               check_description_changed() — compares generated XML with disk, no I/O

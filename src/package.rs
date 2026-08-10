@@ -5,6 +5,7 @@ use std::{fs::create_dir_all, path::Path};
 
 use super::conf::System;
 use super::emulationstation::Game;
+use crate::hash::sha1_file;
 use screenscraper::jeuinfo::{JeuInfo, Media};
 
 #[derive(Default)]
@@ -335,10 +336,13 @@ impl Package {
     }
 
     sources.push(shell_quote("description.xml"));
-    sha1sums.push(shell_quote(&sanitize_sha1(&checksums::hash_file(
-      Path::new(&format!("{}/description.xml", directory.display())),
-      checksums::Algorithm::SHA1,
-    ))));
+    // Written moments ago by write_description_xml, so a read error here means something
+    // is badly wrong with the output directory. sanitize_sha1 turns the empty string into
+    // forty zeros, which makepkg rejects loudly — the one outcome worse than that would be
+    // a PKGBUILD claiming a sum nobody computed.
+    let description_sha1 =
+      sha1_file(&directory.join("description.xml")).unwrap_or_else(|_| String::new());
+    sha1sums.push(shell_quote(&sanitize_sha1(&description_sha1)));
 
     // Media sources. `format` and `region` come straight from ScreenScraper and end up
     // in filenames, so they go through the token whitelist before anything else.
