@@ -6,10 +6,11 @@ pour la traçabilité.
 
 ## Phase 1 — bump screenscraper v0.7.0
 
-- [ ] `nix develop --command just ci` → exit 0.
-- [ ] `nix build` → succès. C'est la seule porte qui valide `cargoLock.outputHashes` ;
-      `just ci` passe même avec un hash faux.
-- [ ] `cargo build` n'affiche plus `unused manifest key: target.x86_64-unknown-linux-gnu`.
+- [x] `nix develop --command just ci` → exit 0, 34 tests. *(2026-08-10)*
+- [x] `nix build` → succès, binaire musl produit. C'est la seule porte qui valide
+      `cargoLock.outputHashes` ; `just ci` passe même avec un hash faux — vérifié en
+      posant volontairement un hash bidon, qui n'a fait échouer que `nix build`.
+- [x] `cargo build` n'affiche plus `unused manifest key: target.x86_64-unknown-linux-gnu`.
 
 ## Phase 2 — `StepError`
 
