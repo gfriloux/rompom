@@ -367,6 +367,21 @@ pub(crate) fn handle_wait_modal(
     (rom.source.filename.clone(), rom.sha1.clone(), candidates)
   };
 
+  // Nobody is watching in plain mode, so there is no one to answer the modal. Fail the
+  // ROM and let the run carry on: it lands in the Completed log as an error and in the
+  // Failures section of the summary, with the cause saying what to do about it.
+  //
+  // Not identified-by-guess: packaging a ROM on the first search hit writes a wrong
+  // description.xml, bumps its pkgver, and persists a wrong ss_game_id that every later
+  // run then trusts — the exact damage P1.1 closed.
+  if crate::ui::is_plain() {
+    return Err(StepError::Fatal(format!(
+      "not identified — needs manual identification, and {} candidate(s) cannot be shown \
+       without a terminal",
+      candidates.len()
+    )));
+  }
+
   // Signal the UI that we're waiting for user input.
   rom_arc.lock().unwrap().bar.waiting_for_user();
 

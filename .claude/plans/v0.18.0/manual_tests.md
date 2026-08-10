@@ -68,8 +68,11 @@ Convention : `☐` à faire · `☑` passé · `☒` échoué · `⊘` non joué
 - ☐ **5.4 — Hors tty sans `--resume`**, `run.yml` présent : run neuf, `run.yml` supprimé,
   et le run **ne bloque pas** en attente de stdin.
 - ☐ **5.5 — ROM non identifiée hors tty** : le run continue, la ROM finit en `✗` avec la
-  cause « needs manual identification », elle apparaît dans la section `Failures`, et
-  `$status` reflète l'échec.
+  cause « needs manual identification », et elle apparaît dans la section `Failures`.
+  **Le code de sortie reste 0** : c'est le choix documenté dans le tableau des codes du
+  README — 0 dit « le run a eu lieu », pas « tout a réussi ». Une bibliothèque de 400 ROMs
+  dont une seule est non identifiée ferait échouer le job à chaque passage sinon. Si on
+  veut l'inverse, c'est une décision à prendre explicitement, pas un effet de bord.
 - ☐ **5.6 — Ctrl-C en mode plain.** Le thread de rendu qui captait les touches n'existe
   plus : c'est le handler `SIGINT` qui doit prendre le relais. Vérifier qu'un Ctrl-C
   arrête proprement, écrit `run.yml`, et qu'un second Ctrl-C sort tout de suite.
