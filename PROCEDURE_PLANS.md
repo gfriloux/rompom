@@ -116,14 +116,16 @@ structurel commité sans MAJ de `CLAUDE.md`/`README.md` rend la doc périmée �
 
 ## 4. Discipline de test
 
-rompom n'a **aucun test** aujourd'hui ; c'est la dette P1.6 de `TODO.md`. La règle à partir
-de maintenant : **tout nouveau code pur arrive avec son test**, et toute correction de bug
-commence par un test qui échoue.
+La règle : **tout nouveau code pur arrive avec son test**, et toute correction de bug
+commence par un test qui échoue. La dette P1.6 de `TODO.md` est soldée depuis v0.18.0 —
+les fonctions pures listées ci-dessous sont toutes couvertes, ce qui n'affranchit de rien
+pour la suite.
 
-**On automatise** (fonctions pures, sans réseau ni terminal) :
-`disc_indicator()`, `group_multi_disc()`, `search_name()`, `normalize_name()`,
-`check_media_changes()`, `read_pkgver()`, `apply_game_path()`, round-trip `SystemState`,
-`apply_run_state()` (invariant anti-underflow), et le **snapshot XML** de
+**On automatise** (fonctions pures, sans réseau ni terminal) : `disc_indicator()`,
+`group_multi_disc()`, `search_name()`, `normalize_name()`, `check_media_changes()`,
+`read_pkgver()`, `apply_game_path()`, `sha1_file()`/`md5_file()`/`crc32_file()` sur les
+vecteurs publiés, round-trip `SystemState`, `apply_run_state()` (invariant
+anti-underflow), `disposition()` (politique de retry), et le **snapshot XML** de
 `generate_description_xml()`.
 
 **On n'automatise pas** : les vrais appels ScreenScraper / Internet Archive, le rendu

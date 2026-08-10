@@ -117,15 +117,14 @@ correction est arrivée avec ses tests : le dépôt est passé de 0 à 34 tests.
   job `ci` (`just ci` = version-check + fmt-check + clippy `-D warnings` + test),
   job `nix` (`nix flake check`), job `audit` (`cargo audit`, advisory). Le `Justfile` est
   la seule définition des portes ; pre-commit l'appelle aussi. Voir `PROCEDURE_PLANS.md` §7.
-- [ ] **P1.6 — Premiers tests unitaires** (fonctions pures, sans réseau).
-  *Entamé le 2026-08-09* : le snapshot XML de `generate_description_xml()` existe
-  (`src/package.rs`, 2 tests) — il a servi à prouver que la montée quick-xml 0.39→0.41
-  ne changeait pas d'un octet la sortie. Restent :
-  `disc_indicator()`, `group_multi_disc()`, `search_name()`, `check_media_changes()`,
-  `apply_game_path()`,
-  `read_pkgver()` + round-trip `SystemState`. Puis `apply_run_state()`
-  (invariant anti-underflow). Extraire `disc_indicator`/`group_multi_disc` vers
-  `src/collect.rs` au passage. *(petit chacun)*
+- [x] **P1.6 — Premiers tests unitaires** (fonctions pures, sans réseau) — *fait le
+  2026-08-10*. Le dépôt passe de 59 à 89 tests. `disc_indicator()` et
+  `group_multi_disc()` sont partis dans `src/collect.rs` avec leurs dix tests ;
+  `search_name()`, `check_media_changes()`, `apply_game_path()` et `read_pkgver()` ont
+  les leurs. **Ce point réclamait deux tests qui existaient déjà** : le round-trip
+  `SystemState` (`state::tests::a_state_survives_a_round_trip`) et `apply_run_state()`
+  (sept tests dans `worker::run_state::tests`), écrits en v0.16/v0.17 sans que la
+  roadmap soit mise à jour.
 - [x] **P1.7 — `./launcher` OpenBOR écrit en CWD** — *fait le 2026-08-10*. Écrit
   maintenant dans le répertoire de la ROM.
   - **À creuser (bug distinct, non corrigé)** : ce fichier `launcher` n'est référencé
