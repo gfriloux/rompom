@@ -193,3 +193,201 @@ pub(crate) fn group_multi_disc(sources: Vec<RomSourceData>) -> Vec<RomSourceData
 
   result
 }
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use crate::rom::FolderSource;
+  use std::path::PathBuf;
+
+  /// A folder-source entry, which is all these two functions look at: they read
+  /// `filename` and nothing else about where the file came from.
+  fn source(filename: &str) -> RomSourceData {
+    RomSourceData {
+      file_name: format!("/roms/{}", filename),
+      filename: filename.to_string(),
+      source: RomSource::Folder(FolderSource {
+        local_path: PathBuf::from(format!("/roms/{}", filename)),
+      }),
+      extra_discs: Vec::new(),
+    }
+  }
+
+  fn names(sources: &[RomSourceData]) -> Vec<&str> {
+    let mut out: Vec<&str> = sources.iter().map(|s| s.filename.as_str()).collect();
+    out.sort();
+    out
+  }
+
+  fn find<'a>(sources: &'a [RomSourceData], filename: &str) -> &'a RomSourceData {
+    sources
+      .iter()
+      .find(|s| s.filename == filename)
+      .unwrap_or_else(|| panic!("no entry named {:?} in {:?}", filename, names(sources)))
+  }
+
+  // ── disc_indicator ───────────────────────────────────────────────────────
+
+  /// The overwhelming majority of a library. Anything that reads a disc number out of
+  /// `Super Mario World (USA)` would merge unrelated games into one package.
+  #[test]
+  fn a_stem_without_a_disc_indicator_has_none() {
+    assert_eq!(disc_indicator("Super Mario World"), None);
+    assert_eq!(disc_indicator("Super Mario World (USA)"), None);
+    assert_eq!(disc_indicator("Sonic The Hedgehog (USA) [!]"), None);
+  }
+
+  /// The three spellings seen in the wild, with and without the space, in any case.
+  /// `(disk 2)` is not a typo to normalise away — No-Intro and Redump disagree.
+  #[test]
+  fn every_accepted_spelling_yields_the_same_base_and_number() {
+    for stem in [
+      "Final Fantasy VII (Disc 2)",
+      "Final Fantasy VII (Disk 2)",
+      "Final Fantasy VII (CD 2)",
+      "Final Fantasy VII (disc2)",
+      "Final Fantasy VII (DISC 2)",
+    ] {
+      assert_eq!(
+        disc_indicator(stem),
+        Some(("Final Fantasy VII".to_string(), 2)),
+        "stem: {}",
+        stem
+      );
+    }
+  }
+
+  /// Numbering starts at 0 in some sets and at 1 in others. Both have to survive, and
+  /// disc 0 must not be read as "no disc".
+  #[test]
+  fn numbering_may_start_at_zero_or_one() {
+    assert_eq!(
+      disc_indicator("Enemy Zero (USA) (Disc 0)"),
+      Some(("Enemy Zero (USA)".to_string(), 0))
+    );
+    assert_eq!(
+      disc_indicator("Enemy Zero (USA) (Disc 1)"),
+      Some(("Enemy Zero (USA)".to_string(), 1))
+    );
+  }
+
+  /// A region tag before the indicator belongs to the base name: it is what tells two
+  /// different releases of the same game apart, and dropping it merges them.
+  #[test]
+  fn a_region_tag_before_the_indicator_stays_in_the_base() {
+    assert_eq!(
+      disc_indicator("Panzer Dragoon Saga (USA) (Disc 1)"),
+      Some(("Panzer Dragoon Saga (USA)".to_string(), 1))
+    );
+  }
+
+  // ── group_multi_disc ─────────────────────────────────────────────────────
+
+  /// The fast path. A library with no multi-disc game must come out exactly as it went
+  /// in — same entries, none of them carrying an extra disc.
+  #[test]
+  fn single_disc_sources_pass_through_untouched() {
+    let out = group_multi_disc(vec![
+      source("Super Mario World.zip"),
+      source("Sonic The Hedgehog.zip"),
+    ]);
+
+    assert_eq!(
+      names(&out),
+      ["Sonic The Hedgehog.zip", "Super Mario World.zip"]
+    );
+    assert!(out.iter().all(|s| s.extra_discs.is_empty()));
+  }
+
+  /// The headline case: one package, disc 1 as the primary entry under a name with no
+  /// disc indicator, disc 2 hanging off it.
+  #[test]
+  fn two_discs_become_one_entry_with_the_second_as_an_extra() {
+    let out = group_multi_disc(vec![
+      source("Panzer Dragoon Saga (Disc 1).chd"),
+      source("Panzer Dragoon Saga (Disc 2).chd"),
+    ]);
+
+    assert_eq!(out.len(), 1);
+    let game = &out[0];
+    assert_eq!(game.filename, "Panzer Dragoon Saga.chd");
+    // file_name still points at the real disc-1 file: that is what gets copied.
+    assert_eq!(game.file_name, "/roms/Panzer Dragoon Saga (Disc 1).chd");
+    assert_eq!(game.extra_discs.len(), 1);
+    assert_eq!(
+      game.extra_discs[0].filename,
+      "Panzer Dragoon Saga (Disc 2).chd"
+    );
+  }
+
+  /// Extra discs feed the .m3u playlist in order. Collection order is whatever the
+  /// filesystem or the Internet Archive listing happened to give, so the sort matters.
+  #[test]
+  fn extra_discs_come_out_in_disc_order_whatever_the_input_order() {
+    let out = group_multi_disc(vec![
+      source("Final Fantasy VII (Disc 3).chd"),
+      source("Final Fantasy VII (Disc 1).chd"),
+      source("Final Fantasy VII (Disc 2).chd"),
+    ]);
+
+    assert_eq!(out.len(), 1);
+    assert_eq!(out[0].file_name, "/roms/Final Fantasy VII (Disc 1).chd");
+    let extras: Vec<&str> = out[0]
+      .extra_discs
+      .iter()
+      .map(|d| d.filename.as_str())
+      .collect();
+    assert_eq!(
+      extras,
+      [
+        "Final Fantasy VII (Disc 2).chd",
+        "Final Fantasy VII (Disc 3).chd"
+      ]
+    );
+  }
+
+  /// Same title, two dump formats. Grouping across extensions would put a .chd and a
+  /// .cue in one playlist and hand makepkg a package it cannot build.
+  #[test]
+  fn a_different_extension_is_a_different_game() {
+    let out = group_multi_disc(vec![
+      source("Lunar (Disc 1).chd"),
+      source("Lunar (Disc 2).cue"),
+    ]);
+
+    assert_eq!(out.len(), 2);
+    assert!(out.iter().all(|s| s.extra_discs.is_empty()));
+  }
+
+  /// A single file that happens to carry `(Disc 1)` is not a group. It keeps its own
+  /// name — renaming it to the virtual one would break the state key and re-scrape it.
+  #[test]
+  fn a_lone_disc_one_is_not_a_group() {
+    let out = group_multi_disc(vec![source("Riven (Disc 1).chd")]);
+
+    assert_eq!(out.len(), 1);
+    assert_eq!(out[0].filename, "Riven (Disc 1).chd");
+    assert!(out[0].extra_discs.is_empty());
+  }
+
+  /// Grouped and ungrouped entries share the output. Nothing may be dropped on the way.
+  #[test]
+  fn ungrouped_entries_survive_alongside_a_group() {
+    let out = group_multi_disc(vec![
+      source("Sonic The Hedgehog.zip"),
+      source("Lunar (Disc 1).chd"),
+      source("Lunar (Disc 2).chd"),
+      source("Super Mario World.zip"),
+    ]);
+
+    assert_eq!(
+      names(&out),
+      [
+        "Lunar.chd",
+        "Sonic The Hedgehog.zip",
+        "Super Mario World.zip"
+      ]
+    );
+    assert_eq!(find(&out, "Lunar.chd").extra_discs.len(), 1);
+  }
+}
