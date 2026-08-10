@@ -12,7 +12,7 @@ use crate::{
 };
 
 use super::super::{
-  helpers::{search_name, NAME_REGIONS},
+  helpers::{lookup_failure, search_name, NAME_REGIONS},
   WorkerContext,
 };
 
@@ -246,15 +246,24 @@ pub(crate) fn handle_lookup_ss(
   if !ctx.ss_sem.acquire() {
     return Err(StepError::Interrupted);
   }
-  let ji = if let Some(gid) = cached_game_id {
-    ctx.ss.jeuinfo_by_gameid(ctx.system.id, gid).ok()
+  let lookup = if let Some(gid) = cached_game_id {
+    ctx.ss.jeuinfo_by_gameid(ctx.system.id, gid)
   } else {
     ctx
       .ss
       .jeuinfo(ctx.system.id, &filename, size, crc32, md5, sha1)
-      .ok()
   };
   ctx.ss_sem.release();
+
+  // A failed lookup used to be flattened to None by `.ok()`, which meant "ScreenScraper
+  // does not know this game" and opened the identification modal. Only a 404 means that.
+  let ji = match lookup {
+    Ok(jeu) => Some(jeu),
+    Err(e) => match lookup_failure(e.failure()) {
+      Some(step_error) => return Err(step_error),
+      None => None,
+    },
+  };
 
   if let Some(jeu) = ji {
     // ── Found ─────────────────────────────────────────────────────────
@@ -272,11 +281,21 @@ pub(crate) fn handle_lookup_ss(
     if !ctx.ss_sem.acquire() {
       return Err(StepError::Interrupted);
     }
-    let search_results = ctx
+    let search = ctx
       .ss
-      .jeu_recherche(Some(ctx.system.id), &search_name(&filename))
-      .unwrap_or_default();
+      .jeu_recherche(Some(ctx.system.id), &search_name(&filename));
     ctx.ss_sem.release();
+
+    // `unwrap_or_default()` turned a failed search into zero candidates, so the user
+    // got an empty modal and no idea why. A search that finds nothing legitimately
+    // returns Ok(vec![]) — that is still an empty modal, but an honest one.
+    let search_results = match search {
+      Ok(results) => results,
+      Err(e) => match lookup_failure(e.failure()) {
+        Some(step_error) => return Err(step_error),
+        None => Vec::new(),
+      },
+    };
 
     let display_candidates: Vec<ModalCandidate> = search_results
       .iter()

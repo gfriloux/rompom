@@ -1,8 +1,56 @@
 use std::{collections::HashMap, path::Path};
 
-use crate::package::{media_ext, Medias};
+use screenscraper::ApiFailure;
+
+use crate::{
+  package::{media_ext, Medias},
+  rom::StepError,
+};
 
 pub(crate) const NAME_REGIONS: &[&str] = &["wor", "eu", "us", "fr", "jp", "ss"];
+
+// ── ScreenScraper failures ─────────────────────────────────────────────────
+
+/// What a failed ScreenScraper call means for the step.
+///
+/// `None` is the important one: it says ScreenScraper answered, and answered that it
+/// does not know this ROM (404). That is the **only** case that justifies stopping the
+/// run to ask the user. Everything else — a timeout, a saturated server, an exhausted
+/// quota — is an error the ROM must not silently absorb, because absorbing it turns
+/// "ScreenScraper is unreachable" into "identify these 400 games by hand".
+pub(crate) fn lookup_failure(failure: ApiFailure) -> Option<StepError> {
+  let reason = match failure {
+    ApiFailure::NotFound => return None,
+    ApiFailure::ThreadLimit => "ScreenScraper thread limit reached",
+    ApiFailure::ServerBusy => "ScreenScraper is saturated or closed to inactive members",
+    ApiFailure::Transport => "could not reach ScreenScraper",
+    ApiFailure::QuotaExceeded => "daily ScreenScraper scrape quota exceeded",
+    ApiFailure::KoQuotaExceeded => {
+      "too many unrecognised ROMs today — ScreenScraper says come back tomorrow"
+    }
+    ApiFailure::ApiClosed => "the ScreenScraper API is closed",
+    ApiFailure::Blacklisted => "this software version is blacklisted by ScreenScraper",
+    ApiFailure::BadDevCredentials => "ScreenScraper rejected the developer credentials",
+    ApiFailure::BadRequest => "ScreenScraper rejected the request as malformed",
+    ApiFailure::Malformed => "ScreenScraper sent a response rompom could not parse",
+    ApiFailure::Api => "ScreenScraper reported an error",
+    ApiFailure::Http(_) => "unexpected ScreenScraper response",
+  };
+  // The status is worth carrying; the library error is not. `reqwest::Error` prints
+  // ` for url (<full url>)` in its Display (error.rs:205), and `base_query()` puts
+  // `devpassword` and `sspassword` in that query string — so interpolating the source
+  // error here would write both passwords into the Completed panel, the end-of-run
+  // summary and <system>.debug.log. rompom builds its own sentence instead.
+  let reason = match failure {
+    ApiFailure::Http(status) => format!("{} (HTTP {})", reason, status),
+    _ => reason.to_string(),
+  };
+  Some(if failure.is_retryable() {
+    StepError::Transient(reason)
+  } else {
+    StepError::Fatal(reason)
+  })
+}
 
 /// Strips the file extension and region/revision tags from a ROM filename to
 /// produce a clean title suitable for a ScreenScraper name search.
@@ -84,6 +132,107 @@ pub(crate) fn check_media_changes(
 mod tests {
   use super::*;
   use std::path::PathBuf;
+
+  // ── lookup_failure ───────────────────────────────────────────────────────
+
+  /// The whole point of P1.1: exactly one failure means "ask the user". Every other
+  /// one used to land there too, so a saturated ScreenScraper produced a modal per ROM.
+  #[test]
+  fn only_a_404_sends_the_user_to_the_modal() {
+    assert!(lookup_failure(ApiFailure::NotFound).is_none());
+
+    for failure in [
+      ApiFailure::BadRequest,
+      ApiFailure::ServerBusy,
+      ApiFailure::BadDevCredentials,
+      ApiFailure::ApiClosed,
+      ApiFailure::Blacklisted,
+      ApiFailure::ThreadLimit,
+      ApiFailure::QuotaExceeded,
+      ApiFailure::KoQuotaExceeded,
+      ApiFailure::Http(418),
+      ApiFailure::Transport,
+      ApiFailure::Malformed,
+      ApiFailure::Api,
+    ] {
+      assert!(
+        lookup_failure(failure).is_some(),
+        "{:?} must not be mistaken for an unknown game",
+        failure
+      );
+    }
+  }
+
+  /// Retrying is delegated to the library's own judgement, so the two stay in step.
+  #[test]
+  fn only_the_librarys_retryable_failures_are_transient() {
+    for failure in [
+      ApiFailure::ThreadLimit,
+      ApiFailure::ServerBusy,
+      ApiFailure::Transport,
+    ] {
+      assert!(
+        matches!(lookup_failure(failure), Some(StepError::Transient(_))),
+        "{:?} should be retried",
+        failure
+      );
+    }
+
+    for failure in [
+      ApiFailure::QuotaExceeded,
+      ApiFailure::KoQuotaExceeded,
+      ApiFailure::ApiClosed,
+      ApiFailure::Blacklisted,
+      ApiFailure::BadDevCredentials,
+      ApiFailure::BadRequest,
+      ApiFailure::Malformed,
+      ApiFailure::Api,
+      ApiFailure::Http(500),
+    ] {
+      assert!(
+        matches!(lookup_failure(failure), Some(StepError::Fatal(_))),
+        "{:?} holds for the rest of the run and must not be retried",
+        failure
+      );
+    }
+  }
+
+  /// An unexpected status is still worth naming precisely.
+  #[test]
+  fn an_unknown_status_carries_its_number() {
+    let message = lookup_failure(ApiFailure::Http(503)).unwrap().to_string();
+    assert!(message.contains("503"), "got: {}", message);
+  }
+
+  /// Every reason has to read as a sentence in the Completed panel, and none of them
+  /// may quote the library error — `reqwest::Error` appends ` for url (<full url>)`,
+  /// and that URL carries `devpassword` and `sspassword`.
+  #[test]
+  fn every_reason_is_a_plain_sentence_without_credentials() {
+    for failure in [
+      ApiFailure::BadRequest,
+      ApiFailure::ServerBusy,
+      ApiFailure::BadDevCredentials,
+      ApiFailure::ApiClosed,
+      ApiFailure::Blacklisted,
+      ApiFailure::ThreadLimit,
+      ApiFailure::QuotaExceeded,
+      ApiFailure::KoQuotaExceeded,
+      ApiFailure::Http(429),
+      ApiFailure::Transport,
+      ApiFailure::Malformed,
+      ApiFailure::Api,
+    ] {
+      let message = lookup_failure(failure).unwrap().to_string();
+      assert!(!message.is_empty());
+      assert!(
+        !message.contains("password") && !message.contains("url ("),
+        "{:?} produced a message that could carry credentials: {}",
+        failure,
+        message
+      );
+    }
+  }
 
   /// The destination is built as `directory.join(media_filename(...))`, and Path::join
   /// resolves `..` against the directory rather than rejecting it. Before the fix,
