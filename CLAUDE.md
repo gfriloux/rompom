@@ -120,6 +120,8 @@ src/
                               (loads <system>.run.yml if present), Ctrl-C handler.
                               `interrupted` and `queue` are created before `Ui::new()` so the
                               render thread can detect Ctrl-C directly via keyboard events.
+  collect.rs                — disc_indicator() / group_multi_disc(): multi-disc grouping,
+                              pure and unit-tested (moved out of main.rs in v0.18)
   conf/
     mod.rs                  — Config loading (serde_yaml), Conf / System / Source enum
     update.rs               — --update-config TUI: lang selection + ia_items migration
@@ -180,7 +182,7 @@ Resolve the system's `source` to a list of files:
 - `Folder`: scan the directory, filter by glob patterns → collect with hashes as `None`
   (computed later in the `ComputeHashes` step).
 
-**Multi-disc grouping** (`group_multi_disc()` in `main.rs`): after collection, files whose
+**Multi-disc grouping** (`group_multi_disc()` in `collect.rs`): after collection, files whose
 stems contain a disc indicator (`(Disc N)`, `(Disk N)`, `(CD N)`, numbering from 0 or 1) and
 share the same base name and extension are merged into a single `RomSourceData`. The detector
 scans all parenthesised groups so region tags before the disc indicator are handled correctly
