@@ -205,6 +205,44 @@ fn init_config(path: &Path) -> Result<(), String> {
   }
 }
 
+/// Reads `--resume=yes|no` into an answer, `None` when the flag was not given.
+fn parse_resume_flag(value: Option<&str>) -> Result<Option<bool>, String> {
+  match value {
+    None => Ok(None),
+    Some(v) => match v.to_ascii_lowercase().as_str() {
+      "yes" | "y" | "true" => Ok(Some(true)),
+      "no" | "n" | "false" => Ok(Some(false)),
+      other => Err(format!("--resume expects yes or no, got {:?}", other)),
+    },
+  }
+}
+
+/// Asks on the terminal whether to resume an interrupted run.
+///
+/// The read used to be `read_line(..).unwrap()` and the answer matched against
+/// `"" | "y" | "yes"`. With stdin closed — a CI runner, a `< /dev/null` — `read_line`
+/// returns `Ok(0)` and leaves the buffer empty, so nobody answering was read as the
+/// default *yes*: the run silently resumed a `run.yml` nothing had validated.
+fn ask_resume(done: usize, total: usize) -> bool {
+  print!(
+    "Found interrupted run ({}/{} done). Resume? [Y/n]: ",
+    done, total
+  );
+  if io::stdout().flush().is_err() {
+    return false;
+  }
+
+  let mut answer = String::new();
+  match io::stdin().read_line(&mut answer) {
+    Ok(0) => {
+      println!();
+      false
+    }
+    Ok(_) => matches!(answer.trim().to_lowercase().as_str(), "" | "y" | "yes"),
+    Err(_) => false,
+  }
+}
+
 /// Prints every system in the loaded config with its ScreenScraper id and where its ROMs
 /// come from.
 ///
@@ -271,6 +309,12 @@ fn main() {
     "debug",
     "write <system>.debug.log with per-ROM pipeline decisions (useful to diagnose false updates)",
   );
+  opts.optopt(
+    "",
+    "resume",
+    "answer the resume prompt up front instead of being asked",
+    "yes|no",
+  );
   opts.optflag(
     "",
     "ascii",
@@ -319,6 +363,14 @@ fn main() {
   if matches.opt_present("ascii") {
     ui::use_ascii_icons();
   }
+
+  let resume_flag = match parse_resume_flag(matches.opt_str("resume").as_deref()) {
+    Ok(value) => value,
+    Err(message) => {
+      eprintln!("rompom: {}", message);
+      std::process::exit(EXIT_USAGE);
+    }
+  };
 
   if matches.opt_present("init") {
     let conf_path = confdir.join("rompom.yml");
@@ -428,20 +480,15 @@ fn main() {
           .iter()
           .filter(|r| r.step_statuses.iter().all(|st| st.is_complete()))
           .count();
-        print!(
-          "Found interrupted run ({}/{} done). Resume? [Y/n]: ",
-          done,
-          s.roms.len()
-        );
-        io::stdout().flush().unwrap();
-        let mut answer = String::new();
-        io::stdin().read_line(&mut answer).unwrap();
-        match answer.trim().to_lowercase().as_str() {
-          "" | "y" | "yes" => Some(s),
-          _ => {
-            fs::remove_file(&run_path).ok();
-            None
-          }
+        let resume = match resume_flag {
+          Some(answer) => answer,
+          None => ask_resume(done, s.roms.len()),
+        };
+        if resume {
+          Some(s)
+        } else {
+          fs::remove_file(&run_path).ok();
+          None
         }
       }
       Err(e) => {
@@ -778,6 +825,28 @@ mod tests {
       "error should quote the pattern: {err}"
     );
     assert!(err.contains("invalid filter pattern"));
+  }
+
+  /// Both spellings, in any case, so a script can say what reads best.
+  #[test]
+  fn parse_resume_flag_reads_both_answers() {
+    for yes in ["yes", "y", "YES", "Yes", "true"] {
+      assert_eq!(parse_resume_flag(Some(yes)), Ok(Some(true)), "{}", yes);
+    }
+    for no in ["no", "n", "NO", "No", "false"] {
+      assert_eq!(parse_resume_flag(Some(no)), Ok(Some(false)), "{}", no);
+    }
+    assert_eq!(parse_resume_flag(None), Ok(None));
+  }
+
+  /// A typo must not silently become one of the two answers. `--resume=maybe` deciding
+  /// on its own whether to replay an interrupted run is the worst of the three outcomes.
+  #[test]
+  fn parse_resume_flag_refuses_anything_else() {
+    let err = parse_resume_flag(Some("maybe")).expect_err("maybe is not an answer");
+    assert!(err.contains("maybe"), "got: {}", err);
+    assert!(err.contains("yes"), "got: {}", err);
+    assert!(parse_resume_flag(Some("")).is_err());
   }
 
   #[test]

@@ -216,6 +216,7 @@ rompom -s atomiswave
 | `--init` | write a starter `rompom.yml` — refuses if one is already there |
 | `--list-systems` | list the systems declared in `rompom.yml` with their id and source, then exit |
 | `--update-config` | interactive migration of an outdated `rompom.yml` |
+| `--resume yes\|no` | answer the interrupted-run prompt up front instead of being asked |
 | `--ascii` | replace the Nerd Font media icons with ASCII letters |
 | `--debug` | write `<system>.debug.log` with the per-ROM pipeline decisions |
 | `-h`, `--help` | usage |
@@ -246,6 +247,10 @@ Other ROMs continue processing in parallel while the modal is open.
 Press `Ctrl-C` to interrupt. rompom saves the current progress to `<system>.run.yml`. On the
 next run, you will be offered to resume from where it stopped — only pending ROMs are
 reprocessed, completed ones are skipped.
+
+`--resume yes` or `--resume no` answers that prompt up front. With stdin closed and no
+flag, rompom does **not** resume: it deletes `<system>.run.yml` and starts a fresh run.
+Everything expensive is skip-if-valid, so a fresh run re-checks rather than re-does.
 
 ### Exit codes
 
