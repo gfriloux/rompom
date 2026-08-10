@@ -96,19 +96,32 @@ pub struct Conf {
   pub systems: Vec<System>,
 }
 
+// Without a `display`, snafu falls back to the variant name: a missing config file
+// reported itself as "ReadConfiguration", dropping both the path it tried and the
+// reason. serde_yaml puts the line and column in its own Display, so `{source}` is
+// what makes a YAML mistake findable.
 #[derive(Debug, Snafu)]
 pub enum Error {
+  #[snafu(display("cannot read the configuration file {}: {}", path.display(), source))]
   ReadConfiguration {
     source: io::Error,
     backtrace: Backtrace,
     path: PathBuf,
   },
+  #[snafu(display("invalid configuration in {}: {}", path.display(), source))]
   ParseConfiguration {
     source: serde_yaml::Error,
+    path: PathBuf,
   },
+  #[snafu(display("cannot write the configuration file {}: {}", path.display(), source))]
   WriteConfiguration {
     source: io::Error,
     backtrace: Backtrace,
+    path: PathBuf,
+  },
+  #[snafu(display("cannot serialise the updated configuration for {}: {}", path.display(), source))]
+  SerializeConfiguration {
+    source: serde_yaml::Error,
     path: PathBuf,
   },
   #[snafu(display("Configuration needs to be updated. Run: rompom --update-config"))]
@@ -120,7 +133,8 @@ type Result<T, E = Error> = std::result::Result<T, E>;
 impl Conf {
   pub fn load(file: &String) -> Result<Conf> {
     let data = fs::read_to_string(file.clone()).context(ReadConfigurationSnafu { path: file })?;
-    let raw: ConfRaw = serde_yaml::from_str(data.as_str()).context(ParseConfigurationSnafu)?;
+    let raw: ConfRaw =
+      serde_yaml::from_str(data.as_str()).context(ParseConfigurationSnafu { path: file })?;
 
     let lang = match raw.lang {
       Some(l) if !l.is_empty() => l,
@@ -153,5 +167,61 @@ impl Conf {
 
   pub fn find_system(&self, name: &str) -> Option<System> {
     self.systems.iter().find(|s| s.name == name).cloned()
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  /// Without a `display` attribute snafu prints the variant name, so a missing config
+  /// file reported "ReadConfiguration" and left the user to guess which path rompom had
+  /// tried — `$XDG_CONFIG_HOME` makes that a real question.
+  #[test]
+  fn a_missing_file_names_the_path_it_tried() {
+    let path = "/nonexistent/rompom-does-not-live-here.yml".to_string();
+    let message = Conf::load(&path).unwrap_err().to_string();
+
+    assert!(message.contains(&path), "got: {}", message);
+    assert!(!message.contains("ReadConfiguration"), "got: {}", message);
+  }
+
+  /// The whole value of `{source}` here: serde_yaml carries the line and column, and a
+  /// YAML mistake is otherwise a needle in a config that lists every system.
+  #[test]
+  fn a_yaml_mistake_points_at_the_line() {
+    let source = serde_yaml::from_str::<ConfRaw>("screenscraper:\n  dev: [\n").unwrap_err();
+    let error = Error::ParseConfiguration {
+      source,
+      path: PathBuf::from("/home/user/.config/rompom.yml"),
+    };
+    let message = error.to_string();
+
+    assert!(
+      message.contains("/home/user/.config/rompom.yml"),
+      "got: {}",
+      message
+    );
+    assert!(message.contains("line"), "got: {}", message);
+  }
+
+  /// Reading, parsing and writing used to be told apart only by a variant name nobody
+  /// saw. They are three different things to go and fix.
+  #[test]
+  fn each_failure_reads_differently() {
+    let path = PathBuf::from("/home/user/.config/rompom.yml");
+    let parse = Error::ParseConfiguration {
+      source: serde_yaml::from_str::<ConfRaw>("[").unwrap_err(),
+      path: path.clone(),
+    };
+    let serialize = Error::SerializeConfiguration {
+      source: serde_yaml::from_str::<ConfRaw>("[").unwrap_err(),
+      path,
+    };
+
+    assert_ne!(parse.to_string(), serialize.to_string());
+    assert!(Error::ConfigNeedsUpdate
+      .to_string()
+      .contains("--update-config"));
   }
 }

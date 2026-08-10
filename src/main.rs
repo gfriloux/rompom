@@ -388,7 +388,7 @@ fn main() {
   if matches.opt_present("update-config") {
     let conf_path = format!("{}/rompom.yml", confdir.display());
     if let Err(e) = conf::Conf::update(&conf_path) {
-      eprintln!("Error: {}", e);
+      eprintln!("rompom: {}", e);
       std::process::exit(1);
     }
     return;
@@ -397,7 +397,7 @@ fn main() {
   let conf = match Conf::load(&format!("{}/rompom.yml", confdir.display())) {
     Ok(c) => c,
     Err(e) => {
-      eprintln!("Error: {}", e);
+      eprintln!("rompom: {}", e);
       std::process::exit(1);
     }
   };

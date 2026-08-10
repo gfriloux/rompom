@@ -93,9 +93,11 @@ correction est arrivée avec ses tests : le dépôt est passé de 0 à 34 tests.
   `restore_bar_for_resumed_rom()` ne lisait que la feuille du pipeline, or une ROM coupée
   en amont a `Skipped` partout après le step cassé — feuille comprise. Un échec repris
   depuis `run.yml` réapparaissait donc en **succès**.
-- [ ] **P1.3 — Messages d'erreur config** : `ReadConfiguration`/`ParseConfiguration`
-  sans `#[snafu(display)]` (`conf/mod.rs:100-113`) → l'erreur serde_yaml
-  (ligne/colonne) et le chemin sont perdus. *(petit)*
+- [x] **P1.3 — Messages d'erreur config** — *fait le 2026-08-10*. `#[snafu(display)]` sur
+  les quatre variantes, `path` ajouté à `ParseConfiguration`. Une erreur YAML donne
+  maintenant le fichier, le champ et la ligne. Au passage : `--update-config` rapportait
+  ses échecs de **sérialisation** sous `ParseConfiguration` — d'où une variante
+  `SerializeConfiguration` distincte.
 - [ ] **P1.4 — Cargo.toml** : pinner les 10 dépendances `*` (valeurs du lock, reqwest
   est à 0.11.27), supprimer la section `[target.x86_64...]` invalide (ignorée par
   cargo — elle produit un `unused manifest key` à chaque build), ajouter
