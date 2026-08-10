@@ -174,6 +174,46 @@ fn print_usage(program: &str, opts: &getopts::Options) {
   print!("{}", opts.usage(&brief));
 }
 
+/// Prints every system in the loaded config with its ScreenScraper id and where its ROMs
+/// come from.
+///
+/// This is the answer to "why does rompom say my system is unknown": the name has to
+/// match `rompom.yml` exactly, and a system with no `source` block cannot be run either
+/// — so it is called out rather than merely listed.
+fn list_systems(conf: &Conf) {
+  if conf.systems.is_empty() {
+    println!("No system declared in rompom.yml.");
+    return;
+  }
+
+  let width = conf
+    .systems
+    .iter()
+    .map(|s| s.name.len())
+    .max()
+    .unwrap_or(0)
+    .max(6);
+
+  println!("{:<width$}  {:>5}  SOURCE", "SYSTEM", "ID", width = width);
+  for system in &conf.systems {
+    let source = match &system.source {
+      Some(Source::InternetArchive(items)) => {
+        let names: Vec<&str> = items.iter().map(|i| i.item.as_str()).collect();
+        format!("internet_archive: {}", names.join(", "))
+      }
+      Some(Source::Folder(folder)) => format!("folder: {}", folder.path),
+      None => "(no source — cannot be run)".to_string(),
+    };
+    println!(
+      "{:<width$}  {:>5}  {}",
+      system.name,
+      system.id,
+      source,
+      width = width
+    );
+  }
+}
+
 // ── main ──────────────────────────────────────────────────────────────────
 
 fn main() {
@@ -199,6 +239,11 @@ fn main() {
     "",
     "debug",
     "write <system>.debug.log with per-ROM pipeline decisions (useful to diagnose false updates)",
+  );
+  opts.optflag(
+    "",
+    "list-systems",
+    "list the systems declared in rompom.yml and exit",
   );
   opts.optflag("h", "help", "print this help menu");
   opts.optflag("V", "version", "print the version and exit");
@@ -245,6 +290,11 @@ fn main() {
     }
   };
 
+  if matches.opt_present("list-systems") {
+    list_systems(&conf);
+    return;
+  }
+
   let system_name = match matches.opt_str("s") {
     Some(x) => x,
     None => {
@@ -286,7 +336,10 @@ fn main() {
   let system = match conf.find_system(&system_name) {
     Some(s) => s,
     None => {
-      eprintln!("rompom: system {:?} is not in rompom.yml", system_name);
+      eprintln!(
+        "rompom: system {:?} is not in rompom.yml — run --list-systems to see what is",
+        system_name
+      );
       std::process::exit(EXIT_FAILURE);
     }
   };

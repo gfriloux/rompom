@@ -208,6 +208,21 @@ format).
 rompom -s atomiswave
 ```
 
+### Command-line flags
+
+| flag | what it does |
+|---|---|
+| `-s`, `--system SYSTEM` | the system to scrape — the name must match `rompom.yml` exactly |
+| `--list-systems` | list the systems declared in `rompom.yml` with their id and source, then exit |
+| `--update-config` | interactive migration of an outdated `rompom.yml` |
+| `--debug` | write `<system>.debug.log` with the per-ROM pipeline decisions |
+| `-h`, `--help` | usage |
+| `-V`, `--version` | version, and nothing else — works without a config file |
+
+`--list-systems` is the answer to *"rompom says my system is unknown"*: it prints exactly
+the names that are accepted, and marks the systems that have no `source` block and
+therefore cannot be run.
+
 rompom opens a terminal UI split into three panels:
 
 - **Discovery** — ROM identification in progress: querying ScreenScraper, generating PKGBUILDs
