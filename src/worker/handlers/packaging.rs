@@ -5,7 +5,7 @@ use std::{
 
 use crate::{
   package::{read_pkgver, Package},
-  rom::{Rom, RomSource, StepStatus},
+  rom::{Rom, RomSource, StepError, StepStatus},
 };
 
 use super::super::{helpers::check_media_changes, WorkerContext};
@@ -20,7 +20,7 @@ pub(crate) fn handle_build_package(
   rom_arc: &Arc<Mutex<Rom>>,
   _step_idx: usize,
   ctx: &WorkerContext,
-) -> Result<StepStatus, String> {
+) -> Result<StepStatus, StepError> {
   // Extract what we need, releasing the lock before expensive I/O.
   let (filename, disc1_filename, sha1, rom_url, extra_discs_info, jeu, rom_unchanged) = {
     let mut rom = rom_arc.lock().unwrap();
@@ -85,7 +85,7 @@ pub(crate) fn handle_build_package(
     &sha1,
     extra_discs_info,
   )
-  .map_err(|e| e.to_string())?;
+  .map_err(StepError::transient)?;
 
   let lang_refs: Vec<&str> = ctx.lang.iter().map(|s| s.as_str()).collect();
 
@@ -135,7 +135,7 @@ pub(crate) fn handle_build_package(
     let pkgver = read_pkgver(&dir) + 1;
     package
       .build(&ctx.system, &lang_refs, pkgver)
-      .map_err(|e| e.to_string())?;
+      .map_err(StepError::transient)?;
   }
 
   // Show description.xml icon: green if written/updated, gray if unchanged.

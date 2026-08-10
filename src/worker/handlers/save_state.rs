@@ -7,7 +7,7 @@ use std::{
 
 use crate::{
   package::Medias,
-  rom::{Rom, StepStatus},
+  rom::{Rom, StepError, StepStatus},
   state::RomStateEntry,
 };
 
@@ -43,7 +43,7 @@ pub(crate) fn handle_save_state(
   rom_arc: &Arc<Mutex<Rom>>,
   _step_idx: usize,
   ctx: &WorkerContext,
-) -> Result<StepStatus, String> {
+) -> Result<StepStatus, StepError> {
   // Collect ROM data while holding the lock, then release before I/O.
   let (filename, entry, package_unchanged, debug_log) = {
     let rom = rom_arc.lock().unwrap();

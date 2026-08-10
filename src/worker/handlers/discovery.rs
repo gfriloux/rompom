@@ -7,7 +7,7 @@ use std::{
 use checksums::{hash_file, Algorithm};
 
 use crate::{
-  rom::{Rom, RomSource, StepData, StepKind, StepStatus},
+  rom::{Rom, RomSource, StepData, StepError, StepKind, StepStatus},
   ui::{ModalCandidate, ModalRequest, ModalResponse},
 };
 
@@ -26,7 +26,7 @@ pub(crate) fn handle_compute_hashes(
   rom_arc: &Arc<Mutex<Rom>>,
   _step_idx: usize,
   ctx: &WorkerContext,
-) -> Result<StepStatus, String> {
+) -> Result<StepStatus, StepError> {
   let (filename, local_path, extra_disc_paths) = {
     let rom = rom_arc.lock().unwrap();
     let path = match &rom.source.source {
@@ -168,7 +168,7 @@ pub(crate) fn handle_lookup_ss(
   rom_arc: &Arc<Mutex<Rom>>,
   step_idx: usize,
   ctx: &WorkerContext,
-) -> Result<StepStatus, String> {
+) -> Result<StepStatus, StepError> {
   // ── Read source data from rom (release lock before network calls) ──────
   let (filename, sha1, md5, crc32, size, is_ia_source) = {
     let rom = rom_arc.lock().unwrap();
@@ -244,7 +244,7 @@ pub(crate) fn handle_lookup_ss(
 
   // ── SS lookup (semaphore limits concurrency to user's SS tier) ────────
   if !ctx.ss_sem.acquire() {
-    return Err("interrupted".to_string());
+    return Err(StepError::Interrupted);
   }
   let ji = if let Some(gid) = cached_game_id {
     ctx.ss.jeuinfo_by_gameid(ctx.system.id, gid).ok()
@@ -270,7 +270,7 @@ pub(crate) fn handle_lookup_ss(
   } else {
     // ── Not found: run jeu_recherche and hand off to WaitModal ────────
     if !ctx.ss_sem.acquire() {
-      return Err("interrupted".to_string());
+      return Err(StepError::Interrupted);
     }
     let search_results = ctx
       .ss
@@ -328,7 +328,7 @@ pub(crate) fn handle_wait_modal(
   rom_arc: &Arc<Mutex<Rom>>,
   step_idx: usize,
   ctx: &WorkerContext,
-) -> Result<StepStatus, String> {
+) -> Result<StepStatus, StepError> {
   // Read the candidates that LookupSS stored in its step data.
   let (filename, sha1_opt, candidates) = {
     let rom = rom_arc.lock().unwrap();
@@ -353,7 +353,7 @@ pub(crate) fn handle_wait_modal(
 
   // Serialise modal display: only one modal open at a time.
   if !ctx.modal_sem.acquire() {
-    return Err("interrupted".to_string());
+    return Err(StepError::Interrupted);
   }
 
   let (resp_tx, resp_rx) = crossbeam_channel::bounded::<ModalResponse>(1);
@@ -375,11 +375,11 @@ pub(crate) fn handle_wait_modal(
           .map(|j| j.find_name(NAME_REGIONS).to_string())
       }),
     })
-    .map_err(|e| format!("modal channel closed: {}", e))?;
+    .map_err(|e| StepError::Fatal(format!("modal channel closed: {}", e)))?;
 
   let response = resp_rx
     .recv()
-    .map_err(|_| "modal response channel closed".to_string())?;
+    .map_err(|_| StepError::Fatal("modal response channel closed".to_string()))?;
 
   ctx.modal_sem.release();
 

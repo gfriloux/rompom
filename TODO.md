@@ -162,8 +162,11 @@ correction est arrivée avec ses tests : le dépôt est passé de 0 à 34 tests.
   les 8 blocs de `build_pkgbuild` (table-driven).
 - [ ] Utiliser `m.url` au lieu de reconstruire les URLs SS à la main dans
   `build_pkgbuild` (cassera au premier changement de format d'URL SS).
-- [ ] `enum StepError { Interrupted, Transient, Fatal }` au lieu de la sentinelle
-  `Err("interrupted")`.
+- [x] `enum StepError { Interrupted, Transient, Fatal }` au lieu de la sentinelle
+  `Err("interrupted")` — *fait le 2026-08-10*, remonté dans le lot v0.17 parce que P1.1
+  en dépend : sans la distinction transitoire/définitif, un quota dépassé brûlait 3
+  tentatives et 7 s de backoff par ROM. La décision vit dans `disposition()`, pure et
+  testée.
 - [ ] Nettoyer le code mort : `StepData` quasi entier, `Phase`/`StepKind::phase()`,
   `Package.name` ≡ `Package.rom`.
 - [ ] Fuite de permit `modal_sem` sur chemin d'erreur (`discovery.rs:355-384`) → guard

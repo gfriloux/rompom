@@ -131,7 +131,7 @@ src/
   queue.rs                  — TaskQueue (LIFO, two priority lanes: main + blocking) + Semaphore (interruptible)
   rom/
     mod.rs                  — Rom struct + new_folder() / new_ia() pipeline constructors
-    step.rs                 — Step, StepKind, StepStatus, StepData, Phase
+    step.rs                 — Step, StepKind, StepStatus, StepError, StepData, Phase
     source.rs               — RomSourceData / RomSource / IaSource / FolderSource
   state.rs                  — SystemState + RomStateEntry (serde YAML): per-run state persisted to
                               <system>.state.yml in the working directory. Tracks ss_game_id, rom_sha1,
@@ -264,6 +264,30 @@ single leaf of both DAGs, so "leaf reached" means "ROM done" whether it ended `D
 any ROM cut short by a failure, and the queue would never shut down. `Rom::finished`
 guards against a double decrement, since both branches of the DAG converge on that leaf.
 
+### Failure kinds — `StepError`
+
+A handler returns `Result<StepStatus, StepError>`:
+
+| variant | `execute_step` does |
+|---|---|
+| `Interrupted` | step back to `Pending`, **no dispatch** — it re-runs on resume |
+| `Transient(msg)` | retry while `retry_count < max_retries`, backoff `2^n` seconds |
+| `Fatal(msg)` | `Failed` immediately, whatever the retry budget says |
+
+The decision itself lives in `disposition()`, a pure function returning
+`Requeue` / `Retry(delay)` / `Fail`, so the policy is unit-tested without a queue or a
+network.
+
+`Fatal` exists because retrying is not free. Against ScreenScraper each attempt also
+spends a request, and the API answers **431** ("sort your ROM files out and come back
+tomorrow") to members who pile up failed lookups — so replaying a call that cannot
+succeed, such as an exhausted daily quota (430) or wrong developer credentials (403),
+actively makes the run worse. See `ApiFailure` in the `screenscraper` lib for the
+classification these map from.
+
+This replaced a `Err("interrupted")` string sentinel that `execute_step` recognised by
+comparing the message.
+
 ### Panic containment
 
 `execute_step` wraps the handler dispatch in `catch_unwind`. A panicking handler used to
@@ -279,7 +303,8 @@ Three things this depends on:
 - **No `panic = "abort"`.** `packages/rompom/default.nix` deliberately omits it; with
   abort, `catch_unwind` never runs and this whole mechanism is dead code in the shipped
   binary.
-- **Panics skip the retry logic.** They are deterministic bugs, not transient failures.
+- **Panics skip the retry logic.** A caught panic becomes `StepError::Fatal`, so it fails
+  on the spot: an index out of bounds is a deterministic bug, not a transient failure.
 
 `install_panic_hook()` (called from `main` before `Ui::new`) records the panic location in
 a thread-local and suppresses the default stderr output, which would otherwise be written
@@ -319,14 +344,14 @@ Second Ctrl-C calls `std::process::exit(1)`.
 `false` = cancelled). It uses `wait_timeout(50ms)` internally to periodically recheck the
 cancelled flag. `cancel()` sets the flag and calls `notify_all()`.
 
-When `acquire()` returns `false` in a handler, the handler returns `Err("interrupted")`.
-`execute_step` intercepts this specific sentinel before the retry logic, resets the step
-to `Pending`, and returns without calling `do_dispatch` — so the step re-runs on resume
-and its successors are not prematurely decremented.
+When `acquire()` returns `false` in a handler, the handler returns
+`Err(StepError::Interrupted)`. `execute_step` resets the step to `Pending` and returns
+without calling `do_dispatch` — so the step re-runs on resume and its successors are not
+prematurely decremented.
 
 Steps that complete normally just before or during the interrupt window are saved as `Done`
 and are **not** re-run on resume (their work is preserved). Only genuinely cancelled steps
-(whose handler returned `Err("interrupted")`) revert to `Pending`.
+(whose handler returned `StepError::Interrupted`) revert to `Pending`.
 
 ### Interrupted run / resume
 
