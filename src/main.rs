@@ -161,9 +161,12 @@ fn collect_sources(source: &Source, ui: &Ui) -> Result<Vec<RomSourceData>, Strin
   Ok(sources)
 }
 
+/// Something went wrong while running: no config directory, unreadable config, unknown
+/// system, a system with no source, ScreenScraper refusing the credentials.
+const EXIT_FAILURE: i32 = 1;
 /// The command line itself is wrong — an unknown flag, a missing value. Kept distinct
-/// from the exit code 1 used for run-time failures, so a script can tell "I invoked it
-/// wrong" from "it tried and could not".
+/// from `EXIT_FAILURE` so a script can tell "I invoked it wrong" from "it tried and
+/// could not".
 const EXIT_USAGE: i32 = 2;
 
 fn print_usage(program: &str, opts: &getopts::Options) {
@@ -181,8 +184,8 @@ fn main() {
   let confdir = match dirs::config_dir() {
     Some(x) => x,
     None => {
-      eprintln!("Failed to find user configuration dir");
-      return;
+      eprintln!("rompom: could not find the user configuration directory");
+      std::process::exit(EXIT_FAILURE);
     }
   };
 
@@ -236,8 +239,9 @@ fn main() {
   let system_name = match matches.opt_str("s") {
     Some(x) => x,
     None => {
+      eprintln!("rompom: no system given");
       print_usage(&program, &opts);
-      return;
+      std::process::exit(EXIT_USAGE);
     }
   };
 
@@ -268,11 +272,13 @@ fn main() {
     None
   };
 
+  // Both of these used to print and `return`, which is exit 0. In CI a mistyped system
+  // name was therefore a green build that had scraped nothing.
   let system = match conf.find_system(&system_name) {
     Some(s) => s,
     None => {
-      eprintln!("System '{}' not found in rompom.yml", system_name);
-      return;
+      eprintln!("rompom: system {:?} is not in rompom.yml", system_name);
+      std::process::exit(EXIT_FAILURE);
     }
   };
 
@@ -280,10 +286,11 @@ fn main() {
     Some(s) => s,
     None => {
       eprintln!(
-        "System '{}' has no source configured in rompom.yml",
+        "rompom: system {:?} has no source block in rompom.yml, so there is nothing to \
+         collect — add an internet_archive or folder source",
         system_name
       );
-      return;
+      std::process::exit(EXIT_FAILURE);
     }
   };
 

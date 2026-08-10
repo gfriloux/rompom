@@ -230,6 +230,17 @@ Press `Ctrl-C` to interrupt. rompom saves the current progress to `<system>.run.
 next run, you will be offered to resume from where it stopped — only pending ROMs are
 reprocessed, completed ones are skipped.
 
+### Exit codes
+
+| code | meaning |
+|---|---|
+| `0` | the run finished — individual ROMs may still have failed, see the `Failures` section of the summary |
+| `1` | rompom could not run: no config directory, unreadable or invalid `rompom.yml`, unknown system, a system with no `source` block, ScreenScraper refusing the credentials |
+| `2` | the command line was wrong: unknown flag, missing value, no `-s` |
+
+A mistyped system name used to exit `0`, which in CI is indistinguishable from a run that
+scraped a whole library.
+
 ## Building and deploying packages
 
 Once rompom finishes, each ROM has its own directory containing a `PKGBUILD`, a
