@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use serde_derive::Serialize;
+use serde::Serialize;
 
 use screenscraper::jeuinfo::JeuInfo;
 

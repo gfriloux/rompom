@@ -71,6 +71,13 @@ single casual setup, Skraper is simpler.
 - A **ScreenScraper developer account** — register at [screenscraper.fr](https://www.screenscraper.fr).
   Both a user account and a developer account are required. The developer account unlocks
   concurrent API threads, which rompom uses to process ROMs in parallel.
+  **Your account tier sets the pace of the whole run**: ScreenScraper reports a
+  `maxthreads` value, and rompom sizes its ScreenScraper semaphore from it. A tier
+  allowing one thread means one lookup at a time, whatever the machine — downloads and
+  packaging still run in parallel around it, but identification is the bottleneck.
+- A **Nerd Font** in your terminal — the media columns are Nerd Font glyphs and render as
+  identical empty boxes without one. `--ascii` replaces them with letters if you would
+  rather not install a font.
 - **makepkg** — to build the generated PKGBUILDs. Available natively on Arch-based systems,
   or via [rom-builder](https://github.com/gfriloux/rom-builder), a Docker image that provides
   a ready-to-use build environment.
@@ -208,7 +215,44 @@ format).
 rompom -s atomiswave
 ```
 
-rompom opens a terminal UI split into three panels:
+### Command-line flags
+
+| flag | what it does |
+|---|---|
+| `-s`, `--system SYSTEM` | the system to scrape — the name must match `rompom.yml` exactly |
+| `--init` | write a starter `rompom.yml` — refuses if one is already there |
+| `--list-systems` | list the systems declared in `rompom.yml` with their id and source, then exit |
+| `--update-config` | interactive migration of an outdated `rompom.yml` |
+| `--plain` | one line per finished ROM instead of the full-screen interface — implied when stdout is not a terminal |
+| `--resume yes\|no` | answer the interrupted-run prompt up front instead of being asked |
+| `--ascii` | replace the Nerd Font media icons with ASCII letters |
+| `--debug` | write `<system>.debug.log` with the per-ROM pipeline decisions |
+| `-h`, `--help` | usage |
+| `-V`, `--version` | version, and nothing else — works without a config file |
+
+`--list-systems` is the answer to *"rompom says my system is unknown"*: it prints exactly
+the names that are accepted, and marks the systems that have no `source` block and
+therefore cannot be run.
+
+### Non-interactive runs
+
+When stdout is not a terminal — a pipe, a file, a CI job — rompom drops the full-screen
+interface on its own and writes one line per finished ROM instead:
+
+```
+[12/340] ✓ Sonic The Hedgehog  󰗚 󰕧 󰋩 󰋫 󰹙
+[13/340] = Streets of Rage 2
+[14/340] ✗ Some Unknown Game  not identified — needs manual identification
+```
+
+`--plain` forces the same thing inside a real terminal. The end-of-run summary is printed
+either way. A run with no terminal at all needs nothing else:
+
+```
+rompom -s snes --plain --resume no < /dev/null
+```
+
+In a terminal, rompom opens a UI split into three panels:
 
 - **Discovery** — ROM identification in progress: querying ScreenScraper, generating PKGBUILDs
 - **Downloads** — ROM and media asset downloads
@@ -229,6 +273,21 @@ Other ROMs continue processing in parallel while the modal is open.
 Press `Ctrl-C` to interrupt. rompom saves the current progress to `<system>.run.yml`. On the
 next run, you will be offered to resume from where it stopped — only pending ROMs are
 reprocessed, completed ones are skipped.
+
+`--resume yes` or `--resume no` answers that prompt up front. With stdin closed and no
+flag, rompom does **not** resume: it deletes `<system>.run.yml` and starts a fresh run.
+Everything expensive is skip-if-valid, so a fresh run re-checks rather than re-does.
+
+### Exit codes
+
+| code | meaning |
+|---|---|
+| `0` | the run finished — individual ROMs may still have failed, see the `Failures` section of the summary |
+| `1` | rompom could not run: no config directory, unreadable or invalid `rompom.yml`, unknown system, a system with no `source` block, ScreenScraper refusing the credentials |
+| `2` | the command line was wrong: unknown flag, missing value, no `-s` |
+
+A mistyped system name used to exit `0`, which in CI is indistinguishable from a run that
+scraped a whole library.
 
 ## Building and deploying packages
 
@@ -297,6 +356,24 @@ package() { true; }
 ```
 
 Installing `set-castlevania` pulls all listed games in one command.
+
+### Files rompom writes
+
+All three land in the **current working directory**, not next to the ROMs and not under
+`$XDG_STATE_HOME` — so running rompom from two different directories gives two
+independent histories of the same system.
+
+| file | what it is |
+|---|---|
+| `<system>.state.yml` | what the last run found: ScreenScraper game ids, ROM and media sha1s. Rewritten every 30 s and once at the end. |
+| `<system>.run.yml` | only while a run is interrupted — the per-ROM step statuses the resume prompt reads. Deleted when the run completes or when you decline to resume. |
+| `<system>.debug.log` | only with `--debug`. Truncated at the start of each run. |
+
+**Deleting `state.yml` is not free.** It is the only record of what has already been done:
+without it every ROM looks new, so every ROM and every media asset is downloaded again,
+every `description.xml` is rewritten, and every `pkgver` is bumped — which republishes the
+entire library to anyone tracking your repository. Move it aside rather than delete it if
+you are only trying something out.
 
 ## Limitations & known issues
 

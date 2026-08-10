@@ -1,0 +1,706 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet data-dc-atomics><meta name="design_doc_mode" content="canvas"><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet"><style>body{margin:0;background:#f0eee9;font-family:Inter,system-ui,sans-serif}a{color:#2a78d6}a:hover{color:#1a5cae}.dv-turn{padding:40px 44px 32px;border-bottom:1px solid rgba(0,0,0,.08);scroll-margin-top:16px}.dv-thd{display:flex;align-items:baseline;gap:10px;margin:0 0 20px}.dv-tid{font:600 10px ui-monospace,Menlo,monospace;padding:3px 7px;background:#1a1a1a;color:#fff;border-radius:4px;text-decoration:none}.dv-tname{font:600 13px/1.2 Inter,system-ui,sans-serif;color:#1a1a1a}.dv-opts{display:flex;flex-wrap:wrap;gap:28px;align-items:flex-start}.dv-opt{flex:none;display:flex;flex-direction:column;gap:9px;scroll-margin-top:16px}.dv-oid{font:600 10.5px ui-monospace,Menlo,monospace;padding:3px 7px;background:rgba(0,0,0,.08);color:#1a1a1a;border-radius:5px;text-decoration:none}.dv-olabel{display:flex;align-items:baseline;gap:8px;font:400 11px/1.3 Inter,system-ui,sans-serif;color:rgba(0,0,0,.55)}.dv-opt:target .dv-oid{background:#2a78d6;color:#fff}.dv-next{margin:22px 0 0;font:12px/1.5 Inter,system-ui,sans-serif;color:rgba(0,0,0,.5)}.t{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px;line-height:1.5;white-space:pre;letter-spacing:0}.t div{min-height:1.5em}.c{display:inline-block}.pt{font-weight:700;margin-top:-15px;margin-bottom:6px;display:inline-block;padding:0 6px;margin-left:-2px;position:relative}.cap{font-size:10.5px;letter-spacing:.08em;margin-bottom:8px;font-family:Inter,system-ui,sans-serif}</style></helmet>
+
+<section class="dv-turn" id="t4">
+<div class="dv-thd"><a class="dv-tid" href="#t4">4</a><span class="dv-tname"><a class="dv-oid" href="#3c">3c</a> poussé en écran complet — ordre d'arrivée, détail à la sélection, vues filtrées, 80 colonnes, fin de run</span></div>
+<div class="dv-opts">
+
+<div class="dv-opt" id="4a">
+<div class="dv-olabel"><a class="dv-oid" href="#4a">4a</a>Écran complet — grille en ordre d'arrivée, ligne de détail sur la sélection</div>
+<div style="background:#0e1116;border-radius:7px;padding:12px 14px;box-shadow:0 1px 3px rgba(0,0,0,.25)">
+<div class="t" style="color:#c9d1d9">
+<div style="border:1px solid #2b323c;border-radius:4px;padding:7px 10px 8px">
+<div class="pt" style="color:#5ec8d8;background:#0e1116"> rompom · snes · 1389 roms </div>
+<div><span class="c" style="width:10ch;color:#5b6673">progress</span><span style="color:#78d18b">██████████████████████████████████</span><span style="color:#2b323c">██████</span><span class="c" style="width:7ch;color:#5b6673"> 87%</span><span class="c" style="width:15ch"><span style="color:#78d18b">✓ 418</span><span style="color:#5b6673"> new</span></span><span class="c" style="width:15ch"><span>= 771</span><span style="color:#5b6673"> same</span></span><span class="c" style="width:14ch"><span style="color:#e86a76">✗ 15</span><span style="color:#5b6673"> failed</span></span><span style="color:#e2b35c">? 1</span><span style="color:#5b6673"> to id</span></div>
+<div><span class="c" style="width:10ch;color:#5b6673">rate</span><span style="color:#5ec8d8">▄▅▆▇█▇▆▅▆▇█▇▆▅▄▅▆▇█▇▆▇█▇▆▅▄▅▆▇</span><span class="c" style="width:11ch"></span><span class="c" style="width:15ch"><span style="font-weight:700">29</span><span style="color:#5b6673"> rom/min</span></span><span class="c" style="width:15ch"><span style="font-weight:700">12.1</span><span style="color:#5b6673"> MiB/s</span></span><span class="c" style="width:14ch"><span style="color:#5b6673">eta </span><span style="font-weight:700">4m 20s</span></span><span style="color:#5b6673">7/8 workers</span></div>
+</div>
+<div style="height:8px"></div>
+<div style="border:1px solid #2b323c;border-radius:4px;padding:7px 10px 8px">
+<div class="pt" style="color:#c9d1d9;background:#0e1116"> roms · ordre d'arrivée · 1204/1389 </div>
+<div><span class="c" style="width:6ch;color:#5b6673">#</span><span class="c" style="width:30ch;color:#5b6673">rom</span><span class="c" style="width:5ch;color:#5b6673">id</span><span class="c" style="width:5ch;color:#5b6673">pkg</span><span class="c" style="width:6ch;color:#5b6673">rom</span><span class="c" style="width:27ch;color:#5b6673">≡  ▶  ▣  ▨  ▤  ◫  ▬  ◎  ❑</span><span class="c" style="width:10ch;color:#5b6673">temps</span><span style="color:#5b6673">état</span></div>
+<div><span style="color:#2b323c">────────────────────────────────────────────────────────────────────────────────────────────</span></div>
+<div><span class="c" style="width:6ch;color:#5b6673">1198</span><span class="c" style="width:30ch;color:#78d18b">Yoshi's Island</span><span class="c" style="width:5ch;color:#78d18b">✓</span><span class="c" style="width:5ch;color:#78d18b">✓</span><span class="c" style="width:6ch;color:#78d18b">✓</span><span class="c" style="width:27ch"><span style="color:#78d18b">●  ●  ●  ●  ●  ●  ●  ●</span><span style="color:#e86a76">  ○</span></span><span class="c" style="width:10ch;color:#5b6673">4.6s</span><span style="color:#5b6673">terminé</span></div>
+<div><span class="c" style="width:6ch;color:#5b6673">1199</span><span class="c" style="width:30ch;color:#e86a76">Bahamut Lagoon (J)</span><span class="c" style="width:5ch;color:#78d18b">✓</span><span class="c" style="width:5ch;color:#78d18b">✓</span><span class="c" style="width:6ch;color:#e86a76">✗</span><span class="c" style="width:27ch;color:#2b323c">·  ·  ·  ·  ·  ·  ·  ·  ·</span><span class="c" style="width:10ch;color:#5b6673">18.2s</span><span style="color:#e86a76">sha1 mismatch ×2</span></div>
+<div><span class="c" style="width:6ch;color:#5b6673">1200</span><span class="c" style="width:30ch;font-weight:700">Illusion of Gaia</span><span class="c" style="width:5ch;color:#78d18b">✓</span><span class="c" style="width:5ch;color:#78d18b">✓</span><span class="c" style="width:6ch;color:#78d18b">62%</span><span class="c" style="width:27ch;color:#2b323c">·  ·  ·  ·  ·  ·  ·  ·  ·</span><span class="c" style="width:10ch;color:#5b6673">3.1s</span><span style="color:#78d18b">rom 2.4/3.9 MiB</span></div>
+<div><span class="c" style="width:6ch;color:#5b6673">1201</span><span class="c" style="width:30ch;color:#5b6673">Kirby Super Star</span><span class="c" style="width:5ch;color:#5b6673">=</span><span class="c" style="width:5ch;color:#5b6673">=</span><span class="c" style="width:6ch;color:#5b6673">=</span><span class="c" style="width:27ch;color:#5b6673">●  ●  ●  ●  ●  ●  ●  ●  ○</span><span class="c" style="width:10ch;color:#5b6673">0.2s</span><span style="color:#5b6673">inchangé</span></div>
+<div style="background:#161c24"><span class="c" style="width:6ch;color:#e2b35c">1202</span><span class="c" style="width:30ch;color:#e2b35c;font-weight:700">▌Ganbare Goemon 2 (J)</span><span class="c" style="width:5ch;color:#e2b35c">⠴</span><span class="c" style="width:5ch;color:#2b323c">·</span><span class="c" style="width:6ch;color:#2b323c">·</span><span class="c" style="width:27ch;color:#2b323c">·  ·  ·  ·  ·  ·  ·  ·  ·</span><span class="c" style="width:10ch;color:#5b6673">42s</span><span style="color:#e2b35c">à identifier · m</span></div>
+<div style="background:#161c24"><span class="c" style="width:6ch"></span><span class="c" style="width:12ch;color:#5b6673">fichier</span><span class="c" style="width:34ch">Ganbare Goemon 2 (J) [!].sfc</span><span class="c" style="width:14ch;color:#5b6673">1.5 MiB</span><span style="color:#5b6673">source archive.org/snes_complete_us</span></div>
+<div style="background:#161c24"><span class="c" style="width:6ch"></span><span class="c" style="width:12ch;color:#5b6673">sha1</span><span class="c" style="width:48ch;color:#5b6673">3f9a1c77e04b2d8815ce6f0aa19b7c4d2e5081aa</span><span style="color:#5b6673">aucun hit hash sur screenscraper</span></div>
+<div style="background:#161c24"><span class="c" style="width:6ch"></span><span class="c" style="width:12ch;color:#5b6673">recherche</span><span class="c" style="width:48ch">4 candidats par nom · meilleur 91%</span><span><span style="color:#e2b35c">enter</span><span style="color:#5b6673"> ouvrir le modal</span></span></div>
+<div><span class="c" style="width:6ch;color:#5b6673">1203</span><span class="c" style="width:30ch;font-weight:700">Star Fox</span><span class="c" style="width:5ch;color:#78d18b">✓</span><span class="c" style="width:5ch;color:#78d18b">✓</span><span class="c" style="width:6ch;color:#78d18b">✓</span><span class="c" style="width:27ch"><span style="color:#78d18b">●  ◐</span><span style="color:#2b323c">  ·  ·  ·  ·  ·  ·  ·</span></span><span class="c" style="width:10ch;color:#5b6673">6.0s</span><span style="color:#78d18b">media 6/9 · video</span></div>
+<div><span class="c" style="width:6ch;color:#5b6673">1204</span><span class="c" style="width:30ch;font-weight:700">Earthbound</span><span class="c" style="width:5ch;color:#78d18b">✓</span><span class="c" style="width:5ch;color:#78d18b">✓</span><span class="c" style="width:6ch;color:#78d18b">✓</span><span class="c" style="width:27ch"><span style="color:#78d18b">●  ●  ●  ●  ●</span><span style="color:#5b6673">  ●  ●</span><span style="color:#78d18b">  ●  ◐</span></span><span class="c" style="width:10ch;color:#5b6673">9.4s</span><span style="color:#78d18b">media 8/9 · manual</span></div>
+<div><span class="c" style="width:6ch;color:#5b6673">1205</span><span class="c" style="width:30ch">Tetris Attack</span><span class="c" style="width:5ch;color:#78d18b">✓</span><span class="c" style="width:5ch;color:#78d18b">✓</span><span class="c" style="width:6ch;color:#e2b35c">⠏</span><span class="c" style="width:27ch;color:#2b323c">·  ·  ·  ·  ·  ·  ·  ·  ·</span><span class="c" style="width:10ch;color:#5b6673">11.7s</span><span style="color:#e2b35c">retry 1/3 · 503</span></div>
+<div><span class="c" style="width:6ch;color:#5b6673">1206</span><span class="c" style="width:30ch;font-weight:700">Super Mario RPG</span><span class="c" style="width:5ch;color:#5ec8d8">⠹</span><span class="c" style="width:5ch;color:#2b323c">·</span><span class="c" style="width:6ch;color:#2b323c">·</span><span class="c" style="width:27ch;color:#2b323c">·  ·  ·  ·  ·  ·  ·  ·  ·</span><span class="c" style="width:10ch;color:#5b6673">1.2s</span><span style="color:#5ec8d8">screenscraper</span></div>
+<div><span class="c" style="width:6ch;color:#5b6673">1207</span><span class="c" style="width:30ch;font-weight:700">Terranigma (E)</span><span class="c" style="width:5ch;color:#78d18b">✓</span><span class="c" style="width:5ch;color:#5ec8d8">⠸</span><span class="c" style="width:6ch;color:#2b323c">·</span><span class="c" style="width:27ch;color:#2b323c">·  ·  ·  ·  ·  ·  ·  ·  ·</span><span class="c" style="width:10ch;color:#5b6673">0.9s</span><span style="color:#5ec8d8">PKGBUILD</span></div>
+<div><span class="c" style="width:6ch;color:#5b6673">1208</span><span class="c" style="width:30ch;color:#5b6673">Zelda: Link to the Past</span><span class="c" style="width:5ch;color:#5b6673">·</span><span class="c" style="width:5ch;color:#2b323c">·</span><span class="c" style="width:6ch;color:#2b323c">·</span><span class="c" style="width:27ch;color:#2b323c">·  ·  ·  ·  ·  ·  ·  ·  ·</span><span class="c" style="width:10ch;color:#5b6673">—</span><span style="color:#5b6673">en file</span></div>
+<div><span class="c" style="width:6ch;color:#5b6673">1209</span><span class="c" style="width:30ch;color:#5b6673">Zombies Ate My Neighbors</span><span class="c" style="width:5ch;color:#5b6673">·</span><span class="c" style="width:5ch;color:#2b323c">·</span><span class="c" style="width:6ch;color:#2b323c">·</span><span class="c" style="width:27ch;color:#2b323c">·  ·  ·  ·  ·  ·  ·  ·  ·</span><span class="c" style="width:10ch;color:#5b6673">—</span><span style="color:#5b6673">en file</span></div>
+<div><span style="color:#2b323c">────────────────────────────────────────────────────────────────────────────────────────────</span></div>
+<div><span class="c" style="width:34ch;color:#5b6673">↑ 1197 plus haut · 181 en file ↓</span><span style="color:#78d18b">●</span><span style="color:#5b6673"> récupéré  </span><span style="color:#5b6673">●</span><span style="color:#5b6673"> déjà à jour  </span><span style="color:#e86a76">○</span><span style="color:#5b6673"> absent  </span><span style="color:#78d18b">◐</span><span style="color:#5b6673"> en cours  </span><span style="color:#2b323c">·</span><span style="color:#5b6673"> pas encore</span></div>
+</div>
+<div style="color:#5b6673;margin-top:8px"><span style="color:#5ec8d8">↑↓</span> sélection  <span style="color:#5ec8d8">enter</span> détail / modal  <span style="color:#5ec8d8">f</span> filtre  <span style="color:#5ec8d8">e</span> erreurs  <span style="color:#5ec8d8">m</span> identifications (1)  <span style="color:#5ec8d8">g/G</span> haut/bas  <span style="color:#5ec8d8">ctrl-c</span> arrêter</div>
+</div>
+</div>
+</div>
+
+<div class="dv-opt" id="4b">
+<div class="dv-olabel"><a class="dv-oid" href="#4b">4b</a>Vues filtrées et modal d'identification dans le même langage</div>
+<div style="display:flex;flex-direction:column;gap:14px">
+
+<div style="background:#0e1116;border-radius:7px;padding:12px 14px;box-shadow:0 1px 3px rgba(0,0,0,.25)">
+<div class="t" style="color:#c9d1d9"><div class="cap" style="color:#5b6673">FILTRE · ERREURS SEULES</div>
+<div style="border:1px solid #e86a76;border-radius:4px;padding:7px 10px 8px">
+<div class="pt" style="color:#e86a76;background:#0e1116"> filtre : erreurs · 15 sur 1389 </div>
+<div><span class="c" style="width:6ch;color:#5b6673">#</span><span class="c" style="width:30ch;color:#5b6673">rom</span><span class="c" style="width:5ch;color:#5b6673">id</span><span class="c" style="width:5ch;color:#5b6673">pkg</span><span class="c" style="width:6ch;color:#5b6673">rom</span><span class="c" style="width:26ch;color:#5b6673">cause</span><span style="color:#5b6673">tentatives</span></div>
+<div><span style="color:#2b323c">──────────────────────────────────────────────────────────────────────────</span></div>
+<div><span class="c" style="width:6ch;color:#5b6673">1199</span><span class="c" style="width:30ch;color:#e86a76">Bahamut Lagoon (J)</span><span class="c" style="width:5ch;color:#78d18b">✓</span><span class="c" style="width:5ch;color:#78d18b">✓</span><span class="c" style="width:6ch;color:#e86a76">✗</span><span class="c" style="width:26ch;color:#e86a76">sha1 mismatch</span><span style="color:#5b6673">2</span></div>
+<div><span class="c" style="width:6ch;color:#5b6673">1141</span><span class="c" style="width:30ch;color:#e86a76">Dragon Quest VI (J)</span><span class="c" style="width:5ch;color:#78d18b">✓</span><span class="c" style="width:5ch;color:#78d18b">✓</span><span class="c" style="width:6ch;color:#e86a76">✗</span><span class="c" style="width:26ch;color:#e86a76">sha1 mismatch</span><span style="color:#5b6673">2</span></div>
+<div><span class="c" style="width:6ch;color:#5b6673">1087</span><span class="c" style="width:30ch;color:#e86a76">Umihara Kawase</span><span class="c" style="width:5ch;color:#e86a76">✗</span><span class="c" style="width:5ch;color:#2b323c">·</span><span class="c" style="width:6ch;color:#2b323c">·</span><span class="c" style="width:26ch;color:#e86a76">absent de screenscraper</span><span style="color:#5b6673">1</span></div>
+<div><span class="c" style="width:6ch;color:#5b6673">942</span><span class="c" style="width:30ch;color:#e86a76">Front Mission (J)</span><span class="c" style="width:5ch;color:#78d18b">✓</span><span class="c" style="width:5ch;color:#78d18b">✓</span><span class="c" style="width:6ch;color:#e86a76">✗</span><span class="c" style="width:26ch;color:#e86a76">http 503 après 3 essais</span><span style="color:#5b6673">3</span></div>
+<div><span class="c" style="width:6ch;color:#5b6673">778</span><span class="c" style="width:30ch;color:#e86a76">Rendering Ranger R2</span><span class="c" style="width:5ch;color:#e86a76">✗</span><span class="c" style="width:5ch;color:#2b323c">·</span><span class="c" style="width:6ch;color:#2b323c">·</span><span class="c" style="width:26ch;color:#e86a76">absent de screenscraper</span><span style="color:#5b6673">1</span></div>
+<div><span style="color:#2b323c">──────────────────────────────────────────────────────────────────────────</span></div>
+<div><span style="color:#5b6673">9 sha1 · 4 absents · 2 http  ·  </span><span style="color:#5ec8d8">r</span><span style="color:#5b6673"> relancer la sélection  </span><span style="color:#5ec8d8">R</span><span style="color:#5b6673"> tout relancer  </span><span style="color:#5ec8d8">w</span><span style="color:#5b6673"> écrire snes.errors.log  </span><span style="color:#5ec8d8">esc</span><span style="color:#5b6673"> retour</span></div>
+</div></div>
+</div>
+
+<div style="background:#0e1116;border-radius:7px;padding:12px 14px;box-shadow:0 1px 3px rgba(0,0,0,.25)">
+<div class="t" style="color:#c9d1d9"><div class="cap" style="color:#5b6673">FILTRE · À IDENTIFIER · le run continue derrière</div>
+<div style="border:1px solid #e2b35c;border-radius:4px;padding:7px 10px 8px">
+<div class="pt" style="color:#e2b35c;background:#0e1116"> à identifier · 3 en attente </div>
+<div><span class="c" style="width:6ch;color:#5b6673">#</span><span class="c" style="width:38ch;color:#5b6673">fichier</span><span class="c" style="width:12ch;color:#5b6673">attente</span><span class="c" style="width:14ch;color:#5b6673">candidats</span><span style="color:#5b6673">meilleur score</span></div>
+<div style="background:#1c1a14"><span class="c" style="width:6ch;color:#e2b35c">1202</span><span class="c" style="width:38ch;color:#e2b35c;font-weight:700">▌Ganbare Goemon 2 (J) [!].sfc</span><span class="c" style="width:12ch;color:#5b6673">42s</span><span class="c" style="width:14ch;color:#5b6673">4</span><span style="color:#78d18b">91%</span></div>
+<div><span class="c" style="width:6ch;color:#5b6673">1178</span><span class="c" style="width:38ch">Dai-3-Ji Super Robot Taisen (J).sfc</span><span class="c" style="width:12ch;color:#5b6673">3m 10s</span><span class="c" style="width:14ch;color:#5b6673">7</span><span style="color:#e2b35c">63%</span></div>
+<div><span class="c" style="width:6ch;color:#5b6673">1155</span><span class="c" style="width:38ch">SD Gundam GX (J) [b1].sfc</span><span class="c" style="width:12ch;color:#5b6673">5m 44s</span><span class="c" style="width:14ch;color:#5b6673">0</span><span style="color:#e86a76">aucun</span></div>
+<div></div>
+<div><span style="color:#e2b35c">enter</span><span style="color:#5b6673"> ouvrir  </span><span style="color:#e2b35c">a</span><span style="color:#5b6673"> accepter tous les ≥90%  </span><span style="color:#e2b35c">s</span><span style="color:#5b6673"> passer  </span><span style="color:#e2b35c">esc</span><span style="color:#5b6673"> retour à la grille</span></div>
+</div></div>
+</div>
+
+<div style="background:#0e1116;border-radius:7px;padding:12px 14px;box-shadow:0 1px 3px rgba(0,0,0,.25)">
+<div class="t" style="color:#c9d1d9"><div class="cap" style="color:#5b6673">MODAL D'IDENTIFICATION · colonnes médias de la grille reprises</div>
+<div style="border:1px solid #e2b35c;border-radius:4px;padding:7px 10px 8px">
+<div class="pt" style="color:#e2b35c;background:#0e1116"> identifier · 1202 · Ganbare Goemon 2 (J) [!].sfc </div>
+<div><span class="c" style="width:10ch;color:#5b6673">sha1</span><span class="c" style="width:44ch;color:#5b6673">3f9a1c77e04b2d8815ce6f0aa19b7c4d2e5081aa</span><span style="color:#5b6673">1.5 MiB · aucun hit hash</span></div>
+<div></div>
+<div><span class="c" style="width:2ch;color:#5b6673"></span><span class="c" style="width:36ch;color:#5b6673">candidat</span><span class="c" style="width:7ch;color:#5b6673">année</span><span class="c" style="width:9ch;color:#5b6673">id</span><span class="c" style="width:27ch;color:#5b6673">≡  ▶  ▣  ▨  ▤  ◫  ▬  ◎  ❑</span><span style="color:#5b6673">score</span></div>
+<div style="background:#1c1a14"><span class="c" style="width:2ch;color:#e2b35c">▶</span><span class="c" style="width:36ch;color:#e2b35c;font-weight:700">Ganbare Goemon 2: Kiteretsu Shougun</span><span class="c" style="width:7ch">1993</span><span class="c" style="width:9ch;color:#5b6673">149021</span><span class="c" style="width:27ch"><span style="color:#78d18b">●  ●  ●  ●  ●  ●  ●  ●</span><span style="color:#e86a76">  ○</span></span><span style="color:#78d18b">91%</span></div>
+<div><span class="c" style="width:2ch"></span><span class="c" style="width:36ch">Ganbare Goemon: Yukihime Kyuushutsu</span><span class="c" style="width:7ch">1991</span><span class="c" style="width:9ch;color:#5b6673">148990</span><span class="c" style="width:27ch"><span style="color:#78d18b">●  ●  ●  ●  ●</span><span style="color:#e86a76">  ○  ○</span><span style="color:#78d18b">  ●</span><span style="color:#e86a76">  ○</span></span><span style="color:#e2b35c">54%</span></div>
+<div><span class="c" style="width:2ch"></span><span class="c" style="width:36ch">Ganbare Goemon 3</span><span class="c" style="width:7ch">1994</span><span class="c" style="width:9ch;color:#5b6673">149044</span><span class="c" style="width:27ch"><span style="color:#78d18b">●  ●  ●  ●  ●  ●  ●  ●</span><span style="color:#e86a76">  ○</span></span><span style="color:#e2b35c">47%</span></div>
+<div><span class="c" style="width:2ch"></span><span class="c" style="width:36ch">Mystical Ninja Starring Goemon</span><span class="c" style="width:7ch">1997</span><span class="c" style="width:9ch;color:#5b6673">151202</span><span class="c" style="width:27ch"><span style="color:#78d18b">●  ●  ●</span><span style="color:#e86a76">  ○  ○  ○  ○</span><span style="color:#78d18b">  ●</span><span style="color:#e86a76">  ○</span></span><span style="color:#e86a76">22%</span></div>
+<div></div>
+<div><span class="c" style="width:10ch;color:#5b6673">sélection</span><span>Konami · action-aventure · 2 joueurs · JP · 8 médias disponibles</span></div>
+<div><span style="color:#e2b35c">↑↓</span><span style="color:#5b6673"> naviguer  </span><span style="color:#e2b35c">enter</span><span style="color:#5b6673"> confirmer  </span><span style="color:#e2b35c">i</span><span style="color:#5b6673"> saisir un id  </span><span style="color:#e2b35c">/</span><span style="color:#5b6673"> relancer la recherche  </span><span style="color:#e2b35c">s</span><span style="color:#5b6673"> passer  </span><span style="color:#e2b35c">esc</span><span style="color:#5b6673"> plus tard</span></div>
+</div></div>
+</div>
+
+</div>
+</div>
+
+<div class="dv-opt" id="4c">
+<div class="dv-olabel"><a class="dv-oid" href="#4c">4c</a>80 colonnes et fin de run</div>
+<div style="display:flex;flex-direction:column;gap:14px">
+
+<div style="background:#0e1116;border-radius:7px;padding:12px 14px;box-shadow:0 1px 3px rgba(0,0,0,.25)">
+<div class="t" style="color:#c9d1d9"><div class="cap" style="color:#5b6673">4a EN 80 COLONNES · colonne temps retirée, médias resserrés</div>
+<div style="border:1px solid #2b323c;border-radius:4px;padding:7px 10px 8px;width:80ch">
+<div class="pt" style="color:#5ec8d8;background:#0e1116"> snes · 87% </div>
+<div><span style="color:#78d18b">████████████████████████████</span><span style="color:#2b323c">████</span><span style="color:#5b6673"> 1204/1389 · 29/min · eta 4m20s</span></div>
+<div><span style="color:#5ec8d8">▄▅▆▇█▇▆▅▆▇█▇▆▅▄▅▆▇█▇▆▇█▇▆▅▄▅▆▇</span><span style="color:#5b6673">  </span><span style="color:#78d18b">✓418</span><span style="color:#5b6673"> </span><span>=771</span><span style="color:#5b6673"> </span><span style="color:#e86a76">✗15</span><span style="color:#5b6673"> </span><span style="color:#e2b35c">?1</span><span style="color:#5b6673"> · 12.1 MiB/s</span></div>
+</div>
+<div style="height:8px"></div>
+<div style="border:1px solid #2b323c;border-radius:4px;padding:7px 10px 8px;width:80ch">
+<div class="pt" style="color:#c9d1d9;background:#0e1116"> roms </div>
+<div><span class="c" style="width:26ch;color:#5b6673">rom</span><span class="c" style="width:4ch;color:#5b6673">id</span><span class="c" style="width:4ch;color:#5b6673">pkg</span><span class="c" style="width:5ch;color:#5b6673">rom</span><span class="c" style="width:20ch;color:#5b6673">≡ ▶ ▣ ▨ ▤ ◫ ▬ ◎ ❑</span><span style="color:#5b6673">état</span></div>
+<div><span class="c" style="width:26ch;color:#78d18b">Yoshi's Island</span><span class="c" style="width:4ch;color:#78d18b">✓</span><span class="c" style="width:4ch;color:#78d18b">✓</span><span class="c" style="width:5ch;color:#78d18b">✓</span><span class="c" style="width:20ch"><span style="color:#78d18b">● ● ● ● ● ● ● ●</span><span style="color:#e86a76"> ○</span></span><span style="color:#5b6673">ok</span></div>
+<div><span class="c" style="width:26ch;color:#e86a76">Bahamut Lagoon (J)</span><span class="c" style="width:4ch;color:#78d18b">✓</span><span class="c" style="width:4ch;color:#78d18b">✓</span><span class="c" style="width:5ch;color:#e86a76">✗</span><span class="c" style="width:20ch;color:#2b323c">· · · · · · · · ·</span><span style="color:#e86a76">sha1</span></div>
+<div style="background:#161c24"><span class="c" style="width:26ch;color:#e2b35c;font-weight:700">▌Ganbare Goemon 2 (J)</span><span class="c" style="width:4ch;color:#e2b35c">⠴</span><span class="c" style="width:4ch;color:#2b323c">·</span><span class="c" style="width:5ch;color:#2b323c">·</span><span class="c" style="width:20ch;color:#2b323c">· · · · · · · · ·</span><span style="color:#e2b35c">id · m</span></div>
+<div><span class="c" style="width:26ch">Illusion of Gaia</span><span class="c" style="width:4ch;color:#78d18b">✓</span><span class="c" style="width:4ch;color:#78d18b">✓</span><span class="c" style="width:5ch;color:#78d18b">62%</span><span class="c" style="width:20ch;color:#2b323c">· · · · · · · · ·</span><span style="color:#78d18b">rom</span></div>
+<div><span class="c" style="width:26ch">Earthbound</span><span class="c" style="width:4ch;color:#78d18b">✓</span><span class="c" style="width:4ch;color:#78d18b">✓</span><span class="c" style="width:5ch;color:#78d18b">✓</span><span class="c" style="width:20ch"><span style="color:#78d18b">● ● ● ● ●</span><span style="color:#5b6673"> ● ●</span><span style="color:#78d18b"> ● ◐</span></span><span style="color:#78d18b">8/9</span></div>
+<div><span class="c" style="width:26ch">Super Mario RPG</span><span class="c" style="width:4ch;color:#5ec8d8">⠹</span><span class="c" style="width:4ch;color:#2b323c">·</span><span class="c" style="width:5ch;color:#2b323c">·</span><span class="c" style="width:20ch;color:#2b323c">· · · · · · · · ·</span><span style="color:#5ec8d8">scrap</span></div>
+<div><span class="c" style="width:26ch;color:#5b6673">Zelda: Link to the Past</span><span class="c" style="width:4ch;color:#5b6673">·</span><span class="c" style="width:4ch;color:#2b323c">·</span><span class="c" style="width:5ch;color:#2b323c">·</span><span class="c" style="width:20ch;color:#2b323c">· · · · · · · · ·</span><span style="color:#5b6673">file</span></div>
+</div>
+<div style="color:#5b6673;margin-top:8px;width:80ch"><span style="color:#5ec8d8">↑↓</span> sél  <span style="color:#5ec8d8">enter</span> détail  <span style="color:#5ec8d8">f</span> filtre  <span style="color:#5ec8d8">e</span> erreurs  <span style="color:#5ec8d8">m</span> id (1)  <span style="color:#5ec8d8">ctrl-c</span> stop</div>
+</div>
+</div>
+
+<div style="background:#0e1116;border-radius:7px;padding:12px 14px;box-shadow:0 1px 3px rgba(0,0,0,.25)">
+<div class="t" style="color:#c9d1d9"><div class="cap" style="color:#5b6673">FIN DE RUN · la grille reste, le bandeau devient bilan</div>
+<div style="border:1px solid #78d18b;border-radius:4px;padding:7px 10px 8px">
+<div class="pt" style="color:#78d18b;background:#0e1116"> run terminé · snes · 1389 roms · 41m 12s </div>
+<div><span class="c" style="width:10ch;color:#5b6673">résultat</span><span style="color:#78d18b">██████████████████████████████████████</span><span style="color:#e86a76">██</span><span class="c" style="width:7ch;color:#5b6673"> 99%</span><span class="c" style="width:15ch"><span style="color:#78d18b">✓ 418</span><span style="color:#5b6673"> new</span></span><span class="c" style="width:15ch"><span>= 956</span><span style="color:#5b6673"> same</span></span><span><span style="color:#e86a76">✗ 15</span><span style="color:#5b6673"> failed</span></span></div>
+<div><span class="c" style="width:10ch;color:#5b6673">débit</span><span style="color:#5ec8d8">▄▅▆▇█▇▆▅▆▇█▇▆▅▄▅▆▇█▇▆▇█▇▆▅▄▅▆▇</span><span class="c" style="width:11ch"></span><span class="c" style="width:15ch"><span style="font-weight:700">34</span><span style="color:#5b6673"> rom/min</span></span><span class="c" style="width:15ch"><span style="font-weight:700">29.2</span><span style="color:#5b6673"> GiB</span></span><span style="color:#5b6673">12.1 MiB/s moyen</span></div>
+</div>
+<div style="height:8px"></div>
+<div style="border:1px solid #2b323c;border-radius:4px;padding:7px 10px 8px">
+<div class="pt" style="color:#5b6673;background:#0e1116;font-weight:400"> couverture médias · 1374 identifiés </div>
+<div><span class="c" style="width:3ch;color:#5ec8d8">≡</span><span class="c" style="width:13ch">description</span><span style="color:#78d18b">████████████████████</span><span class="c" style="width:9ch;color:#5b6673"> 100%</span><span class="c" style="width:3ch;color:#5ec8d8">◫</span><span class="c" style="width:11ch">bezel</span><span style="color:#e2b35c">████</span><span style="color:#2b323c">████████████████</span><span style="color:#5b6673"> 19%</span></div>
+<div><span class="c" style="width:3ch;color:#5ec8d8">▶</span><span class="c" style="width:13ch">video</span><span style="color:#78d18b">███████████████</span><span style="color:#2b323c">█████</span><span class="c" style="width:9ch;color:#5b6673"> 74%</span><span class="c" style="width:3ch;color:#5ec8d8">▬</span><span class="c" style="width:11ch">marquee</span><span style="color:#78d18b">█████████████</span><span style="color:#2b323c">███████</span><span style="color:#5b6673"> 66%</span></div>
+<div><span class="c" style="width:3ch;color:#5ec8d8">▣</span><span class="c" style="width:13ch">image</span><span style="color:#78d18b">███████████████████</span><span style="color:#2b323c">█</span><span class="c" style="width:9ch;color:#5b6673"> 97%</span><span class="c" style="width:3ch;color:#5ec8d8">◎</span><span class="c" style="width:11ch">wheel</span><span style="color:#78d18b">█████████████████</span><span style="color:#2b323c">███</span><span style="color:#5b6673"> 88%</span></div>
+<div><span class="c" style="width:3ch;color:#5ec8d8">▨</span><span class="c" style="width:13ch">thumbnail</span><span style="color:#78d18b">██████████████████</span><span style="color:#2b323c">██</span><span class="c" style="width:9ch;color:#5b6673"> 93%</span><span class="c" style="width:3ch;color:#5ec8d8">❑</span><span class="c" style="width:11ch">manual</span><span style="color:#e2b35c">██</span><span style="color:#2b323c">██████████████████</span><span style="color:#5b6673"> 11%</span></div>
+<div><span class="c" style="width:3ch;color:#5ec8d8">▤</span><span class="c" style="width:13ch">screenshot</span><span style="color:#78d18b">██████████████████</span><span style="color:#2b323c">██</span><span class="c" style="width:9ch;color:#5b6673"> 91%</span></div>
+</div>
+<div style="height:8px"></div>
+<div><span style="color:#e86a76">✗ 15 échecs</span><span style="color:#5b6673"> · 9 sha1 · 4 absents · 2 http 503 · </span><span style="color:#5ec8d8">e</span><span style="color:#5b6673"> les voir  </span><span style="color:#5ec8d8">R</span><span style="color:#5b6673"> tout relancer</span></div>
+<div><span style="color:#5b6673">suite · </span><span>cd snes &amp;&amp; makepkg</span><span style="color:#5b6673">   ·   </span><span>repo-add roms.db.tar.gz snes/*.pkg.tar.zst</span><span style="color:#5b6673">   ·   </span><span style="color:#5ec8d8">q</span><span style="color:#5b6673"> quitter</span></div>
+</div>
+</div>
+
+</div>
+</div>
+
+</div>
+<p class="dv-next">Try next : "colle la ligne de détail de <a class="dv-oid" href="#4a">4a</a> en bas d'écran plutôt qu'inline" · "montre <a class="dv-oid" href="#4a">4a</a> avec 40 lignes" · "durcis les couleurs d'état"</p>
+</section>
+
+<section class="dv-turn" id="t3">
+<div class="dv-thd"><a class="dv-tid" href="#t3">3</a><span class="dv-tname">Sans découpe discovery/downloads — une seule liste de ROMs en cours, avec l'avancement de chacun</span></div>
+<div class="dv-opts">
+
+<div class="dv-opt" id="3a">
+<div class="dv-olabel"><a class="dv-oid" href="#3a">3a</a>Piste par étapes — chaque ROM porte son pipeline complet</div>
+<div style="background:#0e1116;border-radius:7px;padding:12px 14px;box-shadow:0 1px 3px rgba(0,0,0,.25)">
+<div class="t" style="color:#c9d1d9">
+<div style="border:1px solid #2b323c;border-radius:4px;padding:7px 10px 8px">
+<div class="pt" style="color:#5ec8d8;background:#0e1116"> rompom · snes · 87% · 29/min · eta 4m 20s </div>
+<div><span class="c" style="width:26ch;color:#5b6673">1204/1389</span><span class="c" style="width:12ch;color:#5b6673">identify</span><span class="c" style="width:10ch;color:#5b6673">package</span><span class="c" style="width:14ch;color:#5b6673">rom</span><span class="c" style="width:20ch;color:#5b6673">media</span><span style="color:#5b6673">state</span></div>
+<div></div>
+<div><span class="c" style="width:26ch;color:#e2b35c;font-weight:700">⠴ Ganbare Goemon 2 (J)</span><span class="c" style="width:12ch"><span style="color:#e2b35c">███</span><span style="color:#2b323c">██████</span></span><span class="c" style="width:10ch;color:#2b323c">███████</span><span class="c" style="width:14ch;color:#2b323c">███████████</span><span class="c" style="width:20ch;color:#2b323c">█████████████████</span><span style="color:#e2b35c">à identifier · m</span></div>
+<div><span class="c" style="width:26ch;font-weight:700">⠹ Super Mario RPG</span><span class="c" style="width:12ch"><span style="color:#5ec8d8">██████</span><span style="color:#2b323c">███</span></span><span class="c" style="width:10ch;color:#2b323c">███████</span><span class="c" style="width:14ch;color:#2b323c">███████████</span><span class="c" style="width:20ch;color:#2b323c">█████████████████</span><span style="color:#5ec8d8">screenscraper 1.2s</span></div>
+<div><span class="c" style="width:26ch;font-weight:700">⠸ Terranigma (E)</span><span class="c" style="width:12ch;color:#5ec8d8">█████████</span><span class="c" style="width:10ch"><span style="color:#5ec8d8">█████</span><span style="color:#2b323c">██</span></span><span class="c" style="width:14ch;color:#2b323c">███████████</span><span class="c" style="width:20ch;color:#2b323c">█████████████████</span><span style="color:#5ec8d8">PKGBUILD</span></div>
+<div><span class="c" style="width:26ch;font-weight:700">⠼ Illusion of Gaia</span><span class="c" style="width:12ch;color:#5ec8d8">█████████</span><span class="c" style="width:10ch;color:#5ec8d8">███████</span><span class="c" style="width:14ch"><span style="color:#78d18b">███████</span><span style="color:#2b323c">████</span></span><span class="c" style="width:20ch;color:#2b323c">█████████████████</span><span style="color:#5b6673">rom 2.4/3.9 MiB</span></div>
+<div><span class="c" style="width:26ch;font-weight:700">⠧ Star Fox</span><span class="c" style="width:12ch;color:#5ec8d8">█████████</span><span class="c" style="width:10ch;color:#5ec8d8">███████</span><span class="c" style="width:14ch;color:#78d18b">███████████</span><span class="c" style="width:20ch"><span style="color:#78d18b">██████████</span><span style="color:#2b323c">███████</span></span><span style="color:#5b6673">video 6/9</span></div>
+<div><span class="c" style="width:26ch;font-weight:700">⠇ Earthbound</span><span class="c" style="width:12ch;color:#5ec8d8">█████████</span><span class="c" style="width:10ch;color:#5ec8d8">███████</span><span class="c" style="width:14ch;color:#78d18b">███████████</span><span class="c" style="width:20ch"><span style="color:#78d18b">███████████████</span><span style="color:#2b323c">██</span></span><span style="color:#5b6673">manual 8/9</span></div>
+<div><span class="c" style="width:26ch">⠏ Tetris Attack</span><span class="c" style="width:12ch;color:#5ec8d8">█████████</span><span class="c" style="width:10ch;color:#5ec8d8">███████</span><span class="c" style="width:14ch"><span style="color:#e2b35c">████</span><span style="color:#2b323c">███████</span></span><span class="c" style="width:20ch;color:#2b323c">█████████████████</span><span style="color:#e2b35c">retry 1/3 · 503</span></div>
+<div><span class="c" style="width:26ch;color:#e86a76">✗ Bahamut Lagoon (J)</span><span class="c" style="width:12ch;color:#5ec8d8">█████████</span><span class="c" style="width:10ch;color:#5ec8d8">███████</span><span class="c" style="width:14ch;color:#e86a76">███████████</span><span class="c" style="width:20ch;color:#2b323c">█████████████████</span><span style="color:#e86a76">sha1 mismatch ×2</span></div>
+<div><span style="color:#2b323c">──────────────────────────────────────────────────────────────────────────────────────────────</span></div>
+<div><span class="c" style="width:26ch;color:#78d18b">✓ Yoshi's Island</span><span class="c" style="width:36ch"><span style="color:#78d18b">≡ ▶ ▣ ▨ ▤ ◫ ▬ ◎</span><span style="color:#e86a76"> ❑</span></span><span style="color:#5b6673">4.0 MiB · 4.6s</span></div>
+<div><span class="c" style="width:26ch;color:#5b6673">= Kirby Super Star</span><span class="c" style="width:36ch;color:#5b6673">≡ ▶ ▣ ▨ ▤ ◫ ▬ ◎</span><span style="color:#5b6673">3.9 MiB · 0.2s</span></div>
+<div><span class="c" style="width:26ch;color:#78d18b">✓ Secret of Mana</span><span class="c" style="width:36ch"><span style="color:#78d18b">≡ ▶ ▣ ▨ ▤ ◫ ▬</span><span style="color:#e86a76"> ◎</span></span><span style="color:#5b6673">2.0 MiB · 2.9s</span></div>
+<div><span class="c" style="width:26ch;color:#5b6673">= Super Mario Kart</span><span class="c" style="width:36ch;color:#5b6673">≡ ▶ ▣ ▨ ▤ ◫ ▬ ◎ ❑</span><span style="color:#5b6673">0.5 MiB · 0.1s</span></div>
+<div><span class="c" style="width:26ch;color:#78d18b">✓ Super Metroid</span><span class="c" style="width:36ch;color:#78d18b">≡ ▶ ▣ ▨ ▤ ◫ ▬ ◎</span><span style="color:#5b6673">1.8 MiB · 2.4s</span></div>
+</div>
+<div style="color:#5b6673;margin-top:8px"><span style="color:#5ec8d8">f</span> filter  <span style="color:#5ec8d8">e</span> errors  <span style="color:#5ec8d8">m</span> identify (1)  <span style="color:#5ec8d8">↑↓</span> scroll  <span style="color:#5ec8d8">ctrl-c</span> abort</div>
+</div>
+</div>
+</div>
+
+<div class="dv-opt" id="3b">
+<div class="dv-olabel"><a class="dv-oid" href="#3b">3b</a>Une barre par ROM — étape courante en toutes lettres</div>
+<div style="background:#0e1116;border-radius:7px;padding:12px 14px;box-shadow:0 1px 3px rgba(0,0,0,.25)">
+<div class="t" style="color:#c9d1d9">
+<div style="border:1px solid #2b323c;border-radius:4px;padding:7px 10px 8px">
+<div class="pt" style="color:#5ec8d8;background:#0e1116"> en cours · 7 sur 8 workers </div>
+<div><span class="c" style="width:28ch;color:#e2b35c;font-weight:700">⠴ Ganbare Goemon 2 (J)</span><span class="c" style="width:28ch"><span style="color:#e2b35c">███</span><span style="color:#2b323c">███████████████████████</span></span><span class="c" style="width:22ch;color:#e2b35c">identification</span><span style="color:#e2b35c">en attente de toi</span></div>
+<div><span class="c" style="width:28ch;font-weight:700">⠹ Super Mario RPG</span><span class="c" style="width:28ch"><span style="color:#5ec8d8">████</span><span style="color:#2b323c">██████████████████████</span></span><span class="c" style="width:22ch;color:#5ec8d8">screenscraper</span><span style="color:#5b6673">1.2s</span></div>
+<div><span class="c" style="width:28ch;font-weight:700">⠸ Terranigma (E)</span><span class="c" style="width:28ch"><span style="color:#5ec8d8">███████</span><span style="color:#2b323c">███████████████████</span></span><span class="c" style="width:22ch;color:#5ec8d8">PKGBUILD</span><span style="color:#5b6673">0.1s</span></div>
+<div><span class="c" style="width:28ch;font-weight:700">⠼ Illusion of Gaia</span><span class="c" style="width:28ch"><span style="color:#78d18b">█████████████</span><span style="color:#2b323c">█████████████</span></span><span class="c" style="width:22ch;color:#78d18b">rom 2.4/3.9 MiB</span><span style="color:#5b6673">4.1 MiB/s</span></div>
+<div><span class="c" style="width:28ch;font-weight:700">⠧ Star Fox</span><span class="c" style="width:28ch"><span style="color:#78d18b">███████████████████</span><span style="color:#2b323c">███████</span></span><span class="c" style="width:22ch;color:#78d18b">media 6/9 · video</span><span style="color:#5b6673">2.8 MiB/s</span></div>
+<div><span class="c" style="width:28ch;font-weight:700">⠇ Earthbound</span><span class="c" style="width:28ch"><span style="color:#78d18b">████████████████████████</span><span style="color:#2b323c">██</span></span><span class="c" style="width:22ch;color:#78d18b">media 8/9 · manual</span><span style="color:#5b6673">1.1 MiB/s</span></div>
+<div><span class="c" style="width:28ch">⠏ Tetris Attack</span><span class="c" style="width:28ch"><span style="color:#e2b35c">██████████</span><span style="color:#2b323c">████████████████</span></span><span class="c" style="width:22ch;color:#e2b35c">retry 1/3 · http 503</span><span style="color:#5b6673">dans 4s</span></div>
+<div><span class="c" style="width:28ch;color:#5b6673">· Zelda: Link to the Past</span><span class="c" style="width:28ch;color:#2b323c">██████████████████████████</span><span class="c" style="width:22ch;color:#5b6673">en file</span><span style="color:#5b6673">—</span></div>
+</div>
+<div style="height:8px"></div>
+<div style="border:1px solid #2b323c;border-radius:4px;padding:7px 10px 8px">
+<div class="pt" style="color:#c9d1d9;background:#0e1116"> terminés · 1204 / 1389 · 87% </div>
+<div><span style="color:#78d18b">██████████████████████████████████</span><span style="color:#2b323c">██████</span><span style="color:#5b6673">  </span><span style="color:#78d18b">✓ 418</span><span style="color:#5b6673"> · </span><span>= 771</span><span style="color:#5b6673"> · </span><span style="color:#e86a76">✗ 15</span><span style="color:#5b6673">  ·  29/min  ·  eta 4m 20s</span></div>
+<div></div>
+<div><span class="c" style="width:3ch;color:#78d18b">✓</span><span class="c" style="width:32ch">Yoshi's Island</span><span class="c" style="width:24ch"><span style="color:#78d18b">≡ ▶ ▣ ▨ ▤ ◫ ▬ ◎</span><span style="color:#e86a76"> ❑</span></span><span class="c" style="width:12ch;color:#5b6673">4.0 MiB</span><span style="color:#5b6673">4.6s</span></div>
+<div><span class="c" style="width:3ch;color:#e86a76">✗</span><span class="c" style="width:32ch;color:#e86a76">Bahamut Lagoon (J)</span><span class="c" style="width:24ch;color:#e86a76">sha1 mismatch ×2</span><span class="c" style="width:12ch;color:#5b6673">—</span><span style="color:#5b6673">18.2s</span></div>
+<div><span class="c" style="width:3ch;color:#5b6673">=</span><span class="c" style="width:32ch;color:#5b6673">Kirby Super Star</span><span class="c" style="width:24ch;color:#5b6673">≡ ▶ ▣ ▨ ▤ ◫ ▬ ◎</span><span class="c" style="width:12ch;color:#5b6673">3.9 MiB</span><span style="color:#5b6673">0.2s</span></div>
+<div><span class="c" style="width:3ch;color:#78d18b">✓</span><span class="c" style="width:32ch">Secret of Mana</span><span class="c" style="width:24ch"><span style="color:#78d18b">≡ ▶ ▣ ▨ ▤ ◫ ▬</span><span style="color:#e86a76"> ◎</span></span><span class="c" style="width:12ch;color:#5b6673">2.0 MiB</span><span style="color:#5b6673">2.9s</span></div>
+<div><span class="c" style="width:3ch;color:#5b6673">=</span><span class="c" style="width:32ch;color:#5b6673">Super Mario Kart</span><span class="c" style="width:24ch;color:#5b6673">≡ ▶ ▣ ▨ ▤ ◫ ▬ ◎ ❑</span><span class="c" style="width:12ch;color:#5b6673">0.5 MiB</span><span style="color:#5b6673">0.1s</span></div>
+<div><span class="c" style="width:3ch;color:#78d18b">✓</span><span class="c" style="width:32ch">Super Metroid</span><span class="c" style="width:24ch;color:#78d18b">≡ ▶ ▣ ▨ ▤ ◫ ▬ ◎</span><span class="c" style="width:12ch;color:#5b6673">1.8 MiB</span><span style="color:#5b6673">2.4s</span></div>
+</div>
+<div style="color:#5b6673;margin-top:8px"><span style="color:#5ec8d8">f</span> filter  <span style="color:#5ec8d8">e</span> errors  <span style="color:#5ec8d8">m</span> identify (1)  <span style="color:#5ec8d8">↑↓</span> scroll  <span style="color:#5ec8d8">ctrl-c</span> abort</div>
+</div>
+</div>
+</div>
+
+<div class="dv-opt" id="3c">
+<div class="dv-olabel"><a class="dv-oid" href="#3c">3c</a>Grille dense — une colonne par étape, un point par média</div>
+<div style="background:#0e1116;border-radius:7px;padding:12px 14px;box-shadow:0 1px 3px rgba(0,0,0,.25)">
+<div class="t" style="color:#c9d1d9">
+<div style="border:1px solid #2b323c;border-radius:4px;padding:7px 10px 8px">
+<div class="pt" style="color:#5ec8d8;background:#0e1116"> snes · 1204/1389 · 29/min · eta 4m 20s </div>
+<div><span class="c" style="width:30ch;color:#5b6673">rom</span><span class="c" style="width:5ch;color:#5b6673">id</span><span class="c" style="width:5ch;color:#5b6673">pkg</span><span class="c" style="width:5ch;color:#5b6673">rom</span><span class="c" style="width:22ch;color:#5b6673">≡ ▶ ▣ ▨ ▤ ◫ ▬ ◎ ❑</span><span style="color:#5b6673">état</span></div>
+<div><span style="color:#2b323c">──────────────────────────────────────────────────────────────────────────────────</span></div>
+<div><span class="c" style="width:30ch;color:#e2b35c;font-weight:700">Ganbare Goemon 2 (J)</span><span class="c" style="width:5ch;color:#e2b35c">⠴</span><span class="c" style="width:5ch;color:#2b323c">·</span><span class="c" style="width:5ch;color:#2b323c">·</span><span class="c" style="width:22ch;color:#2b323c">· · · · · · · · ·</span><span style="color:#e2b35c">à identifier · m</span></div>
+<div><span class="c" style="width:30ch;font-weight:700">Super Mario RPG</span><span class="c" style="width:5ch;color:#5ec8d8">⠹</span><span class="c" style="width:5ch;color:#2b323c">·</span><span class="c" style="width:5ch;color:#2b323c">·</span><span class="c" style="width:22ch;color:#2b323c">· · · · · · · · ·</span><span style="color:#5ec8d8">screenscraper 1.2s</span></div>
+<div><span class="c" style="width:30ch;font-weight:700">Terranigma (E)</span><span class="c" style="width:5ch;color:#78d18b">✓</span><span class="c" style="width:5ch;color:#5ec8d8">⠸</span><span class="c" style="width:5ch;color:#2b323c">·</span><span class="c" style="width:22ch;color:#2b323c">· · · · · · · · ·</span><span style="color:#5ec8d8">PKGBUILD</span></div>
+<div><span class="c" style="width:30ch;font-weight:700">Illusion of Gaia</span><span class="c" style="width:5ch;color:#78d18b">✓</span><span class="c" style="width:5ch;color:#78d18b">✓</span><span class="c" style="width:5ch;color:#78d18b">62%</span><span class="c" style="width:22ch;color:#2b323c">· · · · · · · · ·</span><span style="color:#5b6673">rom 2.4/3.9 MiB</span></div>
+<div><span class="c" style="width:30ch;font-weight:700">Star Fox</span><span class="c" style="width:5ch;color:#78d18b">✓</span><span class="c" style="width:5ch;color:#78d18b">✓</span><span class="c" style="width:5ch;color:#78d18b">✓</span><span class="c" style="width:22ch"><span style="color:#78d18b">● ◐</span><span style="color:#2b323c"> · · · · · · ·</span></span><span style="color:#78d18b">video 6/9</span></div>
+<div><span class="c" style="width:30ch;font-weight:700">Earthbound</span><span class="c" style="width:5ch;color:#78d18b">✓</span><span class="c" style="width:5ch;color:#78d18b">✓</span><span class="c" style="width:5ch;color:#78d18b">✓</span><span class="c" style="width:22ch"><span style="color:#78d18b">● ● ● ● ●</span><span style="color:#5b6673"> ○ ●</span><span style="color:#78d18b"> ●</span><span style="color:#78d18b"> ◐</span></span><span style="color:#78d18b">manual 8/9</span></div>
+<div><span class="c" style="width:30ch">Tetris Attack</span><span class="c" style="width:5ch;color:#78d18b">✓</span><span class="c" style="width:5ch;color:#78d18b">✓</span><span class="c" style="width:5ch;color:#e2b35c">⠏</span><span class="c" style="width:22ch;color:#2b323c">· · · · · · · · ·</span><span style="color:#e2b35c">retry 1/3 · 503</span></div>
+<div><span class="c" style="width:30ch;color:#e86a76">Bahamut Lagoon (J)</span><span class="c" style="width:5ch;color:#78d18b">✓</span><span class="c" style="width:5ch;color:#78d18b">✓</span><span class="c" style="width:5ch;color:#e86a76">✗</span><span class="c" style="width:22ch;color:#2b323c">· · · · · · · · ·</span><span style="color:#e86a76">sha1 mismatch ×2</span></div>
+<div><span class="c" style="width:30ch;color:#5b6673">Zelda: Link to the Past</span><span class="c" style="width:5ch;color:#5b6673">·</span><span class="c" style="width:5ch;color:#2b323c">·</span><span class="c" style="width:5ch;color:#2b323c">·</span><span class="c" style="width:22ch;color:#2b323c">· · · · · · · · ·</span><span style="color:#5b6673">en file</span></div>
+<div><span style="color:#2b323c">──────────────────────────────────────────────────────────────────────────────────</span></div>
+<div><span class="c" style="width:30ch;color:#78d18b">Yoshi's Island</span><span class="c" style="width:5ch;color:#78d18b">✓</span><span class="c" style="width:5ch;color:#78d18b">✓</span><span class="c" style="width:5ch;color:#78d18b">✓</span><span class="c" style="width:22ch"><span style="color:#78d18b">● ● ● ● ● ● ● ●</span><span style="color:#e86a76"> ○</span></span><span style="color:#5b6673">4.6s</span></div>
+<div><span class="c" style="width:30ch;color:#5b6673">Kirby Super Star</span><span class="c" style="width:5ch;color:#5b6673">=</span><span class="c" style="width:5ch;color:#5b6673">=</span><span class="c" style="width:5ch;color:#5b6673">=</span><span class="c" style="width:22ch;color:#5b6673">● ● ● ● ● ● ● ● ○</span><span style="color:#5b6673">0.2s</span></div>
+<div><span class="c" style="width:30ch;color:#78d18b">Secret of Mana</span><span class="c" style="width:5ch;color:#78d18b">✓</span><span class="c" style="width:5ch;color:#78d18b">✓</span><span class="c" style="width:5ch;color:#78d18b">✓</span><span class="c" style="width:22ch"><span style="color:#78d18b">● ● ● ● ● ● ●</span><span style="color:#e86a76"> ○ ○</span></span><span style="color:#5b6673">2.9s</span></div>
+<div><span class="c" style="width:30ch;color:#5b6673">Super Mario Kart</span><span class="c" style="width:5ch;color:#5b6673">=</span><span class="c" style="width:5ch;color:#5b6673">=</span><span class="c" style="width:5ch;color:#5b6673">=</span><span class="c" style="width:22ch;color:#5b6673">● ● ● ● ● ● ● ● ●</span><span style="color:#5b6673">0.1s</span></div>
+<div><span class="c" style="width:30ch;color:#78d18b">Super Metroid</span><span class="c" style="width:5ch;color:#78d18b">✓</span><span class="c" style="width:5ch;color:#78d18b">✓</span><span class="c" style="width:5ch;color:#78d18b">✓</span><span class="c" style="width:22ch"><span style="color:#78d18b">● ● ● ● ● ● ● ●</span><span style="color:#e86a76"> ○</span></span><span style="color:#5b6673">2.4s</span></div>
+</div>
+<div style="color:#5b6673;margin-top:8px"><span style="color:#78d18b">●</span> récupéré  <span style="color:#5b6673">●</span> déjà à jour  <span style="color:#e86a76">○</span> absent du scraper  <span style="color:#2b323c">·</span> pas encore  ·  <span style="color:#5ec8d8">f</span> filter  <span style="color:#5ec8d8">e</span> errors  <span style="color:#5ec8d8">m</span> identify (1)</div>
+</div>
+</div>
+</div>
+
+</div>
+<p class="dv-next">Try next : "garde <a class="dv-oid" href="#3a">3a</a> mais avec la grille de médias de <a class="dv-oid" href="#3c">3c</a>" · "montre <a class="dv-oid" href="#3b">3b</a> avec 30 ROMs actifs" · "ajoute une ligne de détail quand on sélectionne un ROM"</p>
+</section>
+
+<section class="dv-turn" id="t2">
+<div class="dv-thd"><a class="dv-tid" href="#t2">2</a><span class="dv-tname">Écran principal, erreur, reprise et 80 colonnes — dans le langage de <a class="dv-oid" href="#1a">1a</a></span></div>
+<div class="dv-opts">
+
+<div class="dv-opt" id="2a">
+<div class="dv-olabel"><a class="dv-oid" href="#2a">2a</a>Écran principal — structure actuelle, bandeau de débit en tête</div>
+<div style="background:#0e1116;border-radius:7px;padding:12px 14px;box-shadow:0 1px 3px rgba(0,0,0,.25)">
+<div class="t" style="color:#c9d1d9">
+<div style="border:1px solid #2b323c;border-radius:4px;padding:7px 10px 8px">
+<div class="pt" style="color:#5ec8d8;background:#0e1116"> rompom · snes · 1389 roms </div>
+<div><span class="c" style="width:10ch;color:#5b6673">progress</span><span style="color:#78d18b">██████████████████████████████████</span><span style="color:#2b323c">██████</span><span class="c" style="width:8ch;color:#5b6673"> 87%</span><span class="c" style="width:16ch"><span style="color:#78d18b">✓ 418</span><span style="color:#5b6673"> updated</span></span><span class="c" style="width:16ch"><span>= 771</span><span style="color:#5b6673"> same</span></span><span style="color:#e86a76">✗ 15</span><span style="color:#5b6673"> failed</span></div>
+<div><span class="c" style="width:10ch;color:#5b6673">rate</span><span style="color:#5ec8d8">▄▅▆▇█▇▆▅▆▇█▇▆▅▄▅▆▇█▇▆▇█▇▆▅▄▅▆▇</span><span class="c" style="width:8ch"></span><span class="c" style="width:16ch"><span style="font-weight:700">29</span><span style="color:#5b6673"> rom/min</span></span><span class="c" style="width:16ch"><span style="font-weight:700">12.1</span><span style="color:#5b6673"> MiB/s</span></span><span style="color:#5b6673">eta </span><span style="font-weight:700">4m 20s</span></div>
+</div>
+<div style="height:8px"></div>
+<div style="border:1px solid #2b323c;border-radius:4px;padding:7px 10px 8px">
+<div class="pt" style="color:#c9d1d9;background:#0e1116"> completed · 1204 / 1389 </div>
+<div><span class="c" style="width:3ch;color:#78d18b">✓</span><span class="c" style="width:36ch;font-weight:700">Super Metroid</span><span class="c" style="width:20ch;color:#78d18b">≡ ▶ ▣ ▨ ▤ ◫ ▬ ◎</span><span class="c" style="width:10ch;color:#5b6673">1.8 MiB</span><span style="color:#5b6673">2.4s</span></div>
+<div><span class="c" style="width:3ch;color:#5b6673">=</span><span class="c" style="width:36ch;color:#5b6673">Chrono Trigger</span><span class="c" style="width:20ch;color:#5b6673">≡ ▶ ▣ ▨ ▤ ◫ ▬ ◎ ❑</span><span class="c" style="width:10ch;color:#5b6673">4.0 MiB</span><span style="color:#5b6673">0.2s</span></div>
+<div><span class="c" style="width:3ch;color:#78d18b">✓</span><span class="c" style="width:36ch;font-weight:700">Donkey Kong Country 2</span><span class="c" style="width:20ch"><span style="color:#78d18b">≡ ▶ ▣ ▨ ▤ ◫ ▬</span><span style="color:#e86a76"> ◎ ❑</span></span><span class="c" style="width:10ch;color:#5b6673">3.1 MiB</span><span style="color:#5b6673">3.7s</span></div>
+<div><span class="c" style="width:3ch;color:#e86a76">✗</span><span class="c" style="width:36ch;color:#e86a76;font-weight:700">Bahamut Lagoon (J)</span><span class="c" style="width:30ch;color:#e86a76">sha1 mismatch after 2 retries</span><span style="color:#5b6673">18.2s</span></div>
+<div><span class="c" style="width:3ch;color:#78d18b">✓</span><span class="c" style="width:36ch;font-weight:700">Final Fantasy VI</span><span class="c" style="width:20ch"><span style="color:#78d18b">≡ ▶ ▣ ▨ ▤ ◫ ▬ ◎</span><span style="color:#5b6673"> ❑</span></span><span class="c" style="width:10ch;color:#5b6673">3.1 MiB</span><span style="color:#5b6673">5.1s</span></div>
+<div><span class="c" style="width:3ch;color:#5b6673">=</span><span class="c" style="width:36ch;color:#5b6673">Kirby Super Star</span><span class="c" style="width:20ch;color:#5b6673">≡ ▶ ▣ ▨ ▤ ◫ ▬ ◎</span><span class="c" style="width:10ch;color:#5b6673">3.9 MiB</span><span style="color:#5b6673">0.2s</span></div>
+<div><span class="c" style="width:3ch;color:#78d18b">✓</span><span class="c" style="width:36ch;font-weight:700">Secret of Mana</span><span class="c" style="width:20ch"><span style="color:#78d18b">≡ ▶ ▣ ▨ ▤ ◫ ▬</span><span style="color:#e86a76"> ◎</span></span><span class="c" style="width:10ch;color:#5b6673">2.0 MiB</span><span style="color:#5b6673">2.9s</span></div>
+<div><span class="c" style="width:3ch;color:#5b6673">=</span><span class="c" style="width:36ch;color:#5b6673">Super Mario Kart</span><span class="c" style="width:20ch;color:#5b6673">≡ ▶ ▣ ▨ ▤ ◫ ▬ ◎ ❑</span><span class="c" style="width:10ch;color:#5b6673">0.5 MiB</span><span style="color:#5b6673">0.1s</span></div>
+<div><span class="c" style="width:3ch;color:#78d18b">✓</span><span class="c" style="width:36ch;font-weight:700">Yoshi's Island</span><span class="c" style="width:20ch"><span style="color:#78d18b">≡ ▶ ▣ ▨ ▤ ◫ ▬ ◎</span><span style="color:#e86a76"> ❑</span></span><span class="c" style="width:10ch;color:#5b6673">4.0 MiB</span><span style="color:#5b6673">4.6s</span></div>
+<div><span class="c" style="width:3ch;color:#5b6673">=</span><span class="c" style="width:36ch;color:#5b6673">Zelda: A Link to the Past</span><span class="c" style="width:20ch;color:#5b6673">≡ ▶ ▣ ▨ ▤ ◫ ▬ ◎ ❑</span><span class="c" style="width:10ch;color:#5b6673">1.0 MiB</span><span style="color:#5b6673">0.1s</span></div>
+<div></div>
+<div><span class="c" style="width:3ch;color:#5b6673">≡</span><span class="c" style="width:12ch;color:#5b6673">desc</span><span class="c" style="width:3ch;color:#5b6673">▶</span><span class="c" style="width:12ch;color:#5b6673">video</span><span class="c" style="width:3ch;color:#5b6673">▣</span><span class="c" style="width:12ch;color:#5b6673">image</span><span class="c" style="width:3ch;color:#5b6673">▨</span><span class="c" style="width:12ch;color:#5b6673">thumb</span><span class="c" style="width:3ch;color:#5b6673">▤</span><span class="c" style="width:12ch;color:#5b6673">screen</span></div>
+<div><span class="c" style="width:3ch;color:#5b6673">◫</span><span class="c" style="width:12ch;color:#5b6673">bezel</span><span class="c" style="width:3ch;color:#5b6673">▬</span><span class="c" style="width:12ch;color:#5b6673">marquee</span><span class="c" style="width:3ch;color:#5b6673">◎</span><span class="c" style="width:12ch;color:#5b6673">wheel</span><span class="c" style="width:3ch;color:#5b6673">❑</span><span class="c" style="width:12ch;color:#5b6673">manual</span><span class="c" style="width:9ch;color:#78d18b">■ new</span><span class="c" style="width:11ch;color:#5b6673">■ cached</span><span style="color:#e86a76">■ absent</span></div>
+</div>
+<div style="height:8px"></div>
+<div style="display:flex;gap:8px">
+<div style="border:1px solid #5ec8d8;border-radius:4px;padding:7px 10px 8px;flex:1">
+<div class="pt" style="color:#5ec8d8;background:#0e1116"> discovery · 3 </div>
+<div><span style="color:#5ec8d8">██████████████████████████</span><span style="color:#2b323c">██████</span><span style="color:#5b6673"> 1247/1389</span></div>
+<div><span style="color:#5ec8d8">⠹ </span><span class="c" style="width:30ch">Super Mario RPG</span><span style="color:#5ec8d8">querying screenscraper</span></div>
+<div><span style="color:#5ec8d8">⠸ </span><span class="c" style="width:30ch">Terranigma (E)</span><span style="color:#5ec8d8">writing PKGBUILD</span></div>
+<div><span style="color:#e2b35c">⠴ </span><span class="c" style="width:30ch">Ganbare Goemon 2 (J) [!].sfc</span><span style="color:#e2b35c">waiting for you · press m</span></div>
+</div>
+<div style="border:1px solid #78d18b;border-radius:4px;padding:7px 10px 8px;flex:1">
+<div class="pt" style="color:#78d18b;background:#0e1116"> downloads · 4 </div>
+<div><span style="color:#78d18b">████████████████████████</span><span style="color:#2b323c">████████</span><span style="color:#5b6673"> 1204/1389</span></div>
+<div><span class="c" style="width:24ch">Illusion of Gaia</span><span style="color:#78d18b">██████████</span><span style="color:#2b323c">██████</span><span style="color:#5b6673"> rom 2.4 MiB</span></div>
+<div><span class="c" style="width:24ch">Star Fox</span><span style="color:#78d18b">██████████████</span><span style="color:#2b323c">██</span><span style="color:#5b6673"> video</span></div>
+<div><span class="c" style="width:24ch">Earthbound</span><span style="color:#78d18b">████</span><span style="color:#2b323c">████████████</span><span style="color:#5b6673"> manual</span></div>
+<div><span class="c" style="width:24ch;color:#5b6673">Tetris Attack</span><span style="color:#e2b35c">retry 1/3 · http 503 · 4s</span></div>
+</div></div>
+<div style="color:#5b6673;margin-top:8px"><span style="color:#5ec8d8">f</span> filter  <span style="color:#5ec8d8">e</span> errors only  <span style="color:#5ec8d8">m</span> pending identifications (1)  <span style="color:#5ec8d8">↑↓</span> scroll log  <span style="color:#5ec8d8">ctrl-c</span> abort &amp; save</div>
+</div>
+</div>
+</div>
+
+<div class="dv-opt" id="2b">
+<div class="dv-olabel"><a class="dv-oid" href="#2b">2b</a>Écran principal — rail d'agrégats à gauche, flux unique à droite</div>
+<div style="background:#0e1116;border-radius:7px;padding:12px 14px;box-shadow:0 1px 3px rgba(0,0,0,.25)">
+<div class="t" style="color:#c9d1d9">
+<div style="display:flex;gap:8px">
+<div style="border:1px solid #2b323c;border-radius:4px;padding:7px 10px 8px;width:26ch">
+<div class="pt" style="color:#5ec8d8;background:#0e1116"> snes </div>
+<div style="min-height:0"><span style="color:#78d18b;font-size:24px;font-weight:700">87</span><span style="color:#5b6673;font-size:15px">%</span><span style="color:#5b6673">  1204/1389</span></div>
+<div><span style="color:#78d18b">██████████████████</span><span style="color:#2b323c">███</span></div>
+<div></div>
+<div><span class="c" style="width:8ch;color:#78d18b">✓ 418</span><span style="color:#5b6673">updated</span></div>
+<div><span class="c" style="width:8ch">= 771</span><span style="color:#5b6673">unchanged</span></div>
+<div><span class="c" style="width:8ch;color:#e86a76">✗ 15</span><span style="color:#5b6673">failed</span></div>
+<div><span class="c" style="width:8ch;color:#e2b35c">? 1</span><span style="color:#5b6673">to identify</span></div>
+<div></div>
+<div style="color:#5b6673">rate</div>
+<div><span style="color:#5ec8d8">▄▅▆▇█▇▆▅▆▇█▇▆▅▄▅▆▇█▇▆▇</span></div>
+<div><span style="font-weight:700">29</span><span style="color:#5b6673"> rom/min · </span><span style="font-weight:700">12.1</span><span style="color:#5b6673"> MiB/s</span></div>
+<div><span style="color:#5b6673">eta </span><span style="font-weight:700">4m 20s</span><span style="color:#5b6673"> · 29.2 GiB</span></div>
+<div></div>
+<div style="color:#5b6673">media so far</div>
+<div><span class="c" style="width:9ch;color:#5b6673">≡ desc</span><span style="color:#78d18b">██████</span><span style="color:#5b6673"> 100%</span></div>
+<div><span class="c" style="width:9ch;color:#5b6673">▣ image</span><span style="color:#78d18b">██████</span><span style="color:#5b6673">  97%</span></div>
+<div><span class="c" style="width:9ch;color:#5b6673">▶ video</span><span style="color:#78d18b">████</span><span style="color:#2b323c">██</span><span style="color:#5b6673">  74%</span></div>
+<div><span class="c" style="width:9ch;color:#5b6673">◫ bezel</span><span style="color:#e2b35c">█</span><span style="color:#2b323c">█████</span><span style="color:#5b6673">  19%</span></div>
+<div><span class="c" style="width:9ch;color:#5b6673">❑ manual</span><span style="color:#e2b35c">█</span><span style="color:#2b323c">█████</span><span style="color:#5b6673">  11%</span></div>
+</div>
+<div style="border:1px solid #2b323c;border-radius:4px;padding:7px 10px 8px;flex:1">
+<div class="pt" style="color:#c9d1d9;background:#0e1116"> stream · active first </div>
+<div><span class="c" style="width:3ch;color:#e2b35c">⠴</span><span class="c" style="width:34ch;color:#e2b35c;font-weight:700">Ganbare Goemon 2 (J) [!].sfc</span><span class="c" style="width:22ch;color:#e2b35c">waiting for you</span><span style="color:#e2b35c">press m</span></div>
+<div><span class="c" style="width:3ch;color:#5ec8d8">⠹</span><span class="c" style="width:34ch;font-weight:700">Super Mario RPG</span><span class="c" style="width:22ch;color:#5ec8d8">screenscraper</span><span style="color:#5b6673">1.2s</span></div>
+<div><span class="c" style="width:3ch;color:#5ec8d8">⠸</span><span class="c" style="width:34ch;font-weight:700">Terranigma (E)</span><span class="c" style="width:22ch;color:#5ec8d8">writing PKGBUILD</span><span style="color:#5b6673">0.1s</span></div>
+<div><span class="c" style="width:3ch;color:#78d18b">⠼</span><span class="c" style="width:34ch;font-weight:700">Illusion of Gaia</span><span class="c" style="width:22ch"><span style="color:#78d18b">██████████</span><span style="color:#2b323c">██████</span></span><span style="color:#5b6673">rom 2.4 MiB</span></div>
+<div><span class="c" style="width:3ch;color:#78d18b">⠧</span><span class="c" style="width:34ch;font-weight:700">Star Fox</span><span class="c" style="width:22ch"><span style="color:#78d18b">██████████████</span><span style="color:#2b323c">██</span></span><span style="color:#5b6673">video</span></div>
+<div><span class="c" style="width:3ch;color:#78d18b">⠇</span><span class="c" style="width:34ch;font-weight:700">Earthbound</span><span class="c" style="width:22ch"><span style="color:#78d18b">████</span><span style="color:#2b323c">████████████</span></span><span style="color:#5b6673">manual</span></div>
+<div><span class="c" style="width:3ch;color:#e2b35c">⠏</span><span class="c" style="width:34ch">Tetris Attack</span><span class="c" style="width:22ch;color:#e2b35c">retry 1/3 · http 503</span><span style="color:#5b6673">4s</span></div>
+<div><span style="color:#2b323c">──────────────────────────────────────────────────────────────────────────</span></div>
+<div><span class="c" style="width:3ch;color:#78d18b">✓</span><span class="c" style="width:34ch">Yoshi's Island</span><span class="c" style="width:22ch"><span style="color:#78d18b">≡ ▶ ▣ ▨ ▤ ◫ ▬ ◎</span><span style="color:#e86a76"> ❑</span></span><span style="color:#5b6673">4.6s</span></div>
+<div><span class="c" style="width:3ch;color:#e86a76">✗</span><span class="c" style="width:34ch;color:#e86a76">Bahamut Lagoon (J)</span><span class="c" style="width:22ch;color:#e86a76">sha1 mismatch ×2</span><span style="color:#5b6673">18.2s</span></div>
+<div><span class="c" style="width:3ch;color:#78d18b">✓</span><span class="c" style="width:34ch">Final Fantasy VI</span><span class="c" style="width:22ch"><span style="color:#78d18b">≡ ▶ ▣ ▨ ▤ ◫ ▬ ◎</span><span style="color:#5b6673"> ❑</span></span><span style="color:#5b6673">5.1s</span></div>
+<div><span class="c" style="width:3ch;color:#5b6673">=</span><span class="c" style="width:34ch;color:#5b6673">Kirby Super Star</span><span class="c" style="width:22ch;color:#5b6673">≡ ▶ ▣ ▨ ▤ ◫ ▬ ◎</span><span style="color:#5b6673">0.2s</span></div>
+<div><span class="c" style="width:3ch;color:#78d18b">✓</span><span class="c" style="width:34ch">Secret of Mana</span><span class="c" style="width:22ch"><span style="color:#78d18b">≡ ▶ ▣ ▨ ▤ ◫ ▬</span><span style="color:#e86a76"> ◎</span></span><span style="color:#5b6673">2.9s</span></div>
+<div><span class="c" style="width:3ch;color:#5b6673">=</span><span class="c" style="width:34ch;color:#5b6673">Super Mario Kart</span><span class="c" style="width:22ch;color:#5b6673">≡ ▶ ▣ ▨ ▤ ◫ ▬ ◎ ❑</span><span style="color:#5b6673">0.1s</span></div>
+<div><span class="c" style="width:3ch;color:#78d18b">✓</span><span class="c" style="width:34ch">Super Metroid</span><span class="c" style="width:22ch;color:#78d18b">≡ ▶ ▣ ▨ ▤ ◫ ▬ ◎</span><span style="color:#5b6673">2.4s</span></div>
+</div></div>
+<div style="color:#5b6673;margin-top:8px"><span style="color:#5ec8d8">f</span> filter  <span style="color:#5ec8d8">e</span> errors only  <span style="color:#5ec8d8">m</span> identifications (1)  <span style="color:#5ec8d8">tab</span> focus rail  <span style="color:#5ec8d8">ctrl-c</span> abort &amp; save</div>
+</div>
+</div>
+</div>
+
+<div class="dv-opt" id="2c">
+<div class="dv-olabel"><a class="dv-oid" href="#2c">2c</a>Reprise, erreur ScreenScraper, et 2a replié en 80 colonnes</div>
+<div style="display:flex;flex-direction:column;gap:14px">
+
+<div style="background:#0e1116;border-radius:7px;padding:12px 14px;box-shadow:0 1px 3px rgba(0,0,0,.25)">
+<div class="t" style="color:#c9d1d9"><div class="cap" style="color:#5b6673">REPRISE · snes.run.yml</div>
+<div style="border:1px solid #5ec8d8;border-radius:4px;padding:7px 10px 8px">
+<div class="pt" style="color:#5ec8d8;background:#0e1116"> run interrompu retrouvé </div>
+<div><span class="c" style="width:12ch;color:#5b6673">arrêté</span><span>hier 23:41</span><span style="color:#5b6673">  ·  ctrl-c après 28m 04s</span></div>
+<div><span class="c" style="width:12ch;color:#5b6673">avancement</span><span style="color:#78d18b">████████████████████████</span><span style="color:#2b323c">████████████</span><span style="color:#5b6673"> 1102/1389</span></div>
+<div><span class="c" style="width:12ch;color:#5b6673">reste</span><span style="font-weight:700">287 roms</span><span style="color:#5b6673">  ·  ~8.9 GiB  ·  ~10 min au débit d'hier</span></div>
+<div><span class="c" style="width:12ch;color:#5b6673">à revoir</span><span style="color:#e2b35c">3 identifications en attente</span><span style="color:#5b6673">  ·  </span><span style="color:#e86a76">15 échecs</span></div>
+<div></div>
+<div><span style="color:#5ec8d8">r</span><span style="color:#5b6673"> reprendre les 287 restants   </span><span style="color:#5ec8d8">a</span><span style="color:#5b6673"> tout re-vérifier (1389)   </span><span style="color:#5ec8d8">e</span><span style="color:#5b6673"> rejouer les 15 échecs   </span><span style="color:#5ec8d8">esc</span><span style="color:#5b6673"> ignorer</span></div>
+</div></div>
+</div>
+
+<div style="background:#0e1116;border-radius:7px;padding:12px 14px;box-shadow:0 1px 3px rgba(0,0,0,.25)">
+<div class="t" style="color:#c9d1d9"><div class="cap" style="color:#5b6673">ERREUR · SCREENSCRAPER INDISPONIBLE</div>
+<div style="border:1px solid #2b323c;border-radius:4px;padding:7px 10px 8px">
+<div class="pt" style="color:#5ec8d8;background:#0e1116"> rompom · snes · 1389 roms </div>
+<div><span class="c" style="width:10ch;color:#5b6673">progress</span><span style="color:#78d18b">████████████████████</span><span style="color:#2b323c">████████████████████</span><span class="c" style="width:8ch;color:#5b6673"> 50%</span><span style="color:#5b6673">en pause</span></div>
+<div><span class="c" style="width:10ch;color:#5b6673">rate</span><span style="color:#5ec8d8">▆▇█▇▆▅▄▃▂▁</span><span style="color:#e86a76">▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁</span><span class="c" style="width:8ch"></span><span style="color:#e86a76">0</span><span style="color:#5b6673"> rom/min</span></div>
+</div>
+<div style="height:8px"></div>
+<div style="border:1px solid #e86a76;border-radius:4px;padding:7px 10px 8px">
+<div class="pt" style="color:#e86a76;background:#0e1116"> screenscraper injoignable </div>
+<div><span class="c" style="width:12ch;color:#5b6673">réponse</span><span style="color:#e86a76">HTTP 429</span><span style="color:#5b6673">  ·  quota de threads dépassé (8/8)</span></div>
+<div><span class="c" style="width:12ch;color:#5b6673">depuis</span><span>2m 14s</span><span style="color:#5b6673">  ·  4 tentatives  ·  backoff 8s → 16s → 32s → 64s</span></div>
+<div><span class="c" style="width:12ch;color:#5b6673">prochaine</span><span style="color:#e2b35c">⠹ nouvel essai dans 41s</span></div>
+<div></div>
+<div><span class="c" style="width:12ch;color:#5b6673">en cours</span><span style="color:#78d18b">les 6 téléchargements déjà identifiés continuent</span></div>
+<div><span class="c" style="width:12ch;color:#5b6673">en attente</span><span style="color:#5b6673">281 roms bloqués sur l'identification</span></div>
+<div></div>
+<div><span style="color:#5ec8d8">enter</span><span style="color:#5b6673"> réessayer maintenant   </span><span style="color:#5ec8d8">t</span><span style="color:#5b6673"> réduire à 4 threads   </span><span style="color:#5ec8d8">ctrl-c</span><span style="color:#5b6673"> arrêter et sauver la reprise</span></div>
+</div></div>
+</div>
+
+<div style="background:#0e1116;border-radius:7px;padding:12px 14px;box-shadow:0 1px 3px rgba(0,0,0,.25)">
+<div class="t" style="color:#c9d1d9"><div class="cap" style="color:#5b6673">2a EN 80 COLONNES · icônes médias compactées, colonnes taille/durée retirées</div>
+<div style="border:1px solid #2b323c;border-radius:4px;padding:7px 10px 8px;width:80ch">
+<div class="pt" style="color:#5ec8d8;background:#0e1116"> snes · 87% </div>
+<div><span style="color:#78d18b">████████████████████████████</span><span style="color:#2b323c">████</span><span style="color:#5b6673"> 1204/1389  29/min  eta 4m20s</span></div>
+<div><span style="color:#5ec8d8">▄▅▆▇█▇▆▅▆▇█▇▆▅▄▅▆▇█▇▆▇█▇▆▅▄▅▆▇</span><span style="color:#5b6673">  </span><span style="color:#78d18b">✓418</span><span style="color:#5b6673"> </span><span>=771</span><span style="color:#5b6673"> </span><span style="color:#e86a76">✗15</span><span style="color:#5b6673"> </span><span style="color:#e2b35c">?1</span></div>
+</div>
+<div style="height:8px"></div>
+<div style="border:1px solid #2b323c;border-radius:4px;padding:7px 10px 8px;width:80ch">
+<div class="pt" style="color:#c9d1d9;background:#0e1116"> completed </div>
+<div><span class="c" style="width:3ch;color:#78d18b">✓</span><span class="c" style="width:34ch">Super Metroid</span><span style="color:#78d18b">≡▶▣▨▤◫▬◎</span></div>
+<div><span class="c" style="width:3ch;color:#5b6673">=</span><span class="c" style="width:34ch;color:#5b6673">Chrono Trigger</span><span style="color:#5b6673">≡▶▣▨▤◫▬◎❑</span></div>
+<div><span class="c" style="width:3ch;color:#e86a76">✗</span><span class="c" style="width:34ch;color:#e86a76">Bahamut Lagoon (J)</span><span style="color:#e86a76">sha1 mismatch</span></div>
+<div><span class="c" style="width:3ch;color:#78d18b">✓</span><span class="c" style="width:34ch">Final Fantasy VI</span><span><span style="color:#78d18b">≡▶▣▨▤◫▬◎</span><span style="color:#5b6673">❑</span></span></div>
+</div>
+<div style="height:8px"></div>
+<div style="border:1px solid #5ec8d8;border-radius:4px;padding:7px 10px 8px;width:80ch">
+<div class="pt" style="color:#5ec8d8;background:#0e1116"> active · 7 </div>
+<div><span style="color:#e2b35c">⠴ </span><span class="c" style="width:30ch;color:#e2b35c">Ganbare Goemon 2 (J) [!]</span><span style="color:#e2b35c">à identifier · m</span></div>
+<div><span style="color:#5ec8d8">⠹ </span><span class="c" style="width:30ch">Super Mario RPG</span><span style="color:#5ec8d8">screenscraper</span></div>
+<div><span style="color:#78d18b">⠼ </span><span class="c" style="width:30ch">Illusion of Gaia</span><span><span style="color:#78d18b">██████</span><span style="color:#2b323c">████</span><span style="color:#5b6673"> rom</span></span></div>
+<div><span style="color:#78d18b">⠧ </span><span class="c" style="width:30ch">Star Fox</span><span><span style="color:#78d18b">████████</span><span style="color:#2b323c">██</span><span style="color:#5b6673"> video</span></span></div>
+</div>
+<div style="color:#5b6673;margin-top:8px;width:80ch"><span style="color:#5ec8d8">f</span> filter  <span style="color:#5ec8d8">e</span> errors  <span style="color:#5ec8d8">m</span> identify (1)  <span style="color:#5ec8d8">ctrl-c</span> abort</div>
+</div>
+</div>
+
+</div>
+</div>
+
+</div>
+<p class="dv-next">Try next : "garde <a class="dv-oid" href="#2b">2b</a> mais avec le bandeau de <a class="dv-oid" href="#2a">2a</a>" · "montre l'écran principal quand tout est fini" · "densifie la liste completed"</p>
+</section>
+
+<section class="dv-turn" id="t1">
+<div class="dv-thd"><a class="dv-tid" href="#t1">1</a><span class="dv-tname">rompom TUI — startup, identification modal, end-of-run summary</span></div>
+<div class="dv-opts">
+
+<div class="dv-opt" id="1a">
+<div class="dv-olabel"><a class="dv-oid" href="#1a">1a</a>Instrumented — today's panel structure plus a persistent throughput strip</div>
+<div style="display:flex;flex-direction:column;gap:14px">
+
+<div style="background:#0e1116;border-radius:7px;padding:12px 14px;box-shadow:0 1px 3px rgba(0,0,0,.25)">
+<div class="t" style="color:#c9d1d9"><div class="cap" style="color:#5b6673">STARTUP · COLLECTING</div>
+<div style="border:1px solid #2b323c;border-radius:4px;padding:7px 10px 8px">
+<div class="pt" style="color:#5ec8d8;background:#0e1116"> rompom · snes </div>
+<div><span class="c" style="width:10ch;color:#5b6673">source</span><span>internet_archive</span><span style="color:#5b6673">:</span><span>snes_complete_us</span></div>
+<div><span class="c" style="width:10ch;color:#5b6673">filter</span><span class="c" style="width:26ch">*.zip, *.sfc</span><span style="color:#5b6673">matched </span><span style="font-weight:700">1204</span><span style="color:#5b6673"> / 3891</span></div>
+<div><span class="c" style="width:10ch;color:#5b6673">state</span><span class="c" style="width:26ch">snes.state.yml</span><span style="color:#5b6673">1041 ROMs already known</span></div>
+<div></div>
+<div><span style="color:#5ec8d8">⠹ </span><span class="c" style="width:28ch">indexing archive item</span><span class="c" style="width:26ch;color:#78d18b">3891 files</span><span style="color:#5b6673">4.1s</span></div>
+<div><span style="color:#78d18b">✓ </span><span class="c" style="width:28ch">applying glob filters</span><span class="c" style="width:26ch;color:#78d18b">1204 candidates</span><span style="color:#5b6673">0.1s</span></div>
+<div><span style="color:#5ec8d8">⠹ </span><span class="c" style="width:28ch">hashing local library</span><span class="c" style="width:28ch"><span style="color:#5ec8d8">████████</span><span style="color:#2b323c">████████████</span><span style="color:#5b6673"> 39%</span></span><span style="color:#5b6673">412/1041</span></div>
+<div><span style="color:#5b6673">· </span><span class="c" style="width:28ch;color:#5b6673">worker queue</span><span class="c" style="width:26ch;color:#5b6673">idle · 8 threads ready</span></div>
+</div>
+<div style="height:8px"></div>
+<div style="border:1px solid #2b323c;border-radius:4px;padding:7px 10px 4px">
+<div class="pt" style="color:#5b6673;background:#0e1116;font-weight:400"> rate </div>
+<div><span class="c" style="width:10ch;color:#5b6673">hash</span><span style="color:#5ec8d8">▁▂▄▃▅▆▇█▇▆▅▆▇█▇▅▄▃▄▅▆▇█▇▆</span><span class="c" style="width:6ch"></span><span style="font-weight:700">96</span><span style="color:#5b6673"> file/s   eta </span><span>6s</span></div>
+</div>
+<div style="color:#5b6673;margin-top:8px"><span style="color:#5ec8d8">ctrl-c</span> abort</div></div>
+</div>
+
+<div style="background:#0e1116;border-radius:7px;padding:12px 14px;box-shadow:0 1px 3px rgba(0,0,0,.25)">
+<div class="t" style="color:#c9d1d9"><div class="cap" style="color:#5b6673">IDENTIFICATION MODAL · over dimmed run screen</div>
+<div style="color:#20262e">
+<div>✓  Super Metroid                    ≡ ▶ ▣ ▨ ▤ ◫ ▬ ◎</div>
+<div>=  Chrono Trigger                   ≡ ▶ ▣ ▨ ▤ ◫ ▬ ◎ ❑</div>
+<div>✓  Donkey Kong Country 2            ≡ ▶ ▣ ▨ ▤ ◫ ▬</div>
+</div>
+<div style="border:1px solid #e2b35c;border-radius:4px;padding:7px 10px 8px;margin-top:4px">
+<div class="pt" style="color:#e2b35c;background:#0e1116"> unidentified · 1 of 3 pending </div>
+<div><span class="c" style="width:8ch;color:#5b6673">file</span><span style="font-weight:700">Ganbare Goemon 2 (J) [!].sfc</span></div>
+<div><span class="c" style="width:8ch;color:#5b6673">sha1</span><span style="color:#5b6673">3f9a1c77e04b2d8815ce6f0aa19b7c4d2e5081aa   1.5 MiB</span></div>
+<div><span class="c" style="width:8ch;color:#5b6673">search</span><span style="color:#5b6673">name · 4 candidates · region JP</span></div>
+<div></div>
+<div><span style="color:#e2b35c">▶ </span><span class="c" style="width:38ch;color:#e2b35c;font-weight:700">Ganbare Goemon 2: Kiteretsu Shougun</span><span class="c" style="width:8ch;color:#78d18b">1993</span><span class="c" style="width:12ch;color:#5b6673">Konami</span><span class="c" style="width:11ch;color:#5b6673">id 149021</span><span style="color:#78d18b">████████</span><span style="color:#2b323c">██</span><span style="color:#78d18b"> 91%</span></div>
+<div><span class="c" style="width:2ch"></span><span class="c" style="width:38ch">Ganbare Goemon: Yukihime Kyuushutsu</span><span class="c" style="width:8ch;color:#5b6673">1991</span><span class="c" style="width:12ch;color:#5b6673">Konami</span><span class="c" style="width:11ch;color:#5b6673">id 148990</span><span style="color:#e2b35c">█████</span><span style="color:#2b323c">█████</span><span style="color:#5b6673"> 54%</span></div>
+<div><span class="c" style="width:2ch"></span><span class="c" style="width:38ch">Ganbare Goemon 3</span><span class="c" style="width:8ch;color:#5b6673">1994</span><span class="c" style="width:12ch;color:#5b6673">Konami</span><span class="c" style="width:11ch;color:#5b6673">id 149044</span><span style="color:#e2b35c">████</span><span style="color:#2b323c">██████</span><span style="color:#5b6673"> 47%</span></div>
+<div><span class="c" style="width:2ch"></span><span class="c" style="width:38ch">Mystical Ninja Starring Goemon</span><span class="c" style="width:8ch;color:#5b6673">1997</span><span class="c" style="width:12ch;color:#5b6673">Konami</span><span class="c" style="width:11ch;color:#5b6673">id 151202</span><span style="color:#e86a76">██</span><span style="color:#2b323c">████████</span><span style="color:#5b6673"> 22%</span></div>
+<div></div>
+<div><span style="color:#5b6673">selected · </span><span>SNES · action-adventure · 2 players · media </span><span style="color:#78d18b">≡ ▶ ▣ ▨ ▤ ◫ ▬ ◎</span><span style="color:#e86a76"> ❑</span></div>
+<div><span style="color:#e2b35c">↑↓</span><span style="color:#5b6673"> navigate  </span><span style="color:#e2b35c">enter</span><span style="color:#5b6673"> confirm  </span><span style="color:#e2b35c">i</span><span style="color:#5b6673"> type id  </span><span style="color:#e2b35c">s</span><span style="color:#5b6673"> skip  </span><span style="color:#e2b35c">esc</span><span style="color:#5b6673"> defer to end of run</span></div>
+</div>
+<div style="color:#20262e;margin-top:4px">⠸ Final Fantasy VI — downloading ROM…      ⠸ Super Mario World — video…</div></div>
+</div>
+
+<div style="background:#0e1116;border-radius:7px;padding:12px 14px;box-shadow:0 1px 3px rgba(0,0,0,.25)">
+<div class="t" style="color:#c9d1d9"><div class="cap" style="color:#5b6673">END-OF-RUN SUMMARY</div>
+<div style="border:1px solid #2b323c;border-radius:4px;padding:7px 10px 8px">
+<div class="pt" style="color:#78d18b;background:#0e1116"> run complete · snes · 1204 ROMs · 41m 12s </div>
+<div><span style="color:#78d18b">✓ </span><span class="c" style="width:6ch;font-weight:700">418</span><span class="c" style="width:14ch;color:#5b6673">updated</span><span style="color:#5b6673">= </span><span class="c" style="width:6ch">771</span><span class="c" style="width:14ch;color:#5b6673">unchanged</span><span style="color:#e86a76">✗ </span><span class="c" style="width:6ch;color:#e86a76;font-weight:700">15</span><span style="color:#5b6673">errors</span></div>
+<div><span class="c" style="width:8ch"></span><span class="c" style="width:14ch;color:#5b6673">29.2 GiB</span><span class="c" style="width:8ch"></span><span class="c" style="width:14ch;color:#5b6673">skipped</span><span class="c" style="width:8ch"></span><span style="color:#5b6673">see snes.errors.log</span></div>
+</div>
+<div style="height:8px"></div>
+<div style="border:1px solid #2b323c;border-radius:4px;padding:7px 10px 8px">
+<div class="pt" style="color:#5b6673;background:#0e1116;font-weight:400"> media coverage </div>
+<div><span class="c" style="width:3ch;color:#5ec8d8">≡</span><span class="c" style="width:13ch">description</span><span style="color:#78d18b">████████████████████</span><span class="c" style="width:12ch;color:#5b6673"> 100%</span><span style="color:#5b6673">1189</span></div>
+<div><span class="c" style="width:3ch;color:#5ec8d8">▶</span><span class="c" style="width:13ch">video</span><span style="color:#78d18b">███████████████</span><span style="color:#2b323c">█████</span><span class="c" style="width:12ch;color:#5b6673"> 74%</span><span style="color:#5b6673">880</span></div>
+<div><span class="c" style="width:3ch;color:#5ec8d8">▣</span><span class="c" style="width:13ch">image</span><span style="color:#78d18b">███████████████████</span><span style="color:#2b323c">█</span><span class="c" style="width:12ch;color:#5b6673"> 97%</span><span style="color:#5b6673">1153</span></div>
+<div><span class="c" style="width:3ch;color:#5ec8d8">▨</span><span class="c" style="width:13ch">thumbnail</span><span style="color:#78d18b">██████████████████</span><span style="color:#2b323c">██</span><span class="c" style="width:12ch;color:#5b6673"> 93%</span><span style="color:#5b6673">1105</span></div>
+<div><span class="c" style="width:3ch;color:#5ec8d8">▤</span><span class="c" style="width:13ch">screenshot</span><span style="color:#78d18b">██████████████████</span><span style="color:#2b323c">██</span><span class="c" style="width:12ch;color:#5b6673"> 91%</span><span style="color:#5b6673">1082</span></div>
+<div><span class="c" style="width:3ch;color:#5ec8d8">◫</span><span class="c" style="width:13ch">bezel</span><span style="color:#e2b35c">████</span><span style="color:#2b323c">████████████████</span><span class="c" style="width:12ch;color:#5b6673"> 19%</span><span style="color:#5b6673">226</span></div>
+<div><span class="c" style="width:3ch;color:#5ec8d8">▬</span><span class="c" style="width:13ch">marquee</span><span style="color:#78d18b">█████████████</span><span style="color:#2b323c">███████</span><span class="c" style="width:12ch;color:#5b6673"> 66%</span><span style="color:#5b6673">785</span></div>
+<div><span class="c" style="width:3ch;color:#5ec8d8">◎</span><span class="c" style="width:13ch">wheel</span><span style="color:#78d18b">█████████████████</span><span style="color:#2b323c">███</span><span class="c" style="width:12ch;color:#5b6673"> 88%</span><span style="color:#5b6673">1046</span></div>
+<div><span class="c" style="width:3ch;color:#5ec8d8">❑</span><span class="c" style="width:13ch">manual</span><span style="color:#e2b35c">██</span><span style="color:#2b323c">██████████████████</span><span class="c" style="width:12ch;color:#5b6673"> 11%</span><span style="color:#5b6673">131</span></div>
+</div>
+<sc-if value="{{ showTimings }}" hint-placeholder-val="{{ true }}"><div style="height:8px"></div>
+<div style="border:1px solid #2b323c;border-radius:4px;padding:7px 10px 8px">
+<div class="pt" style="color:#5b6673;background:#0e1116;font-weight:400"> where the time went </div>
+<div><span class="c" style="width:20ch">screenscraper query</span><span style="color:#5ec8d8">██████████</span><span style="color:#2b323c">██████████████████████████████</span><span class="c" style="width:13ch;color:#5b6673">  14m 02s</span><span style="color:#5b6673">avg 0.70s</span></div>
+<div><span class="c" style="width:20ch">rom download</span><span style="color:#5ec8d8">███████████████</span><span style="color:#2b323c">█████████████████████████</span><span class="c" style="width:13ch;color:#5b6673">  19m 48s</span><span style="color:#5b6673">avg 2.84s</span></div>
+<div><span class="c" style="width:20ch">media download</span><span style="color:#5ec8d8">████</span><span style="color:#2b323c">████████████████████████████████████</span><span class="c" style="width:13ch;color:#5b6673">  5m 31s</span><span style="color:#5b6673">avg 0.79s</span></div>
+<div><span class="c" style="width:20ch">packaging</span><span style="color:#5ec8d8">█</span><span style="color:#2b323c">███████████████████████████████████████</span><span class="c" style="width:13ch;color:#5b6673">  1m 51s</span><span style="color:#5b6673">avg 0.09s</span></div>
+</div></sc-if>
+<div style="color:#5b6673;margin-top:8px">next · <span style="color:#c9d1d9">cd snes &amp;&amp; makepkg</span>   ·   <span style="color:#c9d1d9">repo-add roms.db.tar.gz snes/*.pkg.tar.zst</span></div></div>
+</div>
+
+</div>
+</div>
+
+<div class="dv-opt" id="1b">
+<div class="dv-olabel"><a class="dv-oid" href="#1b">1b</a>Dashboard rail — aggregates pinned left, stream on the right</div>
+<div style="display:flex;flex-direction:column;gap:14px">
+
+<div style="background:#16130f;border-radius:7px;padding:12px 14px;box-shadow:0 1px 3px rgba(0,0,0,.25)">
+<div class="t" style="color:#e9dfd0"><div class="cap" style="color:#7a6d5c">STARTUP · COLLECTING</div>
+<div style="display:flex;gap:10px">
+<div style="border:1px solid #352d24;border-radius:4px;padding:7px 10px 8px;width:30ch">
+<div class="pt" style="color:#e0a458;background:#16130f"> snes </div>
+<div style="color:#7a6d5c">source</div>
+<div>internet_archive</div>
+<div>snes_complete_us</div>
+<div></div>
+<div style="color:#7a6d5c">candidates</div>
+<div style="min-height:0"><span style="color:#e0a458;font-size:22px;font-weight:700">1204</span><span style="color:#7a6d5c"> / 3891</span></div>
+<div></div>
+<div style="color:#7a6d5c">known state</div>
+<div><span>1041 </span><span style="color:#7a6d5c">roms</span></div>
+<div><span style="color:#63b6a4">163 </span><span style="color:#7a6d5c">new since last run</span></div>
+</div>
+<div style="border:1px solid #352d24;border-radius:4px;padding:7px 10px 8px;flex:1">
+<div class="pt" style="color:#7a6d5c;background:#16130f;font-weight:400"> preflight </div>
+<div><span style="color:#93bf6a">✓ </span><span class="c" style="width:30ch">config ~/.config/rompom.yml</span><span style="color:#7a6d5c">v3 · no migration needed</span></div>
+<div><span style="color:#93bf6a">✓ </span><span class="c" style="width:30ch">screenscraper auth</span><span style="color:#7a6d5c">dev tier · 8 threads</span></div>
+<div><span style="color:#93bf6a">✓ </span><span class="c" style="width:30ch">archive.org item</span><span style="color:#7a6d5c">3891 files · 61.4 GiB</span></div>
+<div><span style="color:#e0a458">⠹ </span><span class="c" style="width:30ch">hashing local library</span><span style="color:#7a6d5c">412/1041</span></div>
+<div><span class="c" style="width:2ch"></span><span style="color:#e0a458">██████████████</span><span style="color:#352d24">██████████████████████</span><span style="color:#7a6d5c"> 39%   96/s   eta 6s</span></div>
+<div></div>
+<div style="color:#7a6d5c">─────────────────────────────────────────────────────</div>
+<div><span style="color:#7a6d5c">estimated run</span><span>  ~38 min</span><span style="color:#7a6d5c">   download  ~24.8 GiB</span></div>
+<div><span style="color:#e0a458">enter</span><span style="color:#7a6d5c"> start   </span><span style="color:#e0a458">r</span><span style="color:#7a6d5c"> resume snes.run.yml (287 pending)   </span><span style="color:#e0a458">ctrl-c</span><span style="color:#7a6d5c"> quit</span></div>
+</div></div></div>
+</div>
+
+<div style="background:#16130f;border-radius:7px;padding:12px 14px;box-shadow:0 1px 3px rgba(0,0,0,.25)">
+<div class="t" style="color:#e9dfd0"><div class="cap" style="color:#7a6d5c">IDENTIFICATION MODAL · split candidate / detail</div>
+<div style="border:1px solid #e0a458;border-radius:4px;padding:7px 10px 8px">
+<div class="pt" style="color:#e0a458;background:#16130f"> identify · Ganbare Goemon 2 (J) [!].sfc </div>
+<div style="display:flex;gap:12px">
+<div style="width:46ch">
+<div style="color:#7a6d5c">4 results · sorted by match</div>
+<div></div>
+<div><span style="color:#e0a458">▶ </span><span style="color:#e0a458;font-weight:700">Ganbare Goemon 2: Kiteretsu Shougun</span></div>
+<div><span class="c" style="width:2ch"></span><span style="color:#7a6d5c">1993 · Konami · </span><span style="color:#93bf6a">91%</span></div>
+<div><span class="c" style="width:2ch"></span><span>Ganbare Goemon: Yukihime Kyuushutsu</span></div>
+<div><span class="c" style="width:2ch"></span><span style="color:#7a6d5c">1991 · Konami · 54%</span></div>
+<div><span class="c" style="width:2ch"></span><span>Ganbare Goemon 3</span></div>
+<div><span class="c" style="width:2ch"></span><span style="color:#7a6d5c">1994 · Konami · 47%</span></div>
+<div><span class="c" style="width:2ch"></span><span>Mystical Ninja Starring Goemon</span></div>
+<div><span class="c" style="width:2ch"></span><span style="color:#7a6d5c">1997 · Konami · 22%</span></div>
+</div>
+<div style="flex:1;border-left:1px solid #352d24;padding-left:12px">
+<div><span style="color:#7a6d5c">id       </span><span>149021</span></div>
+<div><span style="color:#7a6d5c">region   </span><span>JP</span><span style="color:#7a6d5c">   players </span><span>2</span></div>
+<div><span style="color:#7a6d5c">genre    </span><span>action-adventure</span></div>
+<div><span style="color:#7a6d5c">rating   </span><span style="color:#e0a458">★★★★</span><span style="color:#352d24">★</span></div>
+<div><span style="color:#7a6d5c">media    </span><span style="color:#93bf6a">≡ ▶ ▣ ▨ ▤ ◫ ▬ ◎</span><span style="color:#d97066"> ❑</span></div>
+<div></div>
+<div style="color:#7a6d5c">Goemon and Ebisumaru set out</div>
+<div style="color:#7a6d5c">across Edo-period Japan to stop</div>
+<div style="color:#7a6d5c">the Kiteretsu Shogun's plans…</div>
+</div></div>
+<div style="color:#352d24">──────────────────────────────────────────────────────────────────────────────────────────</div>
+<div style="color:#7a6d5c">sha1 3f9a1c77e04b2d8815ce6f0aa19b7c4d2e5081aa · 1.5 MiB · 2 more waiting</div>
+<div><span style="color:#e0a458">↑↓</span><span style="color:#7a6d5c"> move  </span><span style="color:#e0a458">enter</span><span style="color:#7a6d5c"> confirm  </span><span style="color:#e0a458">i</span><span style="color:#7a6d5c"> game id  </span><span style="color:#e0a458">/</span><span style="color:#7a6d5c"> search again  </span><span style="color:#e0a458">s</span><span style="color:#7a6d5c"> skip  </span><span style="color:#e0a458">esc</span><span style="color:#7a6d5c"> defer</span></div>
+</div></div>
+</div>
+
+<div style="background:#16130f;border-radius:7px;padding:12px 14px;box-shadow:0 1px 3px rgba(0,0,0,.25)">
+<div class="t" style="color:#e9dfd0"><div class="cap" style="color:#7a6d5c">END-OF-RUN SUMMARY</div>
+<div style="display:flex;gap:10px">
+<div style="border:1px solid #352d24;border-radius:4px;padding:7px 10px 8px;width:30ch">
+<div class="pt" style="color:#93bf6a;background:#16130f"> done </div>
+<div style="min-height:0"><span style="color:#93bf6a;font-size:22px;font-weight:700">418</span><span style="color:#7a6d5c"> updated</span></div>
+<div style="min-height:0"><span style="font-size:22px;font-weight:700">771</span><span style="color:#7a6d5c"> unchanged</span></div>
+<div style="min-height:0"><span style="color:#d97066;font-size:22px;font-weight:700">15</span><span style="color:#7a6d5c"> errors</span></div>
+<div></div>
+<div><span style="color:#7a6d5c">elapsed   </span><span>41m 12s</span></div>
+<div><span style="color:#7a6d5c">throughput</span><span> 29 rom/min</span></div>
+<div><span style="color:#7a6d5c">fetched   </span><span>29.2 GiB</span></div>
+<div><span style="color:#7a6d5c">avg rate  </span><span>12.1 MiB/s</span></div>
+</div>
+<div style="border:1px solid #352d24;border-radius:4px;padding:7px 10px 8px;flex:1">
+<div class="pt" style="color:#7a6d5c;background:#16130f;font-weight:400"> media coverage · 1189 identified </div>
+<div><span class="c" style="width:3ch;color:#e0a458">≡</span><span class="c" style="width:12ch">description</span><span style="color:#93bf6a">████████████████</span><span class="c" style="width:8ch;color:#7a6d5c"> 100%</span><span class="c" style="width:3ch;color:#e0a458">◫</span><span class="c" style="width:10ch">bezel</span><span style="color:#e0a458">███</span><span style="color:#352d24">█████████████</span><span style="color:#7a6d5c"> 19%</span></div>
+<div><span class="c" style="width:3ch;color:#e0a458">▶</span><span class="c" style="width:12ch">video</span><span style="color:#93bf6a">████████████</span><span style="color:#352d24">████</span><span class="c" style="width:8ch;color:#7a6d5c"> 74%</span><span class="c" style="width:3ch;color:#e0a458">▬</span><span class="c" style="width:10ch">marquee</span><span style="color:#93bf6a">██████████</span><span style="color:#352d24">██████</span><span style="color:#7a6d5c"> 66%</span></div>
+<div><span class="c" style="width:3ch;color:#e0a458">▣</span><span class="c" style="width:12ch">image</span><span style="color:#93bf6a">███████████████</span><span style="color:#352d24">█</span><span class="c" style="width:8ch;color:#7a6d5c"> 97%</span><span class="c" style="width:3ch;color:#e0a458">◎</span><span class="c" style="width:10ch">wheel</span><span style="color:#93bf6a">██████████████</span><span style="color:#352d24">██</span><span style="color:#7a6d5c"> 88%</span></div>
+<div><span class="c" style="width:3ch;color:#e0a458">▨</span><span class="c" style="width:12ch">thumbnail</span><span style="color:#93bf6a">██████████████</span><span style="color:#352d24">██</span><span class="c" style="width:8ch;color:#7a6d5c"> 93%</span><span class="c" style="width:3ch;color:#e0a458">❑</span><span class="c" style="width:10ch">manual</span><span style="color:#e0a458">██</span><span style="color:#352d24">██████████████</span><span style="color:#7a6d5c"> 11%</span></div>
+<div><span class="c" style="width:3ch;color:#e0a458">▤</span><span class="c" style="width:12ch">screenshot</span><span style="color:#93bf6a">██████████████</span><span style="color:#352d24">██</span><span class="c" style="width:8ch;color:#7a6d5c"> 91%</span></div>
+<div></div>
+<div style="color:#7a6d5c">─────────────────────────────────────────────────────────</div>
+<div><span style="color:#d97066">✗ 15 errors</span><span style="color:#7a6d5c">  9 checksum mismatch · 4 not on screenscraper · 2 http 503</span></div>
+<div><span style="color:#7a6d5c">           retry them with </span><span>rompom -s snes --retry-failed</span></div>
+</div></div>
+</div>
+</div>
+
+</div>
+</div>
+
+<div class="dv-opt" id="1c">
+<div class="dv-olabel"><a class="dv-oid" href="#1c">1c</a>Quiet focus — one headline number, aggregates over per-ROM noise</div>
+<div style="display:flex;flex-direction:column;gap:14px">
+
+<div style="background:#09090b;border-radius:7px;padding:16px 18px;box-shadow:0 1px 3px rgba(0,0,0,.25)">
+<div class="t" style="color:#ececf0"><div class="cap" style="color:#55555f">STARTUP · COLLECTING</div>
+<div><span style="color:#55555f">rompom</span><span> snes</span><span style="color:#55555f">   ·   archive.org/snes_complete_us</span></div>
+<div></div>
+<div style="min-height:0"><span style="color:#9fe6a0;font-size:30px;font-weight:700">1204</span><span style="color:#55555f;font-size:15px"> roms selected</span><span style="color:#23232a;font-size:15px">  ·  </span><span style="color:#55555f;font-size:15px">3891 in item</span></div>
+<div></div>
+<div><span style="color:#55555f">indexing item      </span><span style="color:#9fe6a0">done</span><span style="color:#55555f">     3891 files, 4.1s</span></div>
+<div><span style="color:#55555f">glob filters       </span><span style="color:#9fe6a0">done</span><span style="color:#55555f">     *.zip *.sfc</span></div>
+<div><span style="color:#55555f">library hashing    </span><span style="color:#f0c674">39%</span><span style="color:#55555f">      412 of 1041</span></div>
+<div></div>
+<div><span style="color:#f0c674">████████████</span><span style="color:#23232a">████████████████████████████████████████████████████</span></div>
+<div></div>
+<div style="color:#55555f">96 file/s   ·   eta 6s   ·   163 new roms since last run</div>
+<div><span style="color:#8fc7e8">enter</span><span style="color:#55555f"> begin      </span><span style="color:#8fc7e8">ctrl-c</span><span style="color:#55555f"> quit</span></div>
+</div>
+</div>
+
+<div style="background:#09090b;border-radius:7px;padding:16px 18px;box-shadow:0 1px 3px rgba(0,0,0,.25)">
+<div class="t" style="color:#ececf0"><div class="cap" style="color:#55555f">IDENTIFICATION MODAL · centred, one decision at a time</div>
+<div><span style="color:#e79ec4">unidentified</span><span style="color:#55555f">   ·   2 more waiting   ·   run continues in background</span></div>
+<div></div>
+<div style="min-height:0"><span style="font-size:17px">Ganbare Goemon 2 (J) [!].sfc</span></div>
+<div style="color:#55555f">1.5 MiB · sha1 3f9a1c77…5081aa · no hash match on screenscraper</div>
+<div></div>
+<div style="color:#55555f">closest names</div>
+<div></div>
+<div style="min-height:0"><span style="color:#e79ec4">▌</span><span style="font-size:15px"> Ganbare Goemon 2: Kiteretsu Shougun</span><span style="color:#55555f;font-size:15px">   1993</span></div>
+<div><span style="color:#e79ec4">▌</span><span style="color:#55555f"> Konami · action-adventure · 2p · id 149021 · </span><span style="color:#9fe6a0">91% match</span></div>
+<div><span style="color:#e79ec4">▌</span><span style="color:#55555f"> media </span><span style="color:#9fe6a0">≡ ▶ ▣ ▨ ▤ ◫ ▬ ◎</span><span style="color:#55555f"> ❑</span></div>
+<div></div>
+<div><span class="c" style="width:2ch"></span><span style="color:#8b8b95">Ganbare Goemon: Yukihime Kyuushutsu</span><span style="color:#55555f">   1991 · 54%</span></div>
+<div><span class="c" style="width:2ch"></span><span style="color:#8b8b95">Ganbare Goemon 3</span><span style="color:#55555f">   1994 · 47%</span></div>
+<div><span class="c" style="width:2ch"></span><span style="color:#8b8b95">Mystical Ninja Starring Goemon</span><span style="color:#55555f">   1997 · 22%</span></div>
+<div></div>
+<div><span style="color:#8fc7e8">↑↓</span><span style="color:#55555f"> move   </span><span style="color:#8fc7e8">enter</span><span style="color:#55555f"> confirm   </span><span style="color:#8fc7e8">i</span><span style="color:#55555f"> game id   </span><span style="color:#8fc7e8">s</span><span style="color:#55555f"> skip   </span><span style="color:#8fc7e8">esc</span><span style="color:#55555f"> decide later</span></div>
+</div>
+</div>
+
+<div style="background:#09090b;border-radius:7px;padding:16px 18px;box-shadow:0 1px 3px rgba(0,0,0,.25)">
+<div class="t" style="color:#ececf0"><div class="cap" style="color:#55555f">END-OF-RUN SUMMARY</div>
+<div><span style="color:#55555f">rompom</span><span> snes</span><span style="color:#55555f">   ·   41m 12s   ·   29.2 GiB   ·   29 rom/min</span></div>
+<div></div>
+<div style="min-height:0"><span style="color:#9fe6a0;font-size:30px;font-weight:700">418</span><span style="color:#55555f;font-size:15px"> updated</span><span style="color:#23232a;font-size:15px">   </span><span style="color:#8b8b95;font-size:30px;font-weight:700">771</span><span style="color:#55555f;font-size:15px"> unchanged</span><span style="color:#23232a;font-size:15px">   </span><span style="color:#e79ec4;font-size:30px;font-weight:700">15</span><span style="color:#55555f;font-size:15px"> failed</span></div>
+<div></div>
+<div style="color:#55555f">media coverage</div>
+<div></div>
+<div><span class="c" style="width:14ch">description</span><span style="color:#9fe6a0">████████████████████████████████</span><span style="color:#55555f">  100%</span></div>
+<div><span class="c" style="width:14ch">image</span><span style="color:#9fe6a0">███████████████████████████████</span><span style="color:#23232a">█</span><span style="color:#55555f">   97%</span></div>
+<div><span class="c" style="width:14ch">thumbnail</span><span style="color:#9fe6a0">██████████████████████████████</span><span style="color:#23232a">██</span><span style="color:#55555f">   93%</span></div>
+<div><span class="c" style="width:14ch">screenshot</span><span style="color:#9fe6a0">█████████████████████████████</span><span style="color:#23232a">███</span><span style="color:#55555f">   91%</span></div>
+<div><span class="c" style="width:14ch">wheel</span><span style="color:#9fe6a0">████████████████████████████</span><span style="color:#23232a">████</span><span style="color:#55555f">   88%</span></div>
+<div><span class="c" style="width:14ch">video</span><span style="color:#9fe6a0">████████████████████████</span><span style="color:#23232a">████████</span><span style="color:#55555f">   74%</span></div>
+<div><span class="c" style="width:14ch">marquee</span><span style="color:#9fe6a0">█████████████████████</span><span style="color:#23232a">███████████</span><span style="color:#55555f">   66%</span></div>
+<div><span class="c" style="width:14ch;color:#8b8b95">bezel</span><span style="color:#f0c674">██████</span><span style="color:#23232a">██████████████████████████</span><span style="color:#55555f">   19%</span></div>
+<div><span class="c" style="width:14ch;color:#8b8b95">manual</span><span style="color:#f0c674">███</span><span style="color:#23232a">█████████████████████████████</span><span style="color:#55555f">   11%</span></div>
+<div></div>
+<sc-if value="{{ showTimings }}" hint-placeholder-val="{{ true }}"><div style="color:#55555f">time spent</div>
+<div></div>
+<div><span class="c" style="width:14ch">rom download</span><span style="color:#8fc7e8">████████████████████</span><span style="color:#23232a">████████████</span><span style="color:#55555f">   19m 48s</span></div>
+<div><span class="c" style="width:14ch">screenscraper</span><span style="color:#8fc7e8">██████████████</span><span style="color:#23232a">██████████████████</span><span style="color:#55555f">   14m 02s</span></div>
+<div><span class="c" style="width:14ch">media download</span><span style="color:#8fc7e8">█████</span><span style="color:#23232a">███████████████████████████</span><span style="color:#55555f">   5m 31s</span></div>
+<div><span class="c" style="width:14ch">packaging</span><span style="color:#8fc7e8">██</span><span style="color:#23232a">██████████████████████████████</span><span style="color:#55555f">   1m 51s</span></div>
+<div></div></sc-if>
+<div><span style="color:#e79ec4">15 failed</span><span style="color:#55555f"> · 9 checksum · 4 unknown · 2 http 503 · </span><span>rompom -s snes --retry-failed</span></div>
+</div>
+</div>
+
+</div>
+</div>
+
+</div>
+<p class="dv-next">Try next: "expand <a class="dv-oid" href="#1b">1b</a> to the main run screen" · "make <a class="dv-oid" href="#1c">1c</a>'s summary work at 80 columns" · "new directions for the modal"</p>
+</section>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;showTimings&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;}}">
+class Component extends DCLogic {
+  renderVals() {
+    return { showTimings: this.props.showTimings ?? true };
+  }
+}
+</script>
+</body>
+</html>

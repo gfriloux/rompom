@@ -4,9 +4,8 @@ use std::{
   time::UNIX_EPOCH,
 };
 
-use checksums::{hash_file, Algorithm};
-
 use crate::{
+  hash::{crc32_file, md5_file, sha1_file},
   rom::{Rom, RomSource, StepData, StepError, StepKind, StepStatus},
   ui::{ModalCandidate, ModalRequest, ModalResponse},
 };
@@ -77,9 +76,9 @@ pub(crate) fn handle_compute_hashes(
       mtime, size, sha1
     ));
   } else {
-    let sha1 = hash_file(&local_path, Algorithm::SHA1).to_lowercase();
-    let md5 = hash_file(&local_path, Algorithm::MD5).to_lowercase();
-    let crc32 = hash_file(&local_path, Algorithm::CRC32).to_lowercase();
+    let sha1 = sha1_file(&local_path).map_err(StepError::transient)?;
+    let md5 = md5_file(&local_path).map_err(StepError::transient)?;
+    let crc32 = crc32_file(&local_path).map_err(StepError::transient)?;
     let meta = fs::metadata(&local_path).ok();
     let mtime = meta
       .as_ref()
@@ -104,8 +103,9 @@ pub(crate) fn handle_compute_hashes(
   // ── Compute sha1 for extra discs (no fast-path for multi-disc extras) ────
   let extra_disc_sha1s: Vec<String> = extra_disc_paths
     .iter()
-    .map(|p| hash_file(p, Algorithm::SHA1).to_lowercase())
-    .collect();
+    .map(|p| sha1_file(p))
+    .collect::<Result<_, _>>()
+    .map_err(StepError::transient)?;
 
   if !extra_disc_sha1s.is_empty() {
     rom_arc.lock().unwrap().extra_disc_sha1s = extra_disc_sha1s.clone();
@@ -366,6 +366,21 @@ pub(crate) fn handle_wait_modal(
 
     (rom.source.filename.clone(), rom.sha1.clone(), candidates)
   };
+
+  // Nobody is watching in plain mode, so there is no one to answer the modal. Fail the
+  // ROM and let the run carry on: it lands in the Completed log as an error and in the
+  // Failures section of the summary, with the cause saying what to do about it.
+  //
+  // Not identified-by-guess: packaging a ROM on the first search hit writes a wrong
+  // description.xml, bumps its pkgver, and persists a wrong ss_game_id that every later
+  // run then trusts — the exact damage P1.1 closed.
+  if crate::ui::is_plain() {
+    return Err(StepError::Fatal(format!(
+      "not identified — needs manual identification, and {} candidate(s) cannot be shown \
+       without a terminal",
+      candidates.len()
+    )));
+  }
 
   // Signal the UI that we're waiting for user input.
   rom_arc.lock().unwrap().bar.waiting_for_user();

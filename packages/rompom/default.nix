@@ -5,7 +5,7 @@
 }:
 pkgs.pkgsStatic.rustPlatform.buildRustPackage {
   pname = "rompom";
-  version = "0.17.0";
+  version = "0.18.0";
 
   src = builtins.path {
     path = ../..;
@@ -27,23 +27,11 @@ pkgs.pkgsStatic.rustPlatform.buildRustPackage {
   # perl is required by openssl-src to build OpenSSL from source (vendored feature)
   nativeBuildInputs = [pkgs.perl];
 
-  # Size optimisations (release profile overrides).
-  #
-  # panic=abort is deliberately NOT set: the worker pool catches a panicking step
-  # handler and turns it into a failed ROM so the rest of the run completes. Aborting
-  # would kill the process instead, and the catch_unwind would be dead code in exactly
-  # the build users run.
-  #
-  # Measured on 2026-08-09, x86_64-unknown-linux-musl: 11 117 480 bytes with
-  # panic=abort against 11 600 808 without, so unwinding costs 483 KB (+4.3%) on a
-  # binary already dominated by vendored OpenSSL. That is the trade this package
-  # accepts — a run that dies halfway through costs more than 4% of size.
-  env = {
-    CARGO_PROFILE_RELEASE_OPT_LEVEL = "z";
-    CARGO_PROFILE_RELEASE_LTO = "thin";
-    CARGO_PROFILE_RELEASE_STRIP = "symbols";
-    CARGO_PROFILE_RELEASE_CODEGEN_UNITS = "1";
-  };
+  # The release profile (opt-level, LTO, codegen-units, strip) lives in [profile.release]
+  # in Cargo.toml, along with the reason panic = "abort" must stay out of it. It used to
+  # be set here as CARGO_PROFILE_RELEASE_* environment variables, which silently override
+  # the manifest — so a cargo build outside Nix produced a different binary, and nothing
+  # would have flagged the two definitions drifting apart.
 
   # Force strip all symbols to minimise binary size
   stripAllList = ["bin"];

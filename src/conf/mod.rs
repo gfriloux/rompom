@@ -1,6 +1,6 @@
 mod update;
 
-use serde_derive::Deserialize;
+use serde::Deserialize;
 use std::{fs, io, path::PathBuf};
 
 use snafu::{Backtrace, ResultExt, Snafu};
@@ -126,6 +126,32 @@ pub enum Error {
   },
   #[snafu(display("Configuration needs to be updated. Run: rompom --update-config"))]
   ConfigNeedsUpdate,
+  #[snafu(display(
+    "unsupported language code{} {} in {} — ScreenScraper serves synopses in: {}",
+    if codes.len() > 1 { "s" } else { "" },
+    codes.join(", "),
+    path.display(),
+    SUPPORTED_LANGS.iter().map(|(code, _)| *code).collect::<Vec<_>>().join(", ")
+  ))]
+  UnsupportedLang { path: PathBuf, codes: Vec<String> },
+}
+
+/// The language codes in `lang` that ScreenScraper does not serve.
+///
+/// Case is folded first: `FR` is a reasonable thing to write and means `fr`. Anything
+/// else — a locale like `fr-FR`, a typo, a three-letter code — is reported, because the
+/// alternative is a run where every synopsis silently comes back empty and the user
+/// concludes ScreenScraper has no descriptions for their games.
+fn unsupported_langs(lang: &[String]) -> Vec<String> {
+  lang
+    .iter()
+    .filter(|code| {
+      !SUPPORTED_LANGS
+        .iter()
+        .any(|(supported, _)| *supported == code.to_lowercase())
+    })
+    .cloned()
+    .collect()
 }
 
 type Result<T, E = Error> = std::result::Result<T, E>;
@@ -140,6 +166,15 @@ impl Conf {
       Some(l) if !l.is_empty() => l,
       _ => return Err(Error::ConfigNeedsUpdate),
     };
+
+    let codes = unsupported_langs(&lang);
+    if !codes.is_empty() {
+      return Err(Error::UnsupportedLang {
+        path: PathBuf::from(file),
+        codes,
+      });
+    }
+    let lang: Vec<String> = lang.iter().map(|code| code.to_lowercase()).collect();
 
     if raw.systems.iter().any(|s| s.ia_items.is_some()) {
       return Err(Error::ConfigNeedsUpdate);
@@ -223,5 +258,57 @@ mod tests {
     assert!(Error::ConfigNeedsUpdate
       .to_string()
       .contains("--update-config"));
+  }
+
+  /// The six codes ScreenScraper serves, in any case, are accepted as they are.
+  #[test]
+  fn every_supported_language_passes() {
+    let lang: Vec<String> = SUPPORTED_LANGS
+      .iter()
+      .map(|(code, _)| code.to_string())
+      .collect();
+    assert_eq!(unsupported_langs(&lang), Vec::<String>::new());
+
+    // `FR` is a reasonable thing to write and means the same thing.
+    assert_eq!(
+      unsupported_langs(&["FR".to_string(), "En".to_string()]),
+      Vec::<String>::new()
+    );
+  }
+
+  /// A locale instead of a language code is the mistake this catches. Nothing failed
+  /// before: the run went through and every synopsis came back empty, which reads as
+  /// "ScreenScraper has no descriptions for my games".
+  #[test]
+  fn a_locale_or_a_typo_is_reported_not_ignored() {
+    assert_eq!(
+      unsupported_langs(&["fr-FR".to_string()]),
+      vec!["fr-FR".to_string()]
+    );
+    assert_eq!(
+      unsupported_langs(&["fr".to_string(), "jp".to_string(), "eng".to_string()]),
+      vec!["jp".to_string(), "eng".to_string()]
+    );
+  }
+
+  /// The message has to carry both what was wrong and what to write instead — the six
+  /// codes are not guessable, and `jp` looks as plausible as `fr`.
+  #[test]
+  fn the_message_lists_the_codes_that_would_have_worked() {
+    let message = Error::UnsupportedLang {
+      path: PathBuf::from("/home/user/.config/rompom.yml"),
+      codes: vec!["jp".to_string()],
+    }
+    .to_string();
+
+    assert!(message.contains("jp"), "got: {}", message);
+    assert!(
+      message.contains("/home/user/.config/rompom.yml"),
+      "got: {}",
+      message
+    );
+    for (code, _) in SUPPORTED_LANGS {
+      assert!(message.contains(code), "{} missing from: {}", code, message);
+    }
   }
 }

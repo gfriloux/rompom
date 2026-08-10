@@ -5,6 +5,7 @@ use std::{fs::create_dir_all, path::Path};
 
 use super::conf::System;
 use super::emulationstation::Game;
+use crate::hash::sha1_file;
 use screenscraper::jeuinfo::{JeuInfo, Media};
 
 #[derive(Default)]
@@ -335,10 +336,13 @@ impl Package {
     }
 
     sources.push(shell_quote("description.xml"));
-    sha1sums.push(shell_quote(&sanitize_sha1(&checksums::hash_file(
-      Path::new(&format!("{}/description.xml", directory.display())),
-      checksums::Algorithm::SHA1,
-    ))));
+    // Written moments ago by write_description_xml, so a read error here means something
+    // is badly wrong with the output directory. sanitize_sha1 turns the empty string into
+    // forty zeros, which makepkg rejects loudly — the one outcome worse than that would be
+    // a PKGBUILD claiming a sum nobody computed.
+    let description_sha1 =
+      sha1_file(&directory.join("description.xml")).unwrap_or_else(|_| String::new());
+    sha1sums.push(shell_quote(&sanitize_sha1(&description_sha1)));
 
     // Media sources. `format` and `region` come straight from ScreenScraper and end up
     // in filenames, so they go through the token whitelist before anything else.
@@ -744,6 +748,151 @@ mod tests {
     let xml = generate_description_xml(&sample_game());
     for absent in ["thumbnail", "marquee", "screenshot", "wheel", "manual"] {
       assert!(!xml.contains(absent), "{absent} should not be serialized");
+    }
+  }
+
+  // ── apply_game_path ──────────────────────────────────────────────────────
+
+  fn system(id: u32) -> System {
+    System {
+      name: "test".to_string(),
+      id,
+      basename: "test-rom-".to_string(),
+      depends: None,
+      dir: "test".to_string(),
+      source: None,
+    }
+  }
+
+  /// The default: EmulationStation keeps whatever path the Game already carries. Most
+  /// systems launch the ROM file directly, so touching this would break them all.
+  #[test]
+  fn an_ordinary_single_disc_game_keeps_its_path() {
+    let mut game = sample_game();
+    let before = game.path.clone();
+
+    apply_game_path(&system(4), &mut game, "sonic", false);
+
+    assert_eq!(game.path, before);
+  }
+
+  /// OpenBOR games are launched through a generated shell script, named after the game
+  /// rather than after the normalised romname.
+  #[test]
+  fn openbor_points_at_a_shell_script_named_after_the_game() {
+    let mut game = sample_game();
+    let expected = format!("./{}.sh", game.name);
+
+    apply_game_path(&system(214), &mut game, "sonic", false);
+
+    assert_eq!(game.path, expected);
+  }
+
+  /// Saturn/PSX (22) and PS2 (57) always install their discs beside an .m3u playlist,
+  /// single-disc releases included — the PKGBUILD templates build one either way.
+  #[test]
+  fn the_disc_based_systems_always_point_at_the_playlist() {
+    for id in [22, 57] {
+      let mut game = sample_game();
+      apply_game_path(&system(id), &mut game, "final-fantasy-vii", false);
+      assert_eq!(game.path, "./final-fantasy-vii.m3u", "system {}", id);
+    }
+  }
+
+  /// And any other system does the same as soon as the game has more than one disc.
+  #[test]
+  fn a_multi_disc_game_points_at_the_playlist_on_any_system() {
+    let mut game = sample_game();
+
+    apply_game_path(&system(20), &mut game, "lunar", true);
+
+    assert_eq!(game.path, "./lunar.m3u");
+  }
+
+  /// OpenBOR wins over the multi-disc rule: the script is what launches the game, and
+  /// a .m3u would point EmulationStation at a playlist nothing produces.
+  #[test]
+  fn openbor_wins_over_the_multi_disc_rule() {
+    let mut game = sample_game();
+    let expected = format!("./{}.sh", game.name);
+
+    apply_game_path(&system(214), &mut game, "beats-of-rage", true);
+
+    assert_eq!(game.path, expected);
+  }
+
+  // ── read_pkgver ──────────────────────────────────────────────────────────
+
+  /// The caller adds 1 to whatever comes back, so a wrong 0 here republishes an already
+  /// published package as version 1 — pacman then refuses the downgrade and the fix
+  /// never reaches the machine.
+  #[test]
+  fn read_pkgver_reads_the_version_a_previous_run_wrote() {
+    let dir = scratch_dir("pkgver-present");
+    std::fs::write(
+      dir.path().join("PKGBUILD"),
+      "pkgname=('x')\npkgver=7\npkgrel=1\n",
+    )
+    .unwrap();
+
+    assert_eq!(read_pkgver(dir.path()), 7);
+  }
+
+  /// A directory with no package yet — the genuine first run.
+  #[test]
+  fn read_pkgver_is_zero_when_there_is_no_pkgbuild() {
+    let dir = scratch_dir("pkgver-absent");
+
+    assert_eq!(read_pkgver(dir.path()), 0);
+  }
+
+  /// A PKGBUILD that is there but says nothing usable. Falling back to 0 is the
+  /// deliberate choice: the alternative is guessing, and the next build reports the
+  /// mismatch loudly.
+  #[test]
+  fn read_pkgver_is_zero_when_the_line_is_missing_or_unusable() {
+    for contents in [
+      "pkgname=('x')\npkgrel=1\n",
+      "pkgname=('x')\npkgver=\npkgrel=1\n",
+      "pkgname=('x')\npkgver=1.2.3\n",
+      "pkgname=('x')\npkgver=-4\n",
+      "  pkgver=9\n",
+    ] {
+      let dir = scratch_dir("pkgver-unusable");
+      std::fs::write(dir.path().join("PKGBUILD"), contents).unwrap();
+
+      assert_eq!(read_pkgver(dir.path()), 0, "contents: {:?}", contents);
+    }
+  }
+
+  /// Scratch directory removed on drop, so the tests leave nothing behind and can run
+  /// concurrently with each other.
+  fn scratch_dir(tag: &str) -> ScratchDir {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static COUNTER: AtomicUsize = AtomicUsize::new(0);
+
+    let n = COUNTER.fetch_add(1, Ordering::SeqCst);
+    let dir = std::env::temp_dir().join(format!(
+      "rompom-pkg-test-{}-{}-{}",
+      std::process::id(),
+      tag,
+      n
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    ScratchDir(dir)
+  }
+
+  struct ScratchDir(std::path::PathBuf);
+
+  impl ScratchDir {
+    fn path(&self) -> &Path {
+      &self.0
+    }
+  }
+
+  impl Drop for ScratchDir {
+    fn drop(&mut self) {
+      let _ = std::fs::remove_dir_all(&self.0);
     }
   }
 }

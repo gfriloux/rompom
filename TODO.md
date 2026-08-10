@@ -98,34 +98,35 @@ correction est arrivée avec ses tests : le dépôt est passé de 0 à 34 tests.
   maintenant le fichier, le champ et la ligne. Au passage : `--update-config` rapportait
   ses échecs de **sérialisation** sous `ParseConfiguration` — d'où une variante
   `SerializeConfiguration` distincte.
-- [ ] **P1.4 — Cargo.toml** : pinner les 10 dépendances `*` (valeurs du lock, reqwest
-  est à 0.11.27), ajouter
-  `[profile.release]` (opt-level=z, LTO — aujourd'hui seulement dans le Nix), retirer
-  `serde_derive` redondant. *(petit)*
-  - **Dette de sécurité associée**, révélée par `just audit` le 2026-08-09 et acceptée
-    explicitement dans `.cargo/audit.toml` (chaque ignore y est justifié) :
-    - `rustls-webpki 0.101.7` — 3 advisories (RUSTSEC-2026-0098/0099/0104), via
-      `rustls 0.21` ← `reqwest 0.11`. Sortie = reqwest 0.12, **impossible pour rompom
-      seul** : screenscraper et internetarchive pinnent aussi reqwest 0.11, les trois
-      doivent bouger ensemble. Se combine avec la migration rustls de P3. *(moyen)*
-    - `rustc-serialize 0.3.25` — RUSTSEC-2022-0004, sans correctif amont, via
-      `shaman` ← `checksums`. Sortie = abandonner la crate `checksums` (rompom ne s'en
-      sert que pour SHA1/MD5/CRC32). *(petit/moyen)*
-    - Restent 9 avertissements *unmaintained/unsound* non bloquants (`atty`,
-      `ansi_term`, `paste`, `lru`, `shaman`, `anyhow`…), à revoir au même moment.
+- [x] **P1.4 — Cargo.toml** — *fait le 2026-08-10*. Les dix `*` pinnés sur les valeurs que
+  `Cargo.lock` résolvait déjà (lock inchangé, c'était la vérification) ; `serde_derive`
+  retiré, ce qui imposait aussi de basculer deux `use` sur `serde::` ; `[profile.release]`
+  déplacé du bloc `env` du Nix vers `Cargo.toml`, **avec** le commentaire sur
+  `panic = "abort"` — les variables `CARGO_PROFILE_RELEASE_*` écrasent le manifeste, garder
+  les deux garantissait une divergence qu'aucune porte ne détecte. Vérifié par `nix build`
+  avant/après : 11 609 000 octets les deux fois.
+  - **`checksums` abandonnée** au passage (`src/hash.rs` : `sha1`, `md-5`, `crc32fast`).
+    C'était la seule dette d'audit que rompom pouvait solder seul, et un test temporaire
+    a comparé les deux implémentations sur de vrais fichiers — padding CRC32 compris —
+    avant de retirer la crate. Résultat : `RUSTSEC-2022-0004` sort de `.cargo/audit.toml`,
+    les avertissements passent de 9 à 4, et le binaire perd 197 Ko.
+  - **Reste la dette rustls**, inchangée et toujours ignorée avec justification :
+    `rustls-webpki 0.101.7` — 3 advisories (RUSTSEC-2026-0098/0099/0104), via
+    `rustls 0.21` ← `reqwest 0.11`. Sortie = reqwest 0.12, **impossible pour rompom
+    seul** : screenscraper et internetarchive pinnent aussi reqwest 0.11, les trois
+    doivent bouger ensemble. Se combine avec la migration rustls de P3. *(moyen)*
 - [x] **P1.5 — CI GitHub Actions** — *fait le 2026-08-09*. `.github/workflows/ci.yml` :
   job `ci` (`just ci` = version-check + fmt-check + clippy `-D warnings` + test),
   job `nix` (`nix flake check`), job `audit` (`cargo audit`, advisory). Le `Justfile` est
   la seule définition des portes ; pre-commit l'appelle aussi. Voir `PROCEDURE_PLANS.md` §7.
-- [ ] **P1.6 — Premiers tests unitaires** (fonctions pures, sans réseau).
-  *Entamé le 2026-08-09* : le snapshot XML de `generate_description_xml()` existe
-  (`src/package.rs`, 2 tests) — il a servi à prouver que la montée quick-xml 0.39→0.41
-  ne changeait pas d'un octet la sortie. Restent :
-  `disc_indicator()`, `group_multi_disc()`, `search_name()`, `check_media_changes()`,
-  `apply_game_path()`,
-  `read_pkgver()` + round-trip `SystemState`. Puis `apply_run_state()`
-  (invariant anti-underflow). Extraire `disc_indicator`/`group_multi_disc` vers
-  `src/collect.rs` au passage. *(petit chacun)*
+- [x] **P1.6 — Premiers tests unitaires** (fonctions pures, sans réseau) — *fait le
+  2026-08-10*. Le dépôt passe de 59 à 89 tests. `disc_indicator()` et
+  `group_multi_disc()` sont partis dans `src/collect.rs` avec leurs dix tests ;
+  `search_name()`, `check_media_changes()`, `apply_game_path()` et `read_pkgver()` ont
+  les leurs. **Ce point réclamait deux tests qui existaient déjà** : le round-trip
+  `SystemState` (`state::tests::a_state_survives_a_round_trip`) et `apply_run_state()`
+  (sept tests dans `worker::run_state::tests`), écrits en v0.16/v0.17 sans que la
+  roadmap soit mise à jour.
 - [x] **P1.7 — `./launcher` OpenBOR écrit en CWD** — *fait le 2026-08-10*. Écrit
   maintenant dans le répertoire de la ROM.
   - **À creuser (bug distinct, non corrigé)** : ce fichier `launcher` n'est référencé
@@ -141,26 +142,42 @@ correction est arrivée avec ses tests : le dépôt est passé de 0 à 34 tests.
 
 ## P2 — Simplicité d'utilisation
 
-- [ ] **P2.1 — CLI** : supprimer le `panic!` sur argument invalide (`main.rs:264-267`),
-  ajouter `--version`, exit codes cohérents (système inconnu / sans source sortent
-  en 0 aujourd'hui), `--list-systems`. *(petit)*
-- [ ] **P2.2 — `rompom --init`** : écrire un template commenté dans
-  `~/.config/rompom.yml` s'il n'existe pas (le sample de la racine via
-  `include_str!`) ; valider `lang` contre `SUPPORTED_LANGS` au chargement. *(petit/moyen)*
-- [ ] **P2.3 — Statut `retrying (2/3)...`** sur la barre pendant les retries
-  (aujourd'hui invisibles). *(petit)*
-- [ ] **P2.4 — Multi-disc, cas limites** : tags région après l'indicateur perdus/fusionnés
-  (`Game (Disc 1) (USA)` + `Game (Disc 2) (Europe)` fusionnent) ; numéros de disque
-  dupliqués acceptés → m3u faux ; `(CD32)` matché comme disque 32. *(moyen)*
-- [ ] **P2.5 — Documentation** : Nerd Fonts requis (+ fallback `--ascii`, les icônes
-  sont centralisées dans `MEDIA_ICONS`), fichiers créés dans le cwd
-  (state.yml/run.yml/debug.log), conséquence de supprimer state.yml, lien tier de
-  compte SS ↔ maxthreads. *(petit)*
-- [ ] **P2.6 — Mode non-interactif `--plain`** + `--resume=yes|no` : aucune détection
-  de tty aujourd'hui (`Ui::new` fait raw mode inconditionnellement) ; 3 bloqueurs
-  CI : prompt resume, TUI, modale. Indispensable pour le cas d'usage CI du README. *(moyen/gros)*
+- [x] **P2.1 — CLI** — *fait le 2026-08-10*. `panic!` remplacé par le message de `getopts`
+  + usage + exit 2 ; `--version` (répondu avant toute lecture disque, donc utilisable sur
+  une machine sans config) ; `--list-systems` ; codes de sortie **0** le run a eu lieu,
+  **1** il n'a pas pu démarrer, **2** la ligne de commande est fautive — documentés dans
+  le README. Système inconnu et système sans `source` sortaient en 0, donc en CI un nom
+  mal orthographié était un build vert qui n'avait rien scrapé.
+- [x] **P2.2 — `rompom --init`** — *fait le 2026-08-10*. Écrit le sample de la racine
+  (`include_str!`) avec `create_new` et non `exists()` puis write : ce fichier porte le
+  mot de passe ScreenScraper, le refus n'a de valeur que si le test et l'écriture sont
+  la même opération. `lang` est validé contre `SUPPORTED_LANGS` (casse repliée), avec un
+  message listant les six codes qui marchent — un `lang: [fr-FR]` chargeait sans broncher
+  et rendait tous les synopsis vides pour le run entier.
+- [x] **P2.3 — Statut `retrying (2/3)...`** — *fait le 2026-08-10*. Posé **avant** le
+  `sleep` du backoff, en jaune : tout l'intérêt est que la barre ait quelque chose à
+  montrer pendant que le worker attend.
+- [x] **P2.4 — Multi-disc, cas limites** — *fait le 2026-08-10*, trois paires
+  test-rouge + correctif. Le nom de groupe est désormais le stem **privé du seul groupe
+  disque**, donc un tag de part et d'autre survit ; deux fichiers réclamant le même
+  numéro font **refuser** le groupe (deux paquets se réparent à la main, un `.m3u` faux
+  ne se voit qu'à la manette) ; et `MAX_DISC = 20` écarte `(CD32)` et `(CD64)` sans
+  perdre la forme courte `(CD1)`, ce qu'aurait fait la règle du séparateur.
+- [x] **P2.5 — Documentation** — *fait le 2026-08-10*. Nerd Font en prérequis (+
+  `--ascii`), tableau des trois fichiers écrits **dans le répertoire courant**, ce que
+  coûte la suppression de `state.yml` (toute la bibliothèque retéléchargée, chaque
+  `pkgver` bumpé, donc republiée à qui suit le dépôt), et le lien tier SS ↔ `maxthreads`
+  ↔ vitesse d'identification.
+- [x] **P2.6 — Mode non-interactif `--plain`** — *fait le 2026-08-10*. Les trois bloqueurs
+  sont tombés : le prompt resume (`--resume=yes|no`, et EOF vaut **non** — `read_line`
+  rend `Ok(0)` sur stdin fermé et la réponse vide passait pour le *oui* par défaut) ;
+  la TUI (`--plain`, impliqué quand stdout n'est pas un terminal) ; et la modale
+  (`StepError::Fatal` explicite plutôt qu'une identification devinée). **Trouvé en
+  chemin** : sans terminal de contrôle, `enable_raw_mode().unwrap()` paniquait sur le
+  thread de rendu et `install_panic_hook()` avalait le message — le run allait au bout
+  sans rien afficher et sans rien signaler.
 - [ ] **P2.7 — Refonte TUI « turn 4 » (design handoff Claude Design)** : spec complète
-  dans `tmp/design_handoff_rompom_tui/` (README.md + mockups.dc.html, maquettes `4a/4b/4c`).
+  dans **`design/tui/`** (`handoff.md` + `mockups.dc.html`, maquettes `4a/4b/4c`).
   Supprime la découpe par phase (`PANELS`/`RomPhase`/`render_active()` disparaissent) au
   profit d'une grille unique : une ligne par ROM à sa place d'arrivée, colonnes d'état
   (id/pkg/rom + 9 pastilles médias), bandeau progression + sparkline débit + ETA,
@@ -170,11 +187,12 @@ correction est arrivée avec ses tests : le dépôt est passé de 0 à 34 tests.
   non-interactif). Haute fidélité : couleurs/largeurs/raccourcis définitifs, garder les
   glyphes Nerd Font de `MEDIA_ICONS`. Fichiers : `ui/render.rs` (réécrit), `ui/mod.rs`,
   `ui/modal.rs`, `summary.rs`. *(gros)*
-  - Prérequis : P1.2 (propager les messages d'erreur — la vue erreurs en a besoin) ;
-    fournit de fait P2.3 (statut retry visible) et la moitié UI de P2.6
-    (`Summary::print()` conservé comme repli non-interactif).
-  - Penser à committer le handoff dans le dépôt (ex. `design/tui/`) — il est
-    actuellement dans `tmp/`, non versionné.
+  - Prérequis P1.2 **satisfait** (v0.17), et P2.3 / P2.6 sont arrivés avant elle en
+    v0.18 : le statut retry existe, et `Summary::print()` est déjà le repli
+    non-interactif. La refonte doit donc les **conserver**, pas les fournir.
+  - Le repli `--plain` de P2.6 ne passe pas par `render()` : il ne sera pas cassé par la
+    réécriture, mais `plain_line()` et `ui::is_plain()` doivent survivre.
+  - Handoff versionné dans `design/tui/` depuis le 2026-08-10.
 
 ## P3 — Dette et long terme
 
@@ -229,10 +247,16 @@ correction est arrivée avec ses tests : le dépôt est passé de 0 à 34 tests.
    P1.6 (34 tests). P1.1–P1.3 ont été **sortis du périmètre** en cours de route : le lot
    P0 formait un ensemble cohérent et publiable, et P1.1 s'est révélé bloqué par la lib
    `screenscraper` (cf. ci-dessus).
-3. **v0.17** — confiance : P1.1 (après décision sur la lib), P1.2 (cause des échecs
-   affichée), P1.3 (messages d'erreur de config), puis P1.4 (pinning + dette de sécurité
-   des dépendances), P1.7, P1.8.
-4. **v0.18** — UX : `--plain` (P2.6), multi-disc edge cases (P2.4), `--init` (P2.2),
-   P2.1, P2.3, P2.5.
-5. **v0.19** — refonte TUI « turn 4 » (P2.7), une fois P1.2 en place.
-6. **Ensuite** — dette P3 au fil de l'eau, puis contribution SS sur base saine.
+3. **v0.17.0 — livrée le 2026-08-10.** Confiance : P1.1 (après la sortie de
+   `screenscraper` v0.7.0), P1.2, P1.3, P1.7, P1.8, plus `StepError` remonté de P3.
+   P1.4 en est **sorti en cours de route** : le pinning n'a rien à voir avec la confiance
+   dans les chemins d'échec, et le lot était déjà cohérent sans lui.
+4. **v0.18.0 — livrée le 2026-08-10.** Dette puis UX, dans cet ordre : P1.4 (+ sortie de
+   `checksums`), P1.6 (89 tests, `src/collect.rs` extrait), P2.4, P2.1, P2.2, P2.3, P2.5,
+   P2.6. Les tests de P1.6 sont passés **avant** P2.4 exprès : les deux fonctions que
+   P2.4 corrige n'avaient aucune couverture, et le diff des tests montre exactement ce
+   que les correctifs ont changé.
+5. **v0.19** — refonte TUI « turn 4 » (P2.7), seule. Ses prérequis sont tous en place ;
+   c'est une réécriture de `ui/render.rs` qui mérite son propre lot.
+6. **Ensuite** — dette P3 au fil de l'eau (dont la migration reqwest 0.12 / rustls, qui
+   demande de bouger les trois dépôts ensemble), puis contribution SS sur base saine.

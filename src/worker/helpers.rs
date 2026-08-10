@@ -131,6 +131,7 @@ pub(crate) fn check_media_changes(
 #[cfg(test)]
 mod tests {
   use super::*;
+  use screenscraper::jeuinfo::Media;
   use std::path::PathBuf;
 
   // ── lookup_failure ───────────────────────────────────────────────────────
@@ -277,5 +278,135 @@ mod tests {
   fn media_filename_falls_back_when_the_format_is_unusable() {
     assert_eq!(media_filename("image", "../.."), "image.bin");
     assert_eq!(media_filename("image", ""), "image.bin");
+  }
+
+  // ── search_name ──────────────────────────────────────────────────────────
+
+  /// What ScreenScraper is asked for when the checksum lookup misses. Every tag left in
+  /// spends a request and comes back empty, and a run that misses enough of them earns
+  /// the 431 that closes the account for the day.
+  #[test]
+  fn search_name_strips_the_extension_and_the_tags() {
+    assert_eq!(
+      search_name("Sonic The Hedgehog (USA) [!].zip"),
+      "Sonic The Hedgehog"
+    );
+    assert_eq!(search_name("Chrono Trigger (USA).sfc"), "Chrono Trigger");
+    assert_eq!(search_name("Chrono Trigger [b1].sfc"), "Chrono Trigger");
+    assert_eq!(
+      search_name("Final Fantasy VII (USA) (Disc 1).chd"),
+      "Final Fantasy VII"
+    );
+  }
+
+  /// A clean name must come through untouched — the common case for a folder source
+  /// someone has already tidied up.
+  #[test]
+  fn search_name_leaves_an_untagged_title_alone() {
+    assert_eq!(search_name("Super Mario World.zip"), "Super Mario World");
+    assert_eq!(search_name("Super Mario World"), "Super Mario World");
+  }
+
+  /// Degenerate, but reachable: a file named only by its tags. An empty search term is
+  /// a request that cannot match, so what matters is that it does not panic on the way.
+  #[test]
+  fn search_name_survives_a_title_that_is_only_tags() {
+    assert_eq!(search_name("(USA).zip"), "");
+    assert_eq!(search_name("[!].zip"), "");
+  }
+
+  // ── check_media_changes ──────────────────────────────────────────────────
+
+  fn media(sha1: &str) -> Media {
+    Media {
+      name: "box-2D".to_string(),
+      parent: "jeu".to_string(),
+      url: "https://screenscraper.fr/medias/1/2/box-2D.png".to_string(),
+      region: Some("wor".to_string()),
+      crc: String::new(),
+      md5: String::new(),
+      sha1: sha1.to_string(),
+      size: None,
+      format: "png".to_string(),
+    }
+  }
+
+  fn state(entries: &[(&str, Option<&str>)]) -> HashMap<String, Option<String>> {
+    entries
+      .iter()
+      .map(|(k, v)| (k.to_string(), v.map(|s| s.to_string())))
+      .collect()
+  }
+
+  /// The steady state of any second run: nothing changed, so nothing is rebuilt and no
+  /// pkgver moves. Getting this wrong bumps every package in the library for free.
+  #[test]
+  fn identical_medias_are_not_a_change() {
+    let medias = Medias {
+      image: Some(media("aaa")),
+      video: Some(media("bbb")),
+      ..Default::default()
+    };
+
+    let (changed, lines) = check_media_changes(
+      &medias,
+      &state(&[("image", Some("aaa")), ("video", Some("bbb"))]),
+    );
+
+    assert!(!changed);
+    // One line per tracked kind, whether present or not — the --debug log reads as a
+    // full inventory rather than a list of surprises.
+    assert_eq!(lines.len(), 8);
+  }
+
+  /// ScreenScraper replacing an asset is the reason this function exists.
+  #[test]
+  fn a_new_sha1_on_a_media_is_a_change() {
+    let medias = Medias {
+      image: Some(media("aaa")),
+      ..Default::default()
+    };
+
+    let (changed, lines) = check_media_changes(&medias, &state(&[("image", Some("bbb"))]));
+
+    assert!(changed);
+    assert!(
+      lines
+        .iter()
+        .any(|l| l.contains("image") && l.contains("CHANGED")),
+      "{:#?}",
+      lines
+    );
+  }
+
+  /// An asset ScreenScraper did not have last time and has now.
+  #[test]
+  fn a_media_that_appears_is_a_change() {
+    let medias = Medias {
+      marquee: Some(media("ccc")),
+      ..Default::default()
+    };
+
+    let (changed, _) = check_media_changes(&medias, &state(&[]));
+
+    assert!(changed);
+  }
+
+  /// And one it has withdrawn. The package must lose the file, so this counts too —
+  /// an absent media compared against a recorded sha1 is not "unchanged".
+  #[test]
+  fn a_media_that_disappears_is_a_change() {
+    let (changed, _) = check_media_changes(&Medias::default(), &state(&[("wheel", Some("ddd"))]));
+
+    assert!(changed);
+  }
+
+  /// First run: no state at all, and ScreenScraper has nothing either. Nothing to
+  /// download is not a change — otherwise every ROM without media would rebuild forever.
+  #[test]
+  fn nothing_on_either_side_is_not_a_change() {
+    let (changed, _) = check_media_changes(&Medias::default(), &state(&[]));
+
+    assert!(!changed);
   }
 }

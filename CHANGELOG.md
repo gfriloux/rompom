@@ -12,6 +12,62 @@ git-cliff; they are preserved verbatim, with far more detail, in
 [SemVer]: https://semver.org/
 [Conventional Commits]: https://www.conventionalcommits.org/
 
+## [0.18.0] — 2026-08-10
+
+### Features
+
+- **pipeline**: Fail unidentified ROMs instead of blocking without a terminal ([`504984b`](https://github.com/gfriloux/rompom/commit/504984b75bc97a5b7ec8ab9ef6d36b016089ce1e))
+- **ui**: Add a non-interactive --plain mode ([`84bcdca`](https://github.com/gfriloux/rompom/commit/84bcdcaf27ab07fd56ef3724e59331b0df0fce32))
+- **cli**: Answer the resume prompt up front with --resume ([`a4912fa`](https://github.com/gfriloux/rompom/commit/a4912fa12e7ed0a75f52033e24c40dc38c6c64de))
+- **ui**: Add --ascii for terminals without a Nerd Font ([`809b269`](https://github.com/gfriloux/rompom/commit/809b269f90180371a9ba1effbb0882b42319052d))
+- **ui**: Show the retry attempt on the bar ([`f00cb6e`](https://github.com/gfriloux/rompom/commit/f00cb6eaaae98e0935512158620cf3b57cd71bea))
+- **cli**: Write a starter configuration with --init ([`51a5f94`](https://github.com/gfriloux/rompom/commit/51a5f9477a86d2bc61ce47a9a2116ccc3e246fb3))
+- **cli**: Add --list-systems ([`1293a0c`](https://github.com/gfriloux/rompom/commit/1293a0c194cac5b09b2d94fa91a42baf0ed103ba))
+- **cli**: Add --version ([`14ea004`](https://github.com/gfriloux/rompom/commit/14ea004558ce8c3662ffa99d58e85b8fbc6b8f1b))
+
+### Bug fixes
+
+- **conf**: Reject a language code ScreenScraper does not serve ([`b46a01f`](https://github.com/gfriloux/rompom/commit/b46a01f931d2349d9863b6b64559a57a6dafdaa7))
+- **cli**: Exit non-zero when the system is unknown or has no source ([`95893ee`](https://github.com/gfriloux/rompom/commit/95893ee1cd2d8680132d77147de863f08fba0b59))
+- **cli**: Report an unknown argument instead of panicking ([`5401677`](https://github.com/gfriloux/rompom/commit/54016779c785de415e5782ed45b64fac411077a9))
+- **collect**: Stop reading the (CD32) platform tag as disc 32 ([`67028a0`](https://github.com/gfriloux/rompom/commit/67028a0210b8125ed59551c40c9b0d009fd2e22f))
+- **collect**: Refuse to group two files claiming the same disc number ([`34c3e37`](https://github.com/gfriloux/rompom/commit/34c3e37634bfd6fb435608c5ffceb7eb96614a1f))
+- **collect**: Keep what follows a disc indicator in the group name ([`68c1ed4`](https://github.com/gfriloux/rompom/commit/68c1ed4f7a89a87cc23d9d759d2f2af44010c8aa))
+
+### Refactoring
+
+- **collect**: Move multi-disc grouping out of main.rs ([`efcc18b`](https://github.com/gfriloux/rompom/commit/efcc18bb4a5f8209a23820b2490f67ea083ef2ae))
+- **pipeline**: Hash with the RustCrypto crates instead of checksums ([`9b77fdd`](https://github.com/gfriloux/rompom/commit/9b77fddd4c27251c04bf2a87c4f65dafaf9a71c4))
+
+### Documentation
+
+- Record what v0.18.0 closed in the roadmap ([`77f85bb`](https://github.com/gfriloux/rompom/commit/77f85bb0c78fd1acaabdf6ba6330ad5525f65c12))
+- **ui**: Commit the turn-4 TUI design handoff ([`ab68c67`](https://github.com/gfriloux/rompom/commit/ab68c670847f0ee80379f673424e4bc53d925776))
+- Document the Nerd Font requirement and the files rompom writes ([`2c4fe12`](https://github.com/gfriloux/rompom/commit/2c4fe12eb88c2b8c319506a0e866178a3f0e5f1a))
+- Correct the test-debt statements left over from v0.16 ([`3da342f`](https://github.com/gfriloux/rompom/commit/3da342f0d4d22a14d6b945639258dd655e6b9540))
+
+### Tests
+
+- **package**: Cover apply_game_path and read_pkgver ([`eb33776`](https://github.com/gfriloux/rompom/commit/eb33776f0a2cf847cb9633638da431a23541c773))
+- **pipeline**: Cover search_name and media change detection ([`02245fd`](https://github.com/gfriloux/rompom/commit/02245fdbb9a0a23000743d75e02f697330001e96))
+- **collect**: Cover disc detection and multi-disc grouping ([`5237649`](https://github.com/gfriloux/rompom/commit/5237649761f19b6ad380e49844105c7092b65bdb))
+
+### Continuous integration
+
+- Group build(deps) with the other dependency changes ([`d3881ab`](https://github.com/gfriloux/rompom/commit/d3881ab22a2e7935a8b47c1e0a1f65e5c4a3fe08))
+
+### Miscellaneous
+
+- **plans**: Record the v0.18.0 checks that were actually run ([`743100c`](https://github.com/gfriloux/rompom/commit/743100c39de1b606f293620d8b34f27d77294897))
+- Move the release profile from the Nix package into Cargo.toml ([`30c7ed9`](https://github.com/gfriloux/rompom/commit/30c7ed997e4d35803d7171075d7a29652b4d0ce6))
+- **plans**: Plan v0.18.0 — dependency debt, pure-function tests, CLI UX ([`f3f9e8b`](https://github.com/gfriloux/rompom/commit/f3f9e8baac76d005c981213dcccfd7108097c9dc))
+
+### Dependencies
+
+- **deps**: Stop ignoring RUSTSEC-2022-0004, the crate is gone ([`f121681`](https://github.com/gfriloux/rompom/commit/f121681dec5cfb7a44f21f642e282ccd65b330de))
+- **deps**: Drop serde_derive, redundant with serde's derive feature ([`d5766c3`](https://github.com/gfriloux/rompom/commit/d5766c301838ace94ba587c764ec793b2e37091e))
+- **deps**: Pin every dependency to the version already locked ([`c35323a`](https://github.com/gfriloux/rompom/commit/c35323a8ab878c4ab0baf6d28893a20b9f819890))
+
 ## [0.17.0] — 2026-08-10
 
 ### Features
