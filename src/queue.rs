@@ -12,9 +12,10 @@ use crate::rom::Rom;
 
 /// A counting semaphore backed by a `Mutex` + `Condvar`.
 ///
-/// Used for two purposes:
-/// - `ss_sem` (capacity = `user_info.maxthreads`): limits concurrent SS API calls.
-/// - `modal_sem` (capacity = 1): ensures at most one modal is open at a time.
+/// Used for one purpose: `ss_sem` (capacity = `user_info.maxthreads`) limits how many
+/// ScreenScraper calls are in flight at once. A second one used to serialise the
+/// identification modal, until it turned out the render thread already does that — and
+/// that capping it at one was what stopped more than one ROM from waiting at a time.
 pub struct Semaphore {
   available: Mutex<usize>,
   cvar: Condvar,

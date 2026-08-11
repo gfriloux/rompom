@@ -345,10 +345,13 @@ pub(crate) fn handle_lookup_ss(
 
 /// Block until the user identifies the ROM via the modal dialog.
 ///
-/// Acquires `modal_sem` (capacity 1) to serialise modals, sends a
-/// `ModalRequest`, and blocks on the response channel.  After the user
-/// responds (or cancels), stores the resolved `JeuInfo` in `rom.jeu` and
-/// transitions the bar to Packaging/waiting.
+/// Sends a `ModalRequest` and blocks on the response channel. The request is parked by
+/// the render thread until the user gets to it, so several ROMs can be waiting at once —
+/// each one holding a blocking-pool worker for as long as it waits. After the user
+/// responds (or cancels), stores the resolved `JeuInfo` in `rom.jeu`.
+///
+/// Nothing serialises the modals here: there is one render thread and one screen, so at
+/// most one modal can be open whatever the workers do.
 pub(crate) fn handle_wait_modal(
   rom_arc: &Arc<Mutex<Rom>>,
   step_idx: usize,
@@ -391,11 +394,6 @@ pub(crate) fn handle_wait_modal(
   // Signal the UI that we're waiting for user input.
   rom_arc.lock().unwrap().bar.waiting_for_user();
 
-  // Serialise modal display: only one modal open at a time.
-  if !ctx.modal_sem.acquire() {
-    return Err(StepError::Interrupted);
-  }
-
   let (resp_tx, resp_rx) = crossbeam_channel::bounded::<ModalResponse>(1);
   let ss_for_closure = Arc::clone(&ctx.ss);
   let system_id = ctx.system.id;
@@ -424,8 +422,6 @@ pub(crate) fn handle_wait_modal(
   let response = resp_rx
     .recv()
     .map_err(|_| StepError::Fatal("modal response channel closed".to_string()))?;
-
-  ctx.modal_sem.release();
 
   // ── Resolve JeuInfo from the user's response ───────────────────────────
   //

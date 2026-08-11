@@ -87,7 +87,6 @@ pub struct WorkerContext {
   pub state: Arc<Mutex<SystemState>>,
   pub modal_tx: crossbeam_channel::Sender<ModalRequest>,
   pub ss_sem: Arc<Semaphore>,
-  pub modal_sem: Arc<Semaphore>,
   /// Number of ROMs whose `SaveState` step has not yet completed.
   /// When it reaches zero the queue is shut down.
   pub remaining: Arc<AtomicUsize>,
@@ -115,7 +114,6 @@ pub fn worker_loop_main(ctx: Arc<WorkerContext>) {
   // Unblock workers stuck in Semaphore::acquire() so they can exit cleanly.
   if ctx.interrupted.load(Ordering::Relaxed) {
     ctx.ss_sem.cancel();
-    ctx.modal_sem.cancel();
   }
 }
 
@@ -129,7 +127,6 @@ pub fn worker_loop_blocking(ctx: Arc<WorkerContext>) {
   }
   if ctx.interrupted.load(Ordering::Relaxed) {
     ctx.ss_sem.cancel();
-    ctx.modal_sem.cancel();
   }
 }
 

@@ -39,7 +39,10 @@ use crate::worker::{lookup_failure, WorkerContext};
 /// Extra main-pool workers beyond the SS-semaphore limit.
 /// Keeps downloads and packaging running while SS slots are saturated.
 const N_EXTRA_MAIN_WORKERS: usize = 8;
-const N_BLOCKING_WORKERS: usize = 2;
+/// Blocking-pool workers, one per ROM that can sit waiting for the user at the same
+/// time. It used to be 2, next to a `modal_sem` of capacity 1 — so exactly one ROM could
+/// ever be waiting, and the "to identify" view had nothing to list.
+const N_BLOCKING_WORKERS: usize = 8;
 
 /// How often the accumulated ROM state is written to disk mid-run.
 const FLUSH_INTERVAL_MS: u64 = 30_000;
@@ -720,7 +723,6 @@ fn main() {
     state: Arc::clone(&state),
     modal_tx,
     ss_sem: Semaphore::new(n_disc),
-    modal_sem: Semaphore::new(1),
     remaining: Arc::new(AtomicUsize::new(remaining_count)),
     active,
     interrupted: Arc::clone(&interrupted),

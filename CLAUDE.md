@@ -265,8 +265,9 @@ LookupSS → WaitModal* → BuildPackage → DownloadRom ────┐
   `ss_game_id` from state if available (`jeuinfo_by_gameid`, fast path). Otherwise calls
   `jeuinfo()`. On miss: runs `jeu_recherche` by name (`search_name()` strips extension +
   region/revision tags), stores candidates in step data, sets `WaitModal` to Pending.
-- **`WaitModal`** — blocking step (runs on `pool_blocking`). Acquires `modal_sem` (capacity 1)
-  to serialise modals, sends `ModalRequest` to the render thread, blocks on response channel.
+- **`WaitModal`** — blocking step (runs on `pool_blocking`). Sends a `ModalRequest` to the
+  render thread and blocks on the response channel. Nothing serialises the modals: there
+  is one render thread and one screen, so at most one can be open whatever the workers do.
 - **`BuildPackage`** — checks if anything changed since last run:
   1. `check_media_changes()` — compares each media sha1 (from SS) with state
   2. `Package::check_description_changed()` — generates description.xml in memory, compares with disk
@@ -374,9 +375,14 @@ over the ratatui interface. Panics outside a step handler are therefore silent.
 - **Main pool**: `ss.user_info.maxthreads + N_EXTRA_MAIN_WORKERS` (fallback 1 + 8 = 9 total).
   Handles all steps except `WaitModal`. Extra workers keep downloads and packaging running while
   SS semaphore slots are saturated.
-- **Blocking pool**: `N_BLOCKING_WORKERS` (currently 2). Exclusively handles `WaitModal` steps.
+- **Blocking pool**: `N_BLOCKING_WORKERS` (currently 8). Exclusively handles `WaitModal`
+  steps. **One waiting ROM = one blocked worker**, so this number is how many ROMs can sit
+  in the "to identify" queue at once. It was 2, next to a `modal_sem` of capacity 1 — so
+  exactly one ROM could ever be waiting, and a queue could not form at all.
 
 Steps that call the SS API acquire `ss_sem` (capacity = `maxthreads`) before the call.
+It is now the only semaphore: `modal_sem` is gone, and with it the permit it leaked on
+every error path between `acquire()` and `release()`.
 
 ### Ctrl-C handling
 
@@ -392,8 +398,11 @@ Ctrl-C detected (render thread)
   → interrupted.swap(true)
   → queue.shutdown()          — wakes workers blocked in pop_main/pop_blocking
   → ss_sem.cancel()           — wakes workers blocked in Semaphore::acquire()
-  → modal_sem.cancel()
 ```
+
+The render loop also answers every **parked** `ModalRequest` with `Cancelled` once
+`interrupted` is set. A parked request is a blocking-pool worker waiting on a channel
+that nobody is going to answer any more, and the run cannot join until it is released.
 
 The `ctrlc` signal handler (registered via the `ctrlc` crate) remains in place as a fallback
 for `SIGINT` sent externally (e.g. `kill -2 PID`). Inside `show_modal()`, Ctrl-C is also
@@ -729,6 +738,11 @@ Call `summary()` before dropping `Ui`, print after (terminal is restored on drop
 - `ModalCandidate { name: String, game_id: String, year: Option<String> }` — one search result row
 - `ModalRequest { filename, sha1, candidates, response: Sender<ModalResponse>, fetch_by_id: Box<dyn Fn(u32) -> Result<String, String> + Send> }` — sent by a worker, blocks on `response`
 - `ModalResponse` — `SelectedId(String)` | `ManualId(String)` | `Cancelled`
+
+**Parking.** Requests land in `AppState::pending` rather than opening a modal on
+arrival. The first one to turn up with nothing else waiting opens by itself, so a run
+with a single unidentified ROM behaves as it always has; once a queue has formed the user
+decides when to work through it while the rest of the run carries on.
 
 **Modal UX (handled entirely inside the render thread via `show_modal()`):**
 - **List mode** (default): shows `jeu_recherche` candidates; ↑/↓ navigate, Enter confirm, `i` switch to Input, Esc cancel

@@ -362,6 +362,12 @@ pub(crate) struct AppState {
   pub(crate) workers: Option<(Arc<AtomicUsize>, usize)>,
   /// When set, the render function draws the modal overlay.
   pub(crate) modal: Option<ModalDisplayState>,
+  /// Identification requests waiting for the user, oldest first.
+  ///
+  /// A worker that sends one blocks on its response channel until it is answered, so a
+  /// parked request is a blocked blocking-pool worker. That is the cost of letting more
+  /// than one ROM wait at a time, and why `N_BLOCKING_WORKERS` is what it is.
+  pub(crate) pending: Vec<ModalRequest>,
 }
 
 impl AppState {
@@ -780,6 +786,7 @@ impl Ui {
       rate: Rate::new(),
       workers: None,
       modal: None,
+      pending: Vec::new(),
     }));
 
     let running = Arc::new(AtomicBool::new(true));
@@ -820,8 +827,30 @@ impl Ui {
           })
           .unwrap();
 
-        if let Ok(req) = modal_rx.try_recv() {
-          show_modal(req, &mut terminal, &state_r, &interrupted_r, &queue_r);
+        // Park whatever arrived. The first one to turn up with nothing else waiting
+        // opens on its own, so a run with a single unidentified ROM behaves as it
+        // always has; once a queue has formed it is the user who decides when to work
+        // through it, from the `m` view, while the rest of the run carries on.
+        let mut open_now = false;
+        while let Ok(req) = modal_rx.try_recv() {
+          let mut s = state_r.lock().unwrap();
+          open_now |= s.pending.is_empty() && s.modal.is_none();
+          s.pending.push(req);
+        }
+
+        // A parked request is a worker blocked on a channel nobody will answer once the
+        // interface is going away. Cancelling them is what lets the run join.
+        if interrupted_r.load(Ordering::SeqCst) {
+          for req in state_r.lock().unwrap().pending.drain(..) {
+            let _ = req.response.send(ModalResponse::Cancelled);
+          }
+        }
+
+        if open_now {
+          let req = state_r.lock().unwrap().pending.pop();
+          if let Some(req) = req {
+            show_modal(req, &mut terminal, &state_r, &interrupted_r, &queue_r);
+          }
         } else if crossterm::event::poll(Duration::from_millis(TICK_MS)).unwrap_or(false) {
           if let Ok(Event::Key(key)) = crossterm::event::read() {
             if key.kind != KeyEventKind::Press {
