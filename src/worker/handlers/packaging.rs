@@ -142,7 +142,7 @@ pub(crate) fn handle_build_package(
 
   // Show description.xml dot: green if written/updated, gray if unchanged.
   if description_changed {
-    rom_arc.lock().unwrap().bar.media_done("description");
+    rom_arc.lock().unwrap().bar.media_done("description", 0);
   } else {
     rom_arc.lock().unwrap().bar.media_skipped("description");
   }

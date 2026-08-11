@@ -165,6 +165,8 @@ src/
     mod.rs                  — Ui + RomBar + AppState + RomEntry + Cell/Dot, modal public types
     grid.rs                 — column widths, text fitting, scroll window, elapsed format;
                               pure arithmetic, and the only testable part of the interface
+    rate.rs                 — Rate: sliding one-minute window feeding the sparkline,
+                              the ROM/min and MiB/s figures and the ETA
     render.rs               — render(), render_banner(), render_grid(), render_modal()
                               and all rendering helpers
     modal.rs                — show_modal(): blocking event loop for the identification modal
@@ -608,6 +610,27 @@ cursor move turns it off and `grid::clamp_scroll()` takes over, moving the windo
 when the selection would leave it; `G` turns following back on. `render()` takes
 `&mut AppState` because the scroll offset lives there and the renderer is the only thing
 that knows the height of the grid on this frame.
+
+**Banner.** Line 1 is the progress bar (40 cells, fixed width so the counters after it
+do not move at every resize) and the four counters. Line 2 is throughput: sparkline,
+ROM/min, MiB/s, ETA, and how many workers are inside a step handler right now
+(`WorkerContext::active`, which counts handler time and not queue-waiting time).
+
+`rate::Rate` keeps a **one-minute** sliding window of 30 two-second buckets, ticked from
+the frame loop — the one thing that already has a heartbeat. Read over the window and not
+over the run: run-wide averages stop moving after a few minutes, and an ETA that no longer
+reacts to the network going slow is worse than none. With nothing finished in the window
+the ETA shows `—` rather than a number someone would plan around.
+
+Everything is keyed on **elapsed `Duration`**, never on `Instant::now()`: an `Instant`
+cannot be built at an arbitrary point, so a window driven by one is a window no test can
+walk through.
+
+Byte volume is counted **per finished file** (`bar.rom_done(bytes)`,
+`bar.media_done(kind, bytes)`, sized with a `stat` on what was just written). Neither
+`internetarchive` nor `screenscraper` reports anything while a transfer is in flight —
+see the handoffs in `.claude/plans/v0.19.0/` — so the figure advances in steps, and there
+is no per-download percentage in the `rom` cell.
 
 **Step cells** (`id`, `pkg`, `rom`) — `Cell` in `ui/mod.rs`:
 

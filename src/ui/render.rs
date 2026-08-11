@@ -1,3 +1,5 @@
+use std::sync::atomic::Ordering;
+
 use ratatui::{
   layout::{Constraint, Direction, Layout, Rect},
   style::{Color, Modifier, Style},
@@ -15,6 +17,9 @@ use super::{
 /// Cells taken by the progress bar in the banner.
 const BAR_WIDTH: usize = 40;
 
+/// Cells taken by the throughput sparkline, under the left of the progress bar.
+const SPARK_WIDTH: usize = 30;
+
 /// Background of the selected row and of the detail lines under it.
 const SELECTED_BG: Color = Color::Rgb(0x16, 0x1c, 0x24);
 
@@ -23,10 +28,15 @@ const SELECTED_BG: Color = Color::Rgb(0x16, 0x1c, 0x24);
 /// Takes the state mutably because the scroll offset lives in it and the renderer is
 /// the only thing that knows how tall the grid is on this frame.
 pub(super) fn render(frame: &mut Frame, state: &mut AppState) {
+  // The throughput window advances from the frame loop: it needs a heartbeat, and this
+  // is the one thing that already has one.
+  let (elapsed, done, bytes) = (state.started.elapsed(), state.done(), state.bytes);
+  state.rate.tick(elapsed, done, bytes);
+
   let areas = Layout::default()
     .direction(Direction::Vertical)
     .constraints([
-      Constraint::Length(3), // banner
+      Constraint::Length(4), // banner
       Constraint::Min(1),    // grid
       Constraint::Length(1), // key hints
     ])
@@ -79,15 +89,57 @@ fn render_banner(frame: &mut Frame, area: Rect, state: &AppState) {
   // Two spans rather than a `Gauge`: the bar is 40 cells wide whatever the terminal is,
   // because the counters after it sit at fixed offsets and a stretching bar would push
   // them around at every resize.
-  let mut spans = vec![
+  let mut progress = vec![
     Span::styled(grid::fit("progress", 10), dim()),
     Span::styled("█".repeat(filled), Style::default().fg(Color::Green)),
     Span::styled("█".repeat(BAR_WIDTH - filled), dim()),
     Span::styled(format!(" {:>3}% ", (ratio * 100.0) as u64), dim()),
   ];
-  spans.extend(counter_spans(state));
+  progress.extend(counter_spans(state));
 
-  frame.render_widget(Paragraph::new(Line::from(spans)), inner);
+  frame.render_widget(
+    Paragraph::new(vec![Line::from(progress), throughput_line(state, done)]),
+    inner,
+  );
+}
+
+/// `rate  ▄▅▆▇█…   29 rom/min   12.1 MiB/s   eta 4m 20s   7/8 workers`
+fn throughput_line(state: &AppState, done: usize) -> Line<'static> {
+  let eta = match state.rate.eta(state.total.saturating_sub(done)) {
+    Some(d) => format!("eta {}", grid::format_elapsed(d)),
+    // Nothing has finished in the last minute, so there is no honest number to put
+    // here — and a made-up one is what people plan the evening around.
+    None => "eta —".to_string(),
+  };
+  let workers = match &state.workers {
+    Some((active, total)) => format!("{}/{} workers", active.load(Ordering::Relaxed), total),
+    None => String::new(),
+  };
+
+  Line::from(vec![
+    Span::styled(grid::fit("rate", 10), dim()),
+    Span::styled(
+      state.rate.spark(SPARK_WIDTH),
+      Style::default().fg(Color::Cyan),
+    ),
+    Span::raw(grid::fit("", BAR_WIDTH - SPARK_WIDTH + 1)),
+    Span::styled(
+      grid::fit(&format!("{:.0} rom/min", state.rate.roms_per_min()), 15),
+      Style::default().add_modifier(Modifier::BOLD),
+    ),
+    Span::styled(
+      grid::fit(
+        &format!(
+          "{}/s",
+          grid::format_bytes(state.rate.bytes_per_sec() as u64)
+        ),
+        15,
+      ),
+      dim(),
+    ),
+    Span::styled(grid::fit(&eta, 14), dim()),
+    Span::styled(workers, dim()),
+  ])
 }
 
 /// `✓ N new   = N same   ✗ N failed   ? N to id`, at fixed offsets.

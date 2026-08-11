@@ -13,6 +13,16 @@ use crate::{
 
 use super::super::{helpers::media_filename, WorkerContext};
 
+/// Size of a file that was just written, for the run's transfer volume.
+///
+/// The file on disk is the only measure available: neither `internetarchive` nor
+/// `screenscraper` reports anything while a download is in flight, so the volume
+/// advances one finished file at a time. A stat that fails contributes nothing rather
+/// than failing the step — this figure is a display, not a decision.
+fn written(path: &Path) -> u64 {
+  fs::metadata(path).map(|m| m.len()).unwrap_or(0)
+}
+
 // ── CopyRom ───────────────────────────────────────────────────────────────
 
 /// Copy a local folder-source ROM to its output directory.
@@ -89,7 +99,7 @@ pub(crate) fn handle_copy_rom(
   }
   let updated = copy_disc(&local_path, &dest1, &sha1_expected)?;
   if updated {
-    rom_arc.lock().unwrap().bar.rom_done();
+    rom_arc.lock().unwrap().bar.rom_done(written(&dest1));
   } else {
     rom_arc.lock().unwrap().bar.rom_skipped();
   }
@@ -166,7 +176,7 @@ pub(crate) fn handle_download_rom(
           .fetch(&dest1, DownloadMethod::Https)
           .map_err(StepError::transient)?;
         dl1.verify_sha1(&dest1).map_err(StepError::transient)?;
-        rom_arc.lock().unwrap().bar.rom_done();
+        rom_arc.lock().unwrap().bar.rom_done(written(&dest1));
       }
     }
   } else {
@@ -175,7 +185,7 @@ pub(crate) fn handle_download_rom(
       .fetch(&dest1, DownloadMethod::Https)
       .map_err(StepError::transient)?;
     dl1.verify_sha1(&dest1).map_err(StepError::transient)?;
-    rom_arc.lock().unwrap().bar.rom_done();
+    rom_arc.lock().unwrap().bar.rom_done(written(&dest1));
   }
 
   // ── Extra discs (disc 2, 3, …) ────────────────────────────────────────
@@ -239,7 +249,7 @@ pub(crate) fn handle_download_medias(
               .media_download(m)
               .fetch(&dest)
               .map_err(|e| StepError::Transient(format!("media {}: {}", kind, e)))?;
-            rom_arc.lock().unwrap().bar.media_done(kind);
+            rom_arc.lock().unwrap().bar.media_done(kind, written(&dest));
           } else {
             rom_arc.lock().unwrap().bar.media_skipped(kind);
           }

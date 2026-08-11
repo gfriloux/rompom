@@ -708,6 +708,10 @@ fn main() {
     return;
   }
 
+  let n_main = n_disc + N_EXTRA_MAIN_WORKERS;
+  let active = Arc::new(AtomicUsize::new(0));
+  ui.set_workers(Arc::clone(&active), n_main + N_BLOCKING_WORKERS);
+
   let ctx = Arc::new(WorkerContext {
     queue: Arc::clone(&queue),
     ss: Arc::clone(&ss),
@@ -718,6 +722,7 @@ fn main() {
     ss_sem: Semaphore::new(n_disc),
     modal_sem: Semaphore::new(1),
     remaining: Arc::new(AtomicUsize::new(remaining_count)),
+    active,
     interrupted: Arc::clone(&interrupted),
     debug_log_path,
   });
@@ -742,7 +747,6 @@ fn main() {
 
   // ── Launch workers ────────────────────────────────────────────────────
 
-  let n_main = n_disc + N_EXTRA_MAIN_WORKERS;
   let mut handles: Vec<thread::JoinHandle<()>> = Vec::with_capacity(n_main + N_BLOCKING_WORKERS);
 
   for _ in 0..n_main {

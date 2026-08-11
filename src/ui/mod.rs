@@ -1,11 +1,12 @@
 mod grid;
 mod modal;
+mod rate;
 mod render;
 
 use std::{
   io,
   sync::{
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicUsize, Ordering},
     Arc, Mutex,
   },
   thread,
@@ -24,6 +25,7 @@ use crate::queue::TaskQueue;
 use crate::summary::Summary;
 
 use modal::show_modal;
+use rate::Rate;
 use render::render;
 
 // ── Constants ─────────────────────────────────────────────────────────────
@@ -317,6 +319,17 @@ pub(crate) struct AppState {
   /// Whether the window tracks the workers on its own. Moving the cursor turns this
   /// off — the user is reading something — and `G` turns it back on.
   pub(crate) follow: bool,
+  /// When the run started, which is what the throughput window is keyed on.
+  pub(crate) started: Instant,
+  /// Bytes written by ROM and media transfers so far.
+  ///
+  /// Counted per finished file, not per chunk: neither `internetarchive` nor
+  /// `screenscraper` reports a download's progress (see the handoffs in
+  /// `.claude/plans/v0.19.0/`), so the figure advances in steps rather than smoothly.
+  pub(crate) bytes: u64,
+  pub(crate) rate: Rate,
+  /// Workers currently inside a step handler, and how many there are in total.
+  pub(crate) workers: Option<(Arc<AtomicUsize>, usize)>,
   /// When set, the render function draws the modal overlay.
   pub(crate) modal: Option<ModalDisplayState>,
 }
@@ -469,8 +482,12 @@ impl RomBar {
     self.set_status("checksum mismatch, re-downloading");
   }
 
-  pub fn rom_done(&self) {
-    self.state.lock().unwrap().roms[self.index].rom = Cell::Done;
+  /// `bytes` is the size of the file that was just written — the only measure of
+  /// transfer volume available while the libraries report nothing during a download.
+  pub fn rom_done(&self, bytes: u64) {
+    let mut s = self.state.lock().unwrap();
+    s.roms[self.index].rom = Cell::Done;
+    s.bytes += bytes;
   }
 
   pub fn rom_skipped(&self) {
@@ -484,9 +501,10 @@ impl RomBar {
     self.set_status(format!("{} — downloading", kind));
   }
 
-  pub fn media_done(&self, kind: &str) {
+  pub fn media_done(&self, kind: &str, bytes: u64) {
     self.set_media(kind, Dot::Fresh);
     self.set_status(format!("{} ✓", kind));
+    self.state.lock().unwrap().bytes += bytes;
   }
 
   pub fn media_skipped(&self, kind: &str) {
@@ -652,6 +670,10 @@ impl Ui {
       selected: 0,
       scroll: 0,
       follow: true,
+      started: Instant::now(),
+      bytes: 0,
+      rate: Rate::new(),
+      workers: None,
       modal: None,
     }));
 
@@ -722,6 +744,12 @@ impl Ui {
       render_handle: Some(render_handle),
       modal_tx,
     }
+  }
+
+  /// Hands the banner the live worker count, so it can show how much of the pool is
+  /// actually busy rather than how big the pool is.
+  pub fn set_workers(&self, active: Arc<AtomicUsize>, total: usize) {
+    self.state.lock().unwrap().workers = Some((active, total));
   }
 
   /// Names the run in the banner title.

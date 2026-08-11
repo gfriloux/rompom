@@ -257,6 +257,12 @@ rompom -s snes --plain --resume no < /dev/null
 In a terminal, rompom opens a full-screen grid: **one row per ROM, in the order it was
 collected, for the whole run**. A ROM never moves — columns say how far it got.
 
+A banner sits above it: how far along the run is, how many ROMs are new / unchanged /
+failed / waiting to be identified, and a throughput line — ROMs per minute, MiB/s, the
+ETA, and how many workers are busy. The rates are read over **the last minute**, not over
+the whole run, so they still react when the network slows down. The ETA reads `—` when
+nothing has finished recently, rather than showing a number that is no longer true.
+
 ```
 #     rom                        id   pkg  rom   󰗚  󰕧  󰋩  󰋫  󰹙  󱂬  󰯃  󰊢  󰂺  time    status
 1198  Yoshi's Island             ✓    ✓    ✓     ●  ●  ●  ●  ●  ●  ●  ●  ○  4.6s    done
