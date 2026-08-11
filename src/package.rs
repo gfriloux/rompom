@@ -45,8 +45,25 @@ pub enum Error {
 
 type Result<T, E = Error> = std::result::Result<T, E>;
 
-fn media_region(url: &str) -> &str {
-  url.find("media=").map(|i| &url[i + 6..]).unwrap_or("")
+/// The media slug ScreenScraper named this asset with: `sstitlejp`, `box-2Djp`, `ss(jp)`.
+///
+/// It is read out of the `media=` parameter of the API URL, and it is what the public
+/// media path is built from — `.../medias/{systemeid}/{jeuid}/{slug}.{ext}`. Reading it
+/// back out is the whole reason `m.url` itself never reaches a PKGBUILD: that URL is the
+/// `mediaJeu.php` call, credentials included.
+///
+/// Bounded at the next `&`. It used to take everything after `media=`, which is only
+/// correct while ScreenScraper keeps that parameter last — one more appended and the
+/// slug would carry `&maxwidth=640` into a filename.
+fn media_slug(url: &str) -> &str {
+  let Some(start) = url.find("media=").map(|i| i + 6) else {
+    return "";
+  };
+  let rest = &url[start..];
+  match rest.find('&') {
+    Some(end) => &rest[..end],
+    None => rest,
+  }
 }
 
 fn render_template(src: &str, ctx: &minijinja::Value) -> String {
@@ -364,19 +381,19 @@ impl Package {
     }
     if let Some(ref x) = self.medias.image {
       let fmt = media_ext(&x.format);
-      let region = sanitize_token(media_region(&x.url));
+      let slug = sanitize_token(media_slug(&x.url));
       sources.push(shell_quote(&format!(
         "image.{}::https://screenscraper.fr/medias/{}/{}/{}.{}",
-        fmt, system.id, jeu_id, region, fmt
+        fmt, system.id, jeu_id, slug, fmt
       )));
       sha1sums.push(shell_quote(&sanitize_sha1(&x.sha1)));
     }
     if let Some(ref x) = self.medias.thumbnail {
       let fmt = media_ext(&x.format);
-      let region = sanitize_token(media_region(&x.url));
+      let slug = sanitize_token(media_slug(&x.url));
       sources.push(shell_quote(&format!(
         "thumbnail.{}::https://screenscraper.fr/medias/{}/{}/{}.{}",
-        fmt, system.id, jeu_id, region, fmt
+        fmt, system.id, jeu_id, slug, fmt
       )));
       sha1sums.push(shell_quote(&sanitize_sha1(&x.sha1)));
     }
@@ -399,18 +416,18 @@ impl Package {
     }
     if let Some(ref x) = self.medias.wheel {
       let fmt = media_ext(&x.format);
-      let region = sanitize_token(media_region(&x.url));
+      let slug = sanitize_token(media_slug(&x.url));
       sources.push(shell_quote(&format!(
         "wheel.{}::https://screenscraper.fr/medias/{}/{}/{}.{}",
-        fmt, system.id, jeu_id, region, fmt
+        fmt, system.id, jeu_id, slug, fmt
       )));
       sha1sums.push(shell_quote(&sanitize_sha1(&x.sha1)));
     }
     if let Some(ref x) = self.medias.manual {
-      let region = sanitize_token(media_region(&x.url));
+      let slug = sanitize_token(media_slug(&x.url));
       sources.push(shell_quote(&format!(
         "manual.pdf::https://screenscraper.fr/medias/{}/{}/{}.pdf",
-        system.id, jeu_id, region
+        system.id, jeu_id, slug
       )));
       sha1sums.push(shell_quote(&sanitize_sha1(&x.sha1)));
     }
@@ -547,6 +564,54 @@ impl Package {
 
 #[cfg(test)]
 mod tests {
+
+  // ── media_slug ───────────────────────────────────────────────────────────
+
+  /// The slugs of a real ScreenScraper response, as they appear in the URLs a generated
+  /// PKGBUILD is expected to contain. They are not regions: some carry the region as a
+  /// suffix (`sstitlejp`), some in parentheses (`ss(jp)`), some not at all (`video`).
+  #[test]
+  fn the_media_slug_is_read_out_of_the_api_url() {
+    let url = |slug: &str| {
+      format!(
+        "https://api.screenscraper.fr/api2/mediaJeu.php?devid=x&devpassword=y&ssid=z&\
+         sspassword=w&systemeid=3&jeuid=65388&media={}",
+        slug
+      )
+    };
+    for slug in [
+      "sstitlejp",
+      "box-2Djp",
+      "ss(jp)",
+      "wheeljp",
+      "manueljp",
+      "video",
+    ] {
+      assert_eq!(media_slug(&url(slug)), slug);
+    }
+  }
+
+  /// It used to take everything after `media=`, which is only correct while ScreenScraper
+  /// keeps that parameter last. One more appended and `&maxwidth=640` went into a
+  /// filename — and through `sanitize_token`, into a filename nobody could explain.
+  #[test]
+  fn the_media_slug_stops_at_the_next_parameter() {
+    assert_eq!(
+      media_slug("https://api.screenscraper.fr/api2/mediaJeu.php?media=ss(jp)&maxwidth=640"),
+      "ss(jp)"
+    );
+  }
+
+  /// No `media=` at all: an empty slug, not a panic and not the whole URL — which would
+  /// have put the credentials into the PKGBUILD by the back door.
+  #[test]
+  fn a_url_without_a_media_parameter_yields_nothing() {
+    assert_eq!(
+      media_slug("https://screenscraper.fr/medias/3/65388/video.mp4"),
+      ""
+    );
+    assert_eq!(media_slug(""), "");
+  }
   use super::*;
 
   /// A game exercising every branch of the serialization: populated and skipped
