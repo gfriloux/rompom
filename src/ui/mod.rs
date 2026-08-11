@@ -401,6 +401,11 @@ pub(crate) struct AppState {
   /// parked request is a blocked blocking-pool worker. That is the cost of letting more
   /// than one ROM wait at a time, and why `N_BLOCKING_WORKERS` is what it is.
   pub(crate) pending: Vec<ModalRequest>,
+  /// When the run ended, which turns the banner into the end-of-run report. `None`
+  /// while the workers are still going.
+  pub(crate) finished_at: Option<Instant>,
+  /// Set by `q` on the end-of-run screen; `Ui::wait_for_quit` is watching for it.
+  pub(crate) quit: bool,
   /// A row whose parked request the user asked to open. Set by the key handler and
   /// consumed by the render loop, which is the only place that owns the terminal.
   pub(crate) open_row: Option<usize>,
@@ -409,6 +414,43 @@ pub(crate) struct AppState {
 impl AppState {
   pub(crate) fn done(&self) -> usize {
     self.roms.iter().filter(|r| r.finished()).count()
+  }
+
+  /// `(succeeded, of which unchanged, failed)` over the finished rows.
+  pub(crate) fn counts(&self) -> (usize, usize, usize) {
+    let finished = || self.roms.iter().filter(|r| r.finished());
+    (
+      finished().filter(|r| !r.failed()).count(),
+      finished().filter(|r| !r.failed() && r.unchanged).count(),
+      finished().filter(|r| r.failed()).count(),
+    )
+  }
+
+  /// How many successful packages ended up with each asset, in canonical order.
+  ///
+  /// Counts a media as present whether it was fetched this run or was already on disk:
+  /// the question the coverage answers is what the library has, not what changed.
+  pub(crate) fn media_coverage(&self) -> Vec<(&'static str, &'static str, usize)> {
+    media_icons()
+      .iter()
+      .enumerate()
+      .map(|(i, &(kind, icon))| {
+        let found = self
+          .roms
+          .iter()
+          .filter(|r| r.finished() && !r.failed() && r.media[i].present())
+          .count();
+        (kind, icon, found)
+      })
+      .collect()
+  }
+
+  /// How long the run took, or has been going.
+  pub(crate) fn run_time(&self) -> Duration {
+    match self.finished_at {
+      Some(end) => end.saturating_duration_since(self.started),
+      None => self.started.elapsed(),
+    }
   }
 }
 
@@ -768,6 +810,13 @@ fn navigate(state: &Mutex<AppState>, code: KeyCode) {
   let mut s = state.lock().unwrap();
   s.notice = None;
 
+  // Only on the end-of-run screen: `q` during a run would be a keystroke away from
+  // throwing the whole thing out, and Ctrl-C is what stops a run.
+  if code == KeyCode::Char('q') && s.finished_at.is_some() {
+    s.quit = true;
+    return;
+  }
+
   match code {
     KeyCode::Char('f') => s.filter = s.filter.next(),
     KeyCode::Char('e') => s.filter = Filter::Errors,
@@ -852,6 +901,8 @@ impl Ui {
       workers: None,
       modal: None,
       pending: Vec::new(),
+      finished_at: None,
+      quit: false,
       open_row: None,
     }));
 
@@ -958,6 +1009,24 @@ impl Ui {
     }
   }
 
+  /// Closes the run: the banner becomes the end-of-run report and `q` starts working.
+  pub fn finish_run(&self) {
+    self.state.lock().unwrap().finished_at = Some(Instant::now());
+  }
+
+  /// Blocks until the user presses `q` on the end-of-run screen.
+  ///
+  /// Returns at once with no interface to press it on, and on an interrupt: a Ctrl-C run
+  /// has a `run.yml` message to print on a restored terminal, not a report to admire.
+  pub fn wait_for_quit(&self, interrupted: &AtomicBool) {
+    if is_plain() {
+      return;
+    }
+    while !self.state.lock().unwrap().quit && !interrupted.load(Ordering::SeqCst) {
+      thread::sleep(Duration::from_millis(50));
+    }
+  }
+
   /// Hands the banner the live worker count, so it can show how much of the pool is
   /// actually busy rather than how big the pool is.
   pub fn set_workers(&self, active: Arc<AtomicUsize>, total: usize) {
@@ -996,22 +1065,13 @@ impl Ui {
   /// Extract end-of-run statistics. Call before dropping `Ui`, print after.
   pub fn summary(&self) -> Summary {
     let s = self.state.lock().unwrap();
-    let finished = || s.roms.iter().filter(|r| r.finished());
-    let success = finished().filter(|r| !r.failed()).count();
-    let unchanged = finished().filter(|r| !r.failed() && r.unchanged).count();
-    let errors = finished().filter(|r| r.failed()).count();
-    let media_stats = media_icons()
-      .iter()
-      .enumerate()
-      .map(|(i, &(kind, icon))| {
-        let found = finished()
-          .filter(|r| !r.failed() && r.media[i].present())
-          .count();
-        (kind, icon, found)
-      })
-      .collect();
+    let (success, unchanged, errors) = s.counts();
+    let media_stats = s.media_coverage();
     // In arrival order: the grid is read top to bottom, and so is a printed list.
-    let failures = finished()
+    let failures = s
+      .roms
+      .iter()
+      .filter(|r| r.finished())
       .filter(|r| r.failed())
       .map(|r| {
         (

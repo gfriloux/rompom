@@ -799,6 +799,21 @@ Once the user has chosen, `handle_wait_modal` fetches the game one last time. A 
 the user had just typed and packaged the ROM with an empty `description.xml`. Only
 `ModalResponse::Cancelled` legitimately yields `None`.
 
+### End of run
+
+When the workers have joined, `main` calls `Ui::finish_run()` — the banner turns green
+and becomes the report (`result` bar with the failed share drawn in red **at the end of
+the bar**, then throughput, volume and average rate), a `media coverage` block appears
+under it in two columns of five and four, and the grid stays exactly as it was. The user
+leaves with `q`; `Ui::wait_for_quit()` blocks `main` until then.
+
+`Summary::print()` is **not** dead: it is the `--plain` path, and the fallback for a run
+that had nothing to do. A Ctrl-C run shows no report at all — it has a `run.yml` message
+to print on a restored terminal, which the report would only be in the way of.
+
+`AppState::counts()` and `AppState::media_coverage()` are shared by the report and by
+`Ui::summary()`, so the numbers on screen and the numbers printed cannot drift.
+
 ### `summary.rs`
 
 `Summary` struct holds: `total`, `success`, `unchanged`, `errors`, `failures`,

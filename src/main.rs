@@ -866,8 +866,16 @@ fn main() {
 
   let mut summary = ui.summary();
   summary.step_avg_durations = step_avg_durations;
+
+  // The report is shown inside the interface, which the user leaves with `q`. Printing
+  // after the terminal is restored is the fallback for `--plain` — and the only path
+  // that ever worked before, which is why `Summary::print()` is still here.
+  ui.finish_run();
+  ui.wait_for_quit(&interrupted);
   drop(ui);
-  summary.print();
+  if ui::is_plain() {
+    summary.print();
+  }
 }
 
 #[cfg(test)]

@@ -294,7 +294,13 @@ dots tighten, and the status becomes a word (`scrap`, `pkg`, `rom`, `8/9`, `ok`)
 | `m` | jump to the ROMs waiting to be identified |
 | `w` | in the errors view, write `<system>.errors.log` |
 | `esc` | leave a filtered view |
+| `q` | leave, once the run has finished |
 | `Ctrl-C` | interrupt, saving `<system>.run.yml` |
+
+When the run ends, the banner turns into a report — what was produced, how fast, how much
+was transferred — with a media coverage block showing what share of the packages ended up
+with each asset. The grid stays as it was, so you can still walk it and open the errors
+view. `q` leaves.
 
 The errors view lists only the ROMs that failed, with the cause and the number of
 attempts instead of the media dots, and counts the causes by kind underneath:

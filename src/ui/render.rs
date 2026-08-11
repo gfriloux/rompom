@@ -38,8 +38,16 @@ pub(super) fn render(frame: &mut Frame, state: &mut AppState) {
 
   // A filtered view hides the banner: it is a different question — "what went wrong" —
   // and the run-wide progress has nothing to say about it.
+  let over = state.finished_at.is_some();
   let constraints: &[Constraint] = if state.filter.is_focused() {
     &[Constraint::Min(1), Constraint::Length(1)]
+  } else if over {
+    &[
+      Constraint::Length(4), // report banner
+      Constraint::Length(7), // media coverage
+      Constraint::Min(1),    // the grid, left as it was
+      Constraint::Length(1), // what to do next
+    ]
   } else {
     &[
       Constraint::Length(4), // banner
@@ -52,7 +60,12 @@ pub(super) fn render(frame: &mut Frame, state: &mut AppState) {
     .constraints(constraints)
     .split(frame.area());
 
-  if state.filter == Filter::Errors {
+  if over && !state.filter.is_focused() {
+    render_report(frame, areas[0], state);
+    render_coverage(frame, areas[1], state);
+    render_grid(frame, areas[2], state);
+    frame.render_widget(hints_or_notice(state, done_help_line(state)), areas[3]);
+  } else if state.filter == Filter::Errors {
     render_errors(frame, areas[0], state);
     frame.render_widget(hints_or_notice(state, errors_help_line()), areas[1]);
   } else if state.filter == Filter::Unidentified {
@@ -242,6 +255,170 @@ fn counter_spans(state: &AppState) -> Vec<Span<'static>> {
       Style::default().fg(Color::Yellow),
     ),
   ]
+}
+
+// ── End of run ────────────────────────────────────────────────────────────
+
+/// The banner, once the workers have joined: what the run produced and how fast.
+fn render_report(frame: &mut Frame, area: Rect, state: &AppState) {
+  let (success, unchanged, errors) = state.counts();
+  let block = styled_block(
+    format!(
+      " run finished · {} · {} roms · {} ",
+      state.system,
+      state.total,
+      grid::format_elapsed(state.run_time())
+    ),
+    Color::Green,
+  );
+  let inner = block.inner(area);
+  frame.render_widget(block, area);
+
+  // The failures are drawn at the end of the bar rather than left out of it: a run that
+  // is 99% green with a red tail is the honest picture of what happened.
+  let done = success + errors;
+  let scale = |n: usize| {
+    if state.total == 0 {
+      0
+    } else {
+      (n * BAR_WIDTH).div_ceil(state.total.max(1))
+    }
+  };
+  let bad = scale(errors).min(BAR_WIDTH);
+  let good = scale(success).min(BAR_WIDTH - bad);
+
+  let result = Line::from(vec![
+    Span::styled(grid::fit("result", 10), dim()),
+    Span::styled("█".repeat(good), Style::default().fg(Color::Green)),
+    Span::styled("█".repeat(bad), Style::default().fg(Color::Red)),
+    Span::styled("█".repeat(BAR_WIDTH - good - bad), dim()),
+    Span::styled(
+      format!(
+        " {:>3}% ",
+        if state.total == 0 {
+          0
+        } else {
+          done * 100 / state.total
+        }
+      ),
+      dim(),
+    ),
+    Span::styled(
+      grid::fit(&format!("✓ {} new", success - unchanged), 15),
+      Style::default().fg(Color::Green),
+    ),
+    Span::raw(grid::fit(&format!("= {} same", unchanged), 15)),
+    Span::styled(
+      format!("✗ {} failed", errors),
+      Style::default().fg(Color::Red),
+    ),
+  ]);
+
+  let throughput = Line::from(vec![
+    Span::styled(grid::fit("throughput", 10), dim()),
+    Span::styled(
+      state.rate.spark(SPARK_WIDTH),
+      Style::default().fg(Color::Cyan),
+    ),
+    Span::raw(grid::fit("", BAR_WIDTH - SPARK_WIDTH + 1)),
+    Span::styled(
+      grid::fit(
+        &format!(
+          "{:.0} rom/min",
+          done as f64 * 60.0 / state.run_time().as_secs_f64().max(1.0)
+        ),
+        15,
+      ),
+      Style::default().add_modifier(Modifier::BOLD),
+    ),
+    Span::styled(grid::fit(&grid::format_bytes(state.bytes), 15), dim()),
+    Span::styled(
+      format!(
+        "{}/s average",
+        grid::format_bytes((state.bytes as f64 / state.run_time().as_secs_f64().max(1.0)) as u64)
+      ),
+      dim(),
+    ),
+  ]);
+
+  frame.render_widget(Paragraph::new(vec![result, throughput]), inner);
+}
+
+/// Which assets the finished packages actually have, two columns of five and four.
+fn render_coverage(frame: &mut Frame, area: Rect, state: &AppState) {
+  let (success, _, _) = state.counts();
+  let coverage = state.media_coverage();
+  let block = styled_block(
+    format!(" media coverage · {} identified ", success),
+    Color::White,
+  );
+  let inner = block.inner(area);
+  frame.render_widget(block, area);
+
+  let half = inner.width as usize / 2;
+  let rows = MEDIA_COUNT.div_ceil(2);
+  let lines: Vec<Line> = (0..rows)
+    .map(|i| {
+      let mut spans = coverage_cell(&coverage[i], success, half);
+      if let Some(right) = coverage.get(i + rows) {
+        spans.extend(coverage_cell(right, success, half));
+      }
+      Line::from(spans)
+    })
+    .collect();
+  frame.render_widget(Paragraph::new(lines), inner);
+}
+
+/// `󰗚  description  ████████████████████ 100%`
+fn coverage_cell(
+  entry: &(&'static str, &'static str, usize),
+  success: usize,
+  width: usize,
+) -> Vec<Span<'static>> {
+  const METER: usize = 20;
+  let (kind, icon, found) = *entry;
+  let pct = if success == 0 {
+    0
+  } else {
+    found * 100 / success
+  };
+  let filled = pct * METER / 100;
+  // Green above half, yellow below: the threshold is where a library stops being
+  // usefully illustrated and starts being mostly blanks.
+  let colour = if pct > 50 {
+    Color::Green
+  } else {
+    Color::Yellow
+  };
+
+  vec![
+    Span::styled(grid::fit(icon, 3), dim()),
+    Span::styled(grid::fit(kind, 13), dim()),
+    Span::styled("█".repeat(filled), Style::default().fg(colour)),
+    Span::styled("░".repeat(METER - filled), dim()),
+    Span::styled(
+      grid::fit(&format!(" {}%", pct), width.saturating_sub(36)),
+      dim(),
+    ),
+  ]
+}
+
+/// What to do with what the run just produced, and how to leave.
+fn done_help_line(state: &AppState) -> Paragraph<'static> {
+  let (_, _, errors) = state.counts();
+  let dir = if state.system.is_empty() {
+    "<system>".to_string()
+  } else {
+    state.system.clone()
+  };
+  let mut pairs = vec![
+    ("cd", format!(" {} && makepkg   ", dir)),
+    ("q", " quit".to_string()),
+  ];
+  if errors > 0 {
+    pairs.insert(0, ("e", format!(" {} failures  ", errors)));
+  }
+  keys(&pairs)
 }
 
 // ── Grid ──────────────────────────────────────────────────────────────────
