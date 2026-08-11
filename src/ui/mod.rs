@@ -175,7 +175,7 @@ pub enum ModalResponse {
 /// This replaces the old `RomPhase`, which said *where* a ROM was so it could be routed
 /// to one panel or the other. The grid asks a different question — a ROM sits on one
 /// line for the whole run, and each column says how far that one stage got.
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub(crate) enum Cell {
   /// Not reached yet.
   Todo,
@@ -183,6 +183,10 @@ pub(crate) enum Cell {
   Running,
   /// Running, but blocked on the user rather than on the machine.
   Waiting,
+  /// Transferring, with the share already written known. Only the two download steps
+  /// produce it: `CopyRom` goes through `fs::copy`, which never comes back to say how
+  /// far it got.
+  Progress(u8),
   Done,
   /// Nothing to do: identical to the last run.
   Unchanged,
@@ -302,6 +306,9 @@ pub(crate) struct RomEntry {
   pub(crate) best_candidate: Option<String>,
   /// Since when this ROM has been blocked on the user.
   pub(crate) waiting_since: Option<Instant>,
+  /// Bytes written by the transfer in flight, and its announced size.
+  pub(crate) transferred: u64,
+  pub(crate) transfer_total: Option<u64>,
   pub(crate) status: String,
   pub(crate) id: Cell,
   pub(crate) pkg: Cell,
@@ -332,6 +339,8 @@ impl RomEntry {
       candidates: None,
       best_candidate: None,
       waiting_since: None,
+      transferred: 0,
+      transfer_total: None,
       status: "queued".to_string(),
       id: Cell::Todo,
       pkg: Cell::Todo,
@@ -466,6 +475,18 @@ pub struct RomBar {
 }
 
 impl RomBar {
+  /// A second handle on the same row.
+  ///
+  /// A `RomBar` is an `Arc` and an index, so this is cheap. It exists for the download
+  /// callbacks: they run for the length of a transfer, and the alternative is holding
+  /// the `Rom` lock throughout — which would block every other reader of that ROM.
+  pub fn handle(&self) -> RomBar {
+    RomBar {
+      state: Arc::clone(&self.state),
+      index: self.index,
+    }
+  }
+
   /// Makes the shared UI state usable again after a step handler panicked while
   /// holding its lock. Without this the render thread would panic on its next frame
   /// and the interface would freeze mid-run.
@@ -611,9 +632,39 @@ impl RomBar {
     self.set_status("checksum mismatch, re-downloading");
   }
 
-  /// `bytes` is the size of the file that was just written — the only measure of
-  /// transfer volume available while the libraries report nothing during a download.
-  pub fn rom_done(&self, bytes: u64) {
+  /// How much of the transfer in flight has been written, and how big it is.
+  ///
+  /// Called from the libraries' progress callback, once per 64 KiB. It does two things
+  /// and nothing else — the `Rom` mutex is held by the handler for the whole download,
+  /// so this runs on a hot path and must stay two assignments and an addition.
+  ///
+  /// **`read` can go backwards**, twice over: `internetarchive` truncates the file and
+  /// restarts from zero when it falls back to another mirror, and the next file of the
+  /// same ROM starts its own count at zero. Either way the drop means "a transfer began",
+  /// so `read` itself is the new volume — the run's byte counter only ever goes up, which
+  /// is what `Rate` needs from it. A mirror fallback therefore counts the re-fetched
+  /// prefix twice, which is honest: those bytes did cross the wire twice.
+  pub fn rom_progress(&self, read: u64, total: Option<u64>) {
+    let mut s = self.state.lock().unwrap();
+    let entry = &mut s.roms[self.index];
+    let delta = transfer_delta(read, entry.transferred);
+    entry.transferred = read;
+    entry.transfer_total = total;
+    entry.rom = progress_cell(read, total);
+    s.bytes += delta;
+  }
+
+  pub fn rom_done(&self) {
+    let mut s = self.state.lock().unwrap();
+    let entry = &mut s.roms[self.index];
+    entry.rom = Cell::Done;
+    entry.transfer_total = None;
+  }
+
+  /// A local copy finished. Counted here rather than through `rom_progress` because
+  /// `fs::copy` reports nothing — the file size is all there is, and leaving it out
+  /// would make a folder-source run look like it moved no data at all.
+  pub fn rom_copied(&self, bytes: u64) {
     let mut s = self.state.lock().unwrap();
     s.roms[self.index].rom = Cell::Done;
     s.bytes += bytes;
@@ -630,10 +681,12 @@ impl RomBar {
     self.set_status(format!("{} — downloading", kind));
   }
 
-  pub fn media_done(&self, kind: &str, bytes: u64) {
+  /// The bytes were counted by `rom_progress` as they arrived, so nothing is added here
+  /// — doing both counted every media twice.
+  pub fn media_done(&self, kind: &str) {
     self.set_media(kind, Dot::Fresh);
     self.set_status(format!("{} ✓", kind));
-    self.state.lock().unwrap().bytes += bytes;
+    self.state.lock().unwrap().roms[self.index].transfer_total = None;
   }
 
   pub fn media_skipped(&self, kind: &str) {
@@ -779,6 +832,31 @@ fn write_errors_log(state: &AppState) -> String {
     // Said on screen rather than swallowed: a keypress that silently does nothing is
     // indistinguishable from one that is not bound.
     Err(e) => format!("could not write {}: {}", path, e),
+  }
+}
+
+/// New bytes to add to the run's volume, for a transfer that has written `read` in total
+/// when `last` was the figure before it.
+///
+/// A drop means a transfer began — a fallback to another mirror, or simply the next file
+/// of the same ROM — so everything written since counts as new. The run's counter
+/// therefore only ever goes up, which is what the throughput window needs from it.
+fn transfer_delta(read: u64, last: u64) -> u64 {
+  if read >= last {
+    read - last
+  } else {
+    read
+  }
+}
+
+/// The `rom` cell for a transfer of `read` out of `total`.
+fn progress_cell(read: u64, total: Option<u64>) -> Cell {
+  match total {
+    // Clamped: a server that under-announces its `Content-Length` would otherwise put
+    // `104%` in a column sized for three digits and a sign.
+    Some(total) if total > 0 => Cell::Progress((read * 100 / total).min(100) as u8),
+    // No `Content-Length`: something is happening, and that is all we can say.
+    _ => Cell::Running,
   }
 }
 
@@ -1101,5 +1179,47 @@ impl Drop for Ui {
     if let Some(h) = self.render_handle.take() {
       h.join().ok();
     }
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  /// The ordinary case: a transfer moving forward adds what it has written since.
+  #[test]
+  fn a_transfer_moving_forward_adds_the_difference() {
+    assert_eq!(transfer_delta(0, 0), 0);
+    assert_eq!(transfer_delta(64_000, 0), 64_000);
+    assert_eq!(transfer_delta(128_000, 64_000), 64_000);
+  }
+
+  /// `internetarchive` truncates the file and restarts from zero when it falls back to
+  /// another mirror, and the next file of the same ROM starts its own count at zero.
+  /// Both look identical from here, and both mean "count what has been written since".
+  ///
+  /// A plain subtraction would panic in debug and wrap to eighteen quintillion in
+  /// release — the run's byte counter has to be monotone for the throughput window.
+  #[test]
+  fn a_restarted_transfer_counts_from_zero_again() {
+    assert_eq!(transfer_delta(0, 700_000_000), 0);
+    assert_eq!(transfer_delta(64_000, 700_000_000), 64_000);
+  }
+
+  /// The percentage is what the six-cell column was sized for.
+  #[test]
+  fn the_progress_cell_reads_as_a_percentage() {
+    assert_eq!(progress_cell(0, Some(100)), Cell::Progress(0));
+    assert_eq!(progress_cell(62, Some(100)), Cell::Progress(62));
+    assert_eq!(progress_cell(100, Some(100)), Cell::Progress(100));
+  }
+
+  /// A server that announces nothing, or announces zero, leaves the spinner: there is
+  /// no share to show. One that under-announces must not print `104%`.
+  #[test]
+  fn an_unknown_size_stays_a_spinner_and_an_overrun_is_clamped() {
+    assert!(matches!(progress_cell(1_000, None), Cell::Running));
+    assert!(matches!(progress_cell(1_000, Some(0)), Cell::Running));
+    assert_eq!(progress_cell(120, Some(100)), Cell::Progress(100));
   }
 }

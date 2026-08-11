@@ -703,11 +703,21 @@ Everything is keyed on **elapsed `Duration`**, never on `Instant::now()`: an `In
 cannot be built at an arbitrary point, so a window driven by one is a window no test can
 walk through.
 
-Byte volume is counted **per finished file** (`bar.rom_done(bytes)`,
-`bar.media_done(kind, bytes)`, sized with a `stat` on what was just written). Neither
-`internetarchive` nor `screenscraper` reports anything while a transfer is in flight —
-see the handoffs in `.claude/plans/v0.19.0/` — so the figure advances in steps, and there
-is no per-download percentage in the `rom` cell.
+Byte volume is counted **as it arrives**, from the progress callbacks of
+`internetarchive` v0.3.0 and `screenscraper` v0.8.0 (`bar.rom_progress(read, total)`, once
+per 64 KiB). `rom_done()` and `media_done()` add nothing — doing both counted every file
+twice. A local copy has no callback to hook (`fs::copy` never comes back), so `CopyRom`
+alone still counts the file size, through `bar.rom_copied()`.
+
+**`read` goes backwards**, twice over: `internetarchive` truncates the file and restarts
+from zero on a mirror fallback, and the next file of the same ROM starts its own count at
+zero. `transfer_delta()` reads any drop as "a transfer began" and counts everything
+written since, so the run's counter is monotone — which is what `Rate` needs, and
+`Rate::tick` saturates as a second line of defence. A mirror fallback therefore counts the
+re-fetched prefix twice, which is honest: those bytes did cross the wire twice.
+
+The callbacks run through `RomBar::handle()`, a cheap second handle on the row, so the
+`Rom` lock is not held for the length of a transfer.
 
 **Colour.** Every colour in `render.rs` goes through `palette::color(Token)` — nine
 roles, resolved once from `COLORTERM`. Without an explicit `truecolor`/`24bit` we assume
@@ -727,6 +737,7 @@ truecolor and visibly different with it.
 |---|---|---|
 | `·` | not reached | dark gray |
 | spinner | running | cyan (yellow when blocked on the user) |
+| `62%` | transferring, share known | green |
 | `✓` | done | green |
 | `=` | nothing to do, identical to the last run | dark gray |
 | `✗` | failed | red |

@@ -52,9 +52,14 @@ impl Rate {
     }
 
     while elapsed >= self.bucket_end {
-      self
-        .buckets
-        .push_back((done - self.last_done, bytes - self.last_bytes));
+      // Saturating, though `RomBar::rom_progress` already guarantees a monotone counter:
+      // a download that restarts on another mirror sends its own counter backwards, and
+      // one arithmetic slip upstream would be a panic in debug and a wrapped bucket the
+      // size of the universe in release.
+      self.buckets.push_back((
+        done.saturating_sub(self.last_done),
+        bytes.saturating_sub(self.last_bytes),
+      ));
       self.last_done = done;
       self.last_bytes = bytes;
       if self.buckets.len() > BUCKETS {
@@ -220,6 +225,19 @@ mod tests {
     assert!(s.starts_with("        "));
     // Scaled to the tallest bucket in view: the newest one is the peak here.
     assert!(s.ends_with('█'));
+  }
+
+  /// A counter that goes backwards is a bug upstream, not a reason to panic here or to
+  /// wrap a bucket to eighteen quintillion bytes.
+  #[test]
+  fn a_counter_that_goes_backwards_does_not_wrap() {
+    let mut r = Rate::new();
+    r.tick(secs(2), 10, 5_000);
+    r.tick(secs(4), 4, 1_000);
+    assert_eq!(r.buckets.back(), Some(&(0, 0)));
+    // And it carries on from the lower value rather than staying stuck.
+    r.tick(secs(6), 6, 3_000);
+    assert_eq!(r.buckets.back(), Some(&(2, 2_000)));
   }
 
   /// A window with nothing in it draws blank rather than a floor of `▁`, which would

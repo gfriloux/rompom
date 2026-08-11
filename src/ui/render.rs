@@ -701,6 +701,16 @@ fn detail_lines(entry: &RomEntry, width: usize) -> Vec<Line<'static>> {
 
   let (third_label, third_value, third_note) = if let Some(cause) = &entry.error {
     ("error", cause.clone(), "")
+  } else if let Some(total) = entry.transfer_total {
+    (
+      "transfer",
+      format!(
+        "{} / {}",
+        grid::format_bytes(entry.transferred),
+        grid::format_bytes(total)
+      ),
+      "",
+    )
   } else if entry.id == Cell::Waiting {
     (
       "search",
@@ -814,10 +824,17 @@ fn row_line(
 }
 
 fn cell_span(cell: Cell, width: usize, spinner: &str, selected: bool) -> Span<'static> {
+  // The percentage is the one cell value that is not a single glyph — the column is six
+  // cells wide precisely so `100%` fits without pushing anything sideways.
+  let percent;
   let (glyph, color) = match cell {
     Cell::Todo => ("·", color(Token::Empty)),
     Cell::Running => (spinner, color(Token::Accent)),
     Cell::Waiting => (spinner, color(Token::Warn)),
+    Cell::Progress(pct) => {
+      percent = format!("{}%", pct);
+      (percent.as_str(), color(Token::Success))
+    }
     Cell::Done => ("✓", color(Token::Success)),
     Cell::Unchanged => ("=", color(Token::Muted)),
     Cell::Failed => ("✗", color(Token::Error)),

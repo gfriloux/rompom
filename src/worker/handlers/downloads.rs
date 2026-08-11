@@ -16,6 +16,24 @@ use super::super::{
   WorkerContext,
 };
 
+/// Downloads one disc, reporting progress to the ROM's bar as the bytes land.
+///
+/// The bar is cloned out of the `Rom` rather than borrowed through it: the callback runs
+/// for the whole transfer, and holding the `Rom` lock that long would block every other
+/// worker that wants to read this ROM — including the renderer's own reads through the
+/// shared `AppState`.
+fn fetch_with_progress(
+  dl: &Download<'_>,
+  dest: &Path,
+  rom_arc: &Arc<Mutex<Rom>>,
+) -> Result<(), StepError> {
+  let bar = rom_arc.lock().unwrap().bar.handle();
+  dl.fetch_with_progress(dest, DownloadMethod::Https, |read, total| {
+    bar.rom_progress(read, total)
+  })
+  .map_err(StepError::transient)
+}
+
 /// Size of a file that was just written, for the run's transfer volume.
 ///
 /// The file on disk is the only measure available: neither `internetarchive` nor
@@ -102,7 +120,7 @@ pub(crate) fn handle_copy_rom(
   }
   let updated = copy_disc(&local_path, &dest1, &sha1_expected)?;
   if updated {
-    rom_arc.lock().unwrap().bar.rom_done(written(&dest1));
+    rom_arc.lock().unwrap().bar.rom_copied(written(&dest1));
   } else {
     rom_arc.lock().unwrap().bar.rom_skipped();
   }
@@ -175,20 +193,16 @@ pub(crate) fn handle_download_rom(
       }
       Err(_) => {
         rom_arc.lock().unwrap().bar.rom_redownloading();
-        dl1
-          .fetch(&dest1, DownloadMethod::Https)
-          .map_err(StepError::transient)?;
+        fetch_with_progress(&dl1, &dest1, rom_arc)?;
         dl1.verify_sha1(&dest1).map_err(StepError::transient)?;
-        rom_arc.lock().unwrap().bar.rom_done(written(&dest1));
+        rom_arc.lock().unwrap().bar.rom_done();
       }
     }
   } else {
     rom_arc.lock().unwrap().bar.rom_downloading();
-    dl1
-      .fetch(&dest1, DownloadMethod::Https)
-      .map_err(StepError::transient)?;
+    fetch_with_progress(&dl1, &dest1, rom_arc)?;
     dl1.verify_sha1(&dest1).map_err(StepError::transient)?;
-    rom_arc.lock().unwrap().bar.rom_done(written(&dest1));
+    rom_arc.lock().unwrap().bar.rom_done();
   }
 
   // ── Extra discs (disc 2, 3, …) ────────────────────────────────────────
@@ -198,8 +212,7 @@ pub(crate) fn handle_download_rom(
     if dest.exists() && dl.verify_sha1(&dest).is_ok() {
       continue; // already valid
     }
-    dl.fetch(&dest, DownloadMethod::Https)
-      .map_err(StepError::transient)?;
+    fetch_with_progress(&dl, &dest, rom_arc)?;
     dl.verify_sha1(&dest).map_err(StepError::transient)?;
   }
 
@@ -247,12 +260,13 @@ pub(crate) fn handle_download_medias(
           let needs_download =
             !dest.exists() || ctx.ss.media_download(m).verify_sha1(&dest).is_err();
           if needs_download {
+            let bar = rom_arc.lock().unwrap().bar.handle();
             ctx
               .ss
               .media_download(m)
-              .fetch(&dest)
+              .fetch_with_progress(&dest, |read, total| bar.rom_progress(read, total))
               .map_err(|e| media_failure(kind, &e))?;
-            rom_arc.lock().unwrap().bar.media_done(kind, written(&dest));
+            rom_arc.lock().unwrap().bar.media_done(kind);
           } else {
             rom_arc.lock().unwrap().bar.media_skipped(kind);
           }
