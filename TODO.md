@@ -210,15 +210,26 @@ correction est arrivée avec ses tests : le dépôt est passé de 0 à 34 tests.
 - [ ] Dédupliquer : calcul `rom_unchanged` (×2 dans discovery.rs), liste des 8 médias
   (×4 → un `Medias::iter()`), `copy_rom`/`download_rom` (closure fetch),
   les 8 blocs de `build_pkgbuild` (table-driven).
-- [ ] Utiliser `m.url` au lieu de reconstruire les URLs SS à la main dans
-  `build_pkgbuild` (cassera au premier changement de format d'URL SS).
+- [x] ~~Utiliser `m.url` au lieu de reconstruire les URLs SS à la main dans
+  `build_pkgbuild`~~ — **À NE PAS FAIRE.** *Constaté le 2026-08-11 en préparant v0.20.0.*
+  `m.url` n'est pas un lien CDN public : c'est l'appel `mediaJeu.php` que ScreenScraper
+  renvoie, et `base_query()` met `devid`, `devpassword`, `ssid` et `sspassword` dans
+  chaque requête. Les URLs du PKGBUILD sont **publiées** — s'en servir écrirait les deux
+  mots de passe dans le dépôt de paquets. La reconstruction à la main
+  (`https://screenscraper.fr/medias/{systemeid}/{jeuid}/{slug}.{ext}`, où `slug` sort du
+  paramètre `media=` de cette même URL) est un **blanchiment délibéré**, pas une
+  duplication naïve. `media_slug()` porte le commentaire qui l'explique, pour que
+  personne ne « simplifie » ça un jour.
 - [x] `enum StepError { Interrupted, Transient, Fatal }` au lieu de la sentinelle
   `Err("interrupted")` — *fait le 2026-08-10*, remonté dans le lot v0.17 parce que P1.1
   en dépend : sans la distinction transitoire/définitif, un quota dépassé brûlait 3
   tentatives et 7 s de backoff par ROM. La décision vit dans `disposition()`, pure et
   testée.
-- [ ] Nettoyer le code mort : `StepData` quasi entier, `Phase`/`StepKind::phase()`,
-  `Package.name` ≡ `Package.rom`.
+- [x] **Code mort** — *fait le 2026-08-11 (v0.20.0)*. `Phase`/`StepKind::phase()` et
+  `Package.name` supprimés. `StepData` réduit à `LookupSS { candidates }` : « quasi
+  entier » était le mot juste, cette variante-là est réellement lue — `LookupSS` et
+  `WaitModal` tournent sur des pools différents et ne peuvent pas se passer les
+  candidats directement.
 - [ ] `debug_assert!` anti-wrap dans `dec_wait_for` ; `cancelled` sous le mutex du
   Semaphore (supprime le polling 50 ms) ; retry sans `thread::sleep` bloquant.
   *(la fuite de permit `modal_sem` est close en v0.19 — le sémaphore a été supprimé, pas
@@ -233,14 +244,16 @@ correction est arrivée avec ses tests : le dépôt est passé de 0 à 34 tests.
   propre plan. En attendant, `w` écrit `<system>.errors.log` et relancer
   `rompom -s <system>` refait exactement les ROMs échoués — leur `state.yml` n'a rien
   enregistré. *(moyen)*
-- [ ] **Progression par téléchargement** — bloqué en amont, handoffs écrits dans
-  `.claude/plans/v0.19.0/`. Au retour des deux libs : variante `Cell::Progress(u8)`,
-  `RomBar::rom_progress()`, et `ui/rate.rs` alimenté à l'octet plutôt qu'au fichier
-  terminé. La colonne `rom` fait déjà 6 cellules, calibrée pour `62%`. *(petit une fois
-  débloqué, deux dépôts voisins + hashes Nix)*
-- [ ] Templates : `mkdir -p 0700 -p` (voulu : `-m 0700`) et `ls *.pdf,` (virgule
-  parasite) dans multidisc/psx/ps2-package.jinja. *(le `sed` Sega CD cassable par `|`
-  est corrigé — `sed_pattern()`, cf. P0.1)*
+- [x] **Progression par téléchargement** — *fait le 2026-08-11 (v0.20.0)*, après
+  `internetarchive` v0.3.0 et `screenscraper` v0.8.0. `Cell::Progress(u8)`,
+  `RomBar::rom_progress()`, volume et débit à l'octet. **Le piège n'était pas le
+  branchement** : `read` recule deux fois — IA tronque et repart de zéro sur bascule de
+  miroir, et le fichier suivant du même ROM repart de zéro aussi. `transfer_delta()` lit
+  toute baisse comme « un transfert a commencé », donc le compteur du run reste monotone.
+  `CopyRom` reste au spinner : `fs::copy` ne rend jamais la main.
+- [x] **Templates** — *fait le 2026-08-11 (v0.20.0)*. `mkdir -m 0700 -p` (l'ancien
+  créait un répertoire nommé `0700` et laissait les vrais aux droits par défaut) et la
+  virgule parasite de `ls *.pdf,` (qui faisait perdre le manuel silencieusement).
 - [ ] **Lib `screenscraper` — assainir le `Display` de `Error::Request`.** La variante
   porte un `source: reqwest::Error` dont le `Display` ajoute l'URL complète, credentials
   compris. rompom est protégé (il ne cite plus l'erreur), mais le prochain consommateur
@@ -289,5 +302,13 @@ correction est arrivée avec ses tests : le dépôt est passé de 0 à 34 tests.
    rapporte), le score de pertinence (ScreenScraper n'en renvoie pas) et la relance
    `r`/`R` (du pipeline, pas de l'UI). Les deux premiers ont un handoff, le troisième un
    point P3.
-6. **Ensuite** — dette P3 au fil de l'eau (dont la migration reqwest 0.12 / rustls, qui
-   demande de bouger les trois dépôts ensemble), puis contribution SS sur base saine.
+6. **v0.20.0 — livrée le 2026-08-11.** La progression des téléchargements, débloquée par
+   `internetarchive` v0.3.0 et `screenscraper` v0.8.0, plus un lot de P3 : les deux bugs
+   de templates, le code mort, `Package.name`. **Trouvé en préparant le lot** : une fuite
+   de credentials vivante sur le chemin médias — rompom citait le `Display` de l'erreur
+   de la lib, qui contient l'URL `mediaJeu.php` avec les deux mots de passe. Même classe
+   de bug que P1.1, sur le chemin que P1.1 n'avait pas audité. Corrigée en tête de lot,
+   et l'item « utiliser `m.url` » est passé d'une tâche à un avertissement.
+7. **Ensuite** — reste de la dette P3 (déduplications, `r`/`R`, packaging OpenBOR, et la
+   migration reqwest 0.12 / rustls qui demande de bouger les trois dépôts ensemble), puis
+   contribution SS sur base saine.
