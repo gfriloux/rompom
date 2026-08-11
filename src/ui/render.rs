@@ -87,8 +87,18 @@ fn dim() -> Style {
 // ── Banner ────────────────────────────────────────────────────────────────
 
 fn render_banner(frame: &mut Frame, area: Rect, state: &AppState) {
+  let folded = grid::columns(area.width).folded;
+  let done = state.done();
+  let ratio = if state.total > 0 {
+    done as f64 / state.total as f64
+  } else {
+    0.0
+  };
+
   let title = if state.system.is_empty() {
     " rompom ".to_string()
+  } else if folded {
+    format!(" {} · {:.0}% ", state.system, ratio * 100.0)
   } else {
     format!(" rompom · {} · {} roms ", state.system, state.total)
   };
@@ -96,12 +106,11 @@ fn render_banner(frame: &mut Frame, area: Rect, state: &AppState) {
   let inner = block.inner(area);
   frame.render_widget(block, area);
 
-  let done = state.done();
-  let ratio = if state.total > 0 {
-    done as f64 / state.total as f64
-  } else {
-    0.0
-  };
+  if folded {
+    frame.render_widget(Paragraph::new(compact_banner(state, done, ratio)), inner);
+    return;
+  }
+
   let filled = (ratio * BAR_WIDTH as f64).round() as usize;
 
   // Two spans rather than a `Gauge`: the bar is 40 cells wide whatever the terminal is,
@@ -119,6 +128,56 @@ fn render_banner(frame: &mut Frame, area: Rect, state: &AppState) {
     Paragraph::new(vec![Line::from(progress), throughput_line(state, done)]),
     inner,
   );
+}
+
+/// The banner with no room for labelled columns: a bar and a sparkline, each trailed by
+/// the numbers that would otherwise have had a column of their own.
+fn compact_banner(state: &AppState, done: usize, ratio: f64) -> Vec<Line<'static>> {
+  const NARROW_BAR: usize = 32;
+  let filled = (ratio * NARROW_BAR as f64).round() as usize;
+  let eta = match state.rate.eta(state.total.saturating_sub(done)) {
+    Some(d) => grid::format_elapsed(d),
+    None => "—".to_string(),
+  };
+  let finished = || state.roms.iter().filter(|r| r.finished());
+  let new = finished().filter(|r| !r.failed() && !r.unchanged).count();
+  let same = finished().filter(|r| !r.failed() && r.unchanged).count();
+  let failed = finished().filter(|r| r.failed()).count();
+  let to_id = state.roms.iter().filter(|r| r.id == Cell::Waiting).count();
+
+  vec![
+    Line::from(vec![
+      Span::styled("█".repeat(filled), Style::default().fg(Color::Green)),
+      Span::styled("█".repeat(NARROW_BAR - filled), dim()),
+      Span::styled(
+        format!(
+          " {}/{} · {:.0}/min · eta {}",
+          done,
+          state.total,
+          state.rate.roms_per_min(),
+          eta
+        ),
+        dim(),
+      ),
+    ]),
+    Line::from(vec![
+      Span::styled(
+        state.rate.spark(NARROW_BAR),
+        Style::default().fg(Color::Cyan),
+      ),
+      Span::styled(format!(" ✓{}", new), Style::default().fg(Color::Green)),
+      Span::raw(format!(" ={}", same)),
+      Span::styled(format!(" ✗{}", failed), Style::default().fg(Color::Red)),
+      Span::styled(format!(" ?{}", to_id), Style::default().fg(Color::Yellow)),
+      Span::styled(
+        format!(
+          " · {}/s",
+          grid::format_bytes(state.rate.bytes_per_sec() as u64)
+        ),
+        dim(),
+      ),
+    ]),
+  ]
 }
 
 /// `rate  ▄▅▆▇█…   29 rom/min   12.1 MiB/s   eta 4m 20s   7/8 workers`
@@ -538,8 +597,13 @@ fn row_line(
     grid::fit(&time, cols.time as usize),
     bg(dim()),
   ));
+  let status = if cols.folded {
+    grid::short_status(entry)
+  } else {
+    entry.status.clone()
+  };
   spans.push(Span::styled(
-    grid::fit(&entry.status, cols.status as usize),
+    grid::fit(&status, cols.status as usize),
     bg(status_style(entry)),
   ));
 

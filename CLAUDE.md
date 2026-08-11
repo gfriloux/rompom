@@ -657,6 +657,15 @@ when the selection would leave it; `G` turns following back on. `render()` takes
 `&mut AppState` because the scroll offset lives there and the renderer is the only thing
 that knows the height of the grid on this frame.
 
+**Folding.** Below 100 columns `grid::columns()` returns a second layout rather than a
+squeezed first one: the arrival index and the clock go entirely, the rest tightens
+(`name` 26, `id`/`pkg` 4, `rom` 5, one space between dots). Both dropped columns are
+worth their cells when there is room and neither is worth taking cells from the ROM's
+name. `Columns::folded` also drives what widths cannot express — the compact two-line
+banner, and `grid::short_status()`, which derives a five-cell status from the *cells*
+rather than cutting the phrase down: `"checksum mismatch, re-downloading"` truncated
+reads as a checksum failure, which is the opposite of what is happening.
+
 **Banner.** Line 1 is the progress bar (40 cells, fixed width so the counters after it
 do not move at every resize) and the four counters. Line 2 is throughput: sparkline,
 ROM/min, MiB/s, ETA, and how many workers are inside a step handler right now

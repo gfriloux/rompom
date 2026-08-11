@@ -282,6 +282,9 @@ nothing has finished recently, rather than showing a number that is no longer tr
 The window scrolls itself to keep the working area in view. The footer says how many ROMs
 are above and below it.
 
+Under 100 columns the grid folds: the arrival number and the elapsed time go, the media
+dots tighten, and the status becomes a word (`scrap`, `pkg`, `rom`, `8/9`, `ok`).
+
 | key | effect |
 |---|---|
 | `↑` `↓` | move the cursor; the selected ROM unfolds three detail lines below it |

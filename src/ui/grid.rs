@@ -7,13 +7,17 @@
 
 use std::time::Duration;
 
-use super::{RomEntry, MEDIA_COUNT};
+use super::{errors, Cell, Dot, RomEntry, MEDIA_COUNT};
 
 #[cfg(test)]
 use super::RomInfo;
 
 /// Cells taken by one media dot, gap included.
 const MEDIA_CELL: u16 = 3;
+
+/// Below this width the full layout does not fit — 89 cells of fixed columns leave
+/// nothing for the status — so the grid folds.
+const FOLD_WIDTH: u16 = 100;
 
 /// Column widths for one grid row, in terminal cells.
 ///
@@ -29,28 +33,82 @@ pub(crate) struct Columns {
   pub(crate) media_cell: u16,
   pub(crate) time: u16,
   pub(crate) status: u16,
+  /// Whether this is the folded layout, which the caller needs to know for the things
+  /// widths cannot express: the shortened status wording and the compact banner.
+  pub(crate) folded: bool,
 }
 
 /// The grid layout for a terminal this wide.
+///
+/// Two layouts, not one that shrinks continuously: the arrival index and the clock are
+/// dropped outright below `FOLD_WIDTH` rather than squeezed. Both are worth their cells
+/// when there is room and neither is worth taking cells from the ROM's name.
 pub(crate) fn columns(width: u16) -> Columns {
-  let index = 6;
-  let name = 30;
-  let id = 5;
-  let pkg = 5;
-  let rom = 6;
-  let media_cell = MEDIA_CELL;
-  let time = 10;
-  let fixed = index + name + id + pkg + rom + media_cell * MEDIA_COUNT as u16 + time;
+  let folded = width < FOLD_WIDTH;
+  let c = if folded {
+    Columns {
+      index: 0,
+      name: 26,
+      id: 4,
+      pkg: 4,
+      rom: 5,
+      media_cell: 2,
+      time: 0,
+      status: 0,
+      folded,
+    }
+  } else {
+    Columns {
+      index: 6,
+      name: 30,
+      id: 5,
+      pkg: 5,
+      rom: 6,
+      media_cell: MEDIA_CELL,
+      time: 10,
+      status: 0,
+      folded,
+    }
+  };
+  let fixed = c.index + c.name + c.id + c.pkg + c.rom + c.media_cell * MEDIA_COUNT as u16 + c.time;
   Columns {
-    index,
-    name,
-    id,
-    pkg,
-    rom,
-    media_cell,
-    time,
     status: width.saturating_sub(fixed),
+    ..c
   }
+}
+
+/// The status of a row in as few cells as the folded layout can spare.
+///
+/// Derived from the cells rather than cut down from the status phrase: `"checksum
+/// mismatch, re-downloading"` truncated to five cells says `"chec…"`, which is both
+/// unreadable and indistinguishable from a checksum *failure*.
+pub(crate) fn short_status(entry: &RomEntry) -> String {
+  if let Some(cause) = &entry.error {
+    return errors::classify(cause).label().to_string();
+  }
+  if entry.finished() {
+    return if entry.unchanged { "same" } else { "ok" }.to_string();
+  }
+  if entry.id == Cell::Waiting {
+    return "id · m".to_string();
+  }
+  if entry.media.contains(&Dot::Running) {
+    let done = entry.media.iter().filter(|d| **d != Dot::Todo).count();
+    return format!("{}/{}", done, MEDIA_COUNT);
+  }
+  if entry.rom == Cell::Running {
+    return "rom".to_string();
+  }
+  if entry.pkg == Cell::Running {
+    return "pkg".to_string();
+  }
+  if entry.id == Cell::Running {
+    return "scrap".to_string();
+  }
+  if entry.started_at.is_none() {
+    return "queued".to_string();
+  }
+  "wait".to_string()
 }
 
 /// Column widths for the errors view, which trades the media dots and the clock for the
@@ -228,12 +286,69 @@ mod tests {
     assert_eq!(c.status, 120 - 89);
   }
 
-  /// Below the fixed width there is nothing left for the status — and no underflow.
-  /// Folding the grid is what actually fixes this case; not panicking is the floor.
+  /// Below 100 cells the index and the clock go entirely, rather than every column
+  /// giving up a cell — and the status still gets room, which is the whole point.
   #[test]
-  fn a_narrow_terminal_leaves_no_status_and_does_not_underflow() {
-    assert_eq!(columns(80).status, 0);
+  fn a_narrow_terminal_folds_instead_of_squeezing() {
+    let c = columns(80);
+    assert!(c.folded);
+    assert_eq!((c.index, c.time), (0, 0));
+    assert_eq!((c.name, c.id, c.pkg, c.rom, c.media_cell), (26, 4, 4, 5, 2));
+    // 26 + 4 + 4 + 5 + 9×2 = 57
+    assert_eq!(c.status, 80 - 57);
+  }
+
+  /// The threshold is where the full layout stops fitting, not one cell either side.
+  #[test]
+  fn the_fold_happens_at_a_hundred_columns() {
+    assert!(columns(99).folded);
+    assert!(!columns(100).folded);
+  }
+
+  /// A terminal narrower than the folded columns themselves must not underflow.
+  #[test]
+  fn an_absurdly_narrow_terminal_does_not_underflow() {
+    assert_eq!(columns(20).status, 0);
     assert_eq!(columns(0).status, 0);
+  }
+
+  /// The short status comes from the cells, not from cutting the phrase down: five
+  /// cells of "checksum mismatch, re-downloading" reads as a checksum failure.
+  #[test]
+  fn the_short_status_says_what_stage_the_row_is_on() {
+    let mut e = entry(true, false);
+    e.id = Cell::Running;
+    assert_eq!(short_status(&e), "scrap");
+    e.id = Cell::Done;
+    e.pkg = Cell::Running;
+    assert_eq!(short_status(&e), "pkg");
+    e.pkg = Cell::Done;
+    e.rom = Cell::Running;
+    assert_eq!(short_status(&e), "rom");
+    e.id = Cell::Waiting;
+    assert_eq!(short_status(&e), "id · m");
+  }
+
+  /// Media in flight reads as how far through the nine it is.
+  #[test]
+  fn media_in_flight_shows_how_far_through_it_is() {
+    let mut e = entry(true, false);
+    e.media[0] = Dot::Fresh;
+    e.media[1] = Dot::Unchanged;
+    e.media[2] = Dot::Running;
+    assert_eq!(short_status(&e), "3/9");
+  }
+
+  /// A finished row says how it finished, and a failed one says what kind of failure.
+  #[test]
+  fn a_finished_row_says_how_it_ended() {
+    let mut e = entry(true, true);
+    assert_eq!(short_status(&e), "ok");
+    e.unchanged = true;
+    assert_eq!(short_status(&e), "same");
+    e.error = Some("Checksum mismatch: expected a, got b".to_string());
+    assert_eq!(short_status(&e), "checksum");
+    assert_eq!(short_status(&entry(false, false)), "queued");
   }
 
   /// A value shorter than its column is padded, so the next column starts where the
