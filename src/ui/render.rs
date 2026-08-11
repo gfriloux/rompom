@@ -9,6 +9,7 @@ use ratatui::{
 };
 
 use super::grid::{self, Columns};
+use super::palette::{color, Token};
 use super::{
   errors, media_icons, visible_rows, AppState, Cell, Dot, Filter, ModalDisplayState, ModalMode,
   RomEntry, MEDIA_COUNT, SPINNER_FRAMES,
@@ -21,10 +22,14 @@ const BAR_WIDTH: usize = 40;
 const SPARK_WIDTH: usize = 30;
 
 /// Background of the selected row and of the detail lines under it.
-const SELECTED_BG: Color = Color::Rgb(0x16, 0x1c, 0x24);
+fn selected_bg() -> Color {
+  color(Token::SelectedBg)
+}
 
 /// Same, in the yellow of the "to identify" view.
-const WAITING_BG: Color = Color::Rgb(0x1c, 0x1a, 0x14);
+fn waiting_bg() -> Color {
+  color(Token::WaitingBg)
+}
 
 // ── Top-level render ────────────────────────────────────────────────────────
 
@@ -93,8 +98,14 @@ fn styled_block(title: String, color: Color) -> Block<'static> {
     .title_style(Style::default().fg(color).add_modifier(Modifier::BOLD))
 }
 
+/// Labels and secondary text: present, but not what the eye lands on.
 fn dim() -> Style {
-  Style::default().fg(Color::DarkGray)
+  Style::default().fg(color(Token::Muted))
+}
+
+/// Rules, empty cells, and the unfilled part of a bar: structure, not content.
+fn faint() -> Style {
+  Style::default().fg(color(Token::Empty))
 }
 
 // ── Banner ────────────────────────────────────────────────────────────────
@@ -115,7 +126,7 @@ fn render_banner(frame: &mut Frame, area: Rect, state: &AppState) {
   } else {
     format!(" rompom · {} · {} roms ", state.system, state.total)
   };
-  let block = styled_block(title, Color::Cyan);
+  let block = styled_block(title, color(Token::Accent));
   let inner = block.inner(area);
   frame.render_widget(block, area);
 
@@ -131,8 +142,11 @@ fn render_banner(frame: &mut Frame, area: Rect, state: &AppState) {
   // them around at every resize.
   let mut progress = vec![
     Span::styled(grid::fit("progress", 10), dim()),
-    Span::styled("█".repeat(filled), Style::default().fg(Color::Green)),
-    Span::styled("█".repeat(BAR_WIDTH - filled), dim()),
+    Span::styled(
+      "█".repeat(filled),
+      Style::default().fg(color(Token::Success)),
+    ),
+    Span::styled("█".repeat(BAR_WIDTH - filled), faint()),
     Span::styled(format!(" {:>3}% ", (ratio * 100.0) as u64), dim()),
   ];
   progress.extend(counter_spans(state));
@@ -160,8 +174,11 @@ fn compact_banner(state: &AppState, done: usize, ratio: f64) -> Vec<Line<'static
 
   vec![
     Line::from(vec![
-      Span::styled("█".repeat(filled), Style::default().fg(Color::Green)),
-      Span::styled("█".repeat(NARROW_BAR - filled), dim()),
+      Span::styled(
+        "█".repeat(filled),
+        Style::default().fg(color(Token::Success)),
+      ),
+      Span::styled("█".repeat(NARROW_BAR - filled), faint()),
       Span::styled(
         format!(
           " {}/{} · {:.0}/min · eta {}",
@@ -176,12 +193,21 @@ fn compact_banner(state: &AppState, done: usize, ratio: f64) -> Vec<Line<'static
     Line::from(vec![
       Span::styled(
         state.rate.spark(NARROW_BAR),
-        Style::default().fg(Color::Cyan),
+        Style::default().fg(color(Token::Accent)),
       ),
-      Span::styled(format!(" ✓{}", new), Style::default().fg(Color::Green)),
+      Span::styled(
+        format!(" ✓{}", new),
+        Style::default().fg(color(Token::Success)),
+      ),
       Span::raw(format!(" ={}", same)),
-      Span::styled(format!(" ✗{}", failed), Style::default().fg(Color::Red)),
-      Span::styled(format!(" ?{}", to_id), Style::default().fg(Color::Yellow)),
+      Span::styled(
+        format!(" ✗{}", failed),
+        Style::default().fg(color(Token::Error)),
+      ),
+      Span::styled(
+        format!(" ?{}", to_id),
+        Style::default().fg(color(Token::Warn)),
+      ),
       Span::styled(
         format!(
           " · {}/s",
@@ -210,7 +236,7 @@ fn throughput_line(state: &AppState, done: usize) -> Line<'static> {
     Span::styled(grid::fit("rate", 10), dim()),
     Span::styled(
       state.rate.spark(SPARK_WIDTH),
-      Style::default().fg(Color::Cyan),
+      Style::default().fg(color(Token::Accent)),
     ),
     Span::raw(grid::fit("", BAR_WIDTH - SPARK_WIDTH + 1)),
     Span::styled(
@@ -243,16 +269,16 @@ fn counter_spans(state: &AppState) -> Vec<Span<'static>> {
   vec![
     Span::styled(
       grid::fit(&format!("✓ {} new", new), 15),
-      Style::default().fg(Color::Green),
+      Style::default().fg(color(Token::Success)),
     ),
     Span::raw(grid::fit(&format!("= {} same", same), 15)),
     Span::styled(
       grid::fit(&format!("✗ {} failed", failed), 14),
-      Style::default().fg(Color::Red),
+      Style::default().fg(color(Token::Error)),
     ),
     Span::styled(
       format!("? {} to id", to_id),
-      Style::default().fg(Color::Yellow),
+      Style::default().fg(color(Token::Warn)),
     ),
   ]
 }
@@ -269,7 +295,7 @@ fn render_report(frame: &mut Frame, area: Rect, state: &AppState) {
       state.total,
       grid::format_elapsed(state.run_time())
     ),
-    Color::Green,
+    color(Token::Success),
   );
   let inner = block.inner(area);
   frame.render_widget(block, area);
@@ -289,9 +315,9 @@ fn render_report(frame: &mut Frame, area: Rect, state: &AppState) {
 
   let result = Line::from(vec![
     Span::styled(grid::fit("result", 10), dim()),
-    Span::styled("█".repeat(good), Style::default().fg(Color::Green)),
-    Span::styled("█".repeat(bad), Style::default().fg(Color::Red)),
-    Span::styled("█".repeat(BAR_WIDTH - good - bad), dim()),
+    Span::styled("█".repeat(good), Style::default().fg(color(Token::Success))),
+    Span::styled("█".repeat(bad), Style::default().fg(color(Token::Error))),
+    Span::styled("█".repeat(BAR_WIDTH - good - bad), faint()),
     Span::styled(
       format!(
         " {:>3}% ",
@@ -305,12 +331,12 @@ fn render_report(frame: &mut Frame, area: Rect, state: &AppState) {
     ),
     Span::styled(
       grid::fit(&format!("✓ {} new", success - unchanged), 15),
-      Style::default().fg(Color::Green),
+      Style::default().fg(color(Token::Success)),
     ),
     Span::raw(grid::fit(&format!("= {} same", unchanged), 15)),
     Span::styled(
       format!("✗ {} failed", errors),
-      Style::default().fg(Color::Red),
+      Style::default().fg(color(Token::Error)),
     ),
   ]);
 
@@ -318,7 +344,7 @@ fn render_report(frame: &mut Frame, area: Rect, state: &AppState) {
     Span::styled(grid::fit("throughput", 10), dim()),
     Span::styled(
       state.rate.spark(SPARK_WIDTH),
-      Style::default().fg(Color::Cyan),
+      Style::default().fg(color(Token::Accent)),
     ),
     Span::raw(grid::fit("", BAR_WIDTH - SPARK_WIDTH + 1)),
     Span::styled(
@@ -350,7 +376,7 @@ fn render_coverage(frame: &mut Frame, area: Rect, state: &AppState) {
   let coverage = state.media_coverage();
   let block = styled_block(
     format!(" media coverage · {} identified ", success),
-    Color::White,
+    color(Token::Text),
   );
   let inner = block.inner(area);
   frame.render_widget(block, area);
@@ -386,16 +412,16 @@ fn coverage_cell(
   // Green above half, yellow below: the threshold is where a library stops being
   // usefully illustrated and starts being mostly blanks.
   let colour = if pct > 50 {
-    Color::Green
+    color(Token::Success)
   } else {
-    Color::Yellow
+    color(Token::Warn)
   };
 
   vec![
     Span::styled(grid::fit(icon, 3), dim()),
     Span::styled(grid::fit(kind, 13), dim()),
     Span::styled("█".repeat(filled), Style::default().fg(colour)),
-    Span::styled("░".repeat(METER - filled), dim()),
+    Span::styled("░".repeat(METER - filled), faint()),
     Span::styled(
       grid::fit(&format!(" {}%", pct), width.saturating_sub(36)),
       dim(),
@@ -429,7 +455,7 @@ fn render_grid(frame: &mut Frame, area: Rect, state: &mut AppState) {
   } else {
     " roms ".to_string()
   };
-  let block = styled_block(title, Color::White);
+  let block = styled_block(title, color(Token::Text));
   let inner = block.inner(area);
   frame.render_widget(block, area);
 
@@ -445,7 +471,7 @@ fn render_grid(frame: &mut Frame, area: Rect, state: &mut AppState) {
     .split(inner);
 
   let cols = grid::columns(inner.width);
-  let rule = Span::styled("─".repeat(inner.width as usize), dim());
+  let rule = Span::styled("─".repeat(inner.width as usize), faint());
 
   frame.render_widget(Paragraph::new(header_line(&cols)), chunks[0]);
   frame.render_widget(Paragraph::new(Line::from(rule.clone())), chunks[1]);
@@ -519,7 +545,7 @@ fn render_errors(frame: &mut Frame, area: Rect, state: &mut AppState) {
   let rows = visible_rows(state);
   let block = styled_block(
     format!(" errors · {} of {} ", rows.len(), state.total),
-    Color::Red,
+    color(Token::Error),
   );
   let inner = block.inner(area);
   frame.render_widget(block, area);
@@ -536,7 +562,7 @@ fn render_errors(frame: &mut Frame, area: Rect, state: &mut AppState) {
     .split(inner);
 
   let cols = grid::error_columns(inner.width);
-  let rule = Span::styled("─".repeat(inner.width as usize), dim());
+  let rule = Span::styled("─".repeat(inner.width as usize), faint());
 
   let header = Line::from(vec![
     Span::styled(grid::fit("#", cols.index as usize), dim()),
@@ -576,7 +602,7 @@ fn render_errors(frame: &mut Frame, area: Rect, state: &mut AppState) {
       let selected = pos == cursor;
       let bg = |style: Style| {
         if selected {
-          style.bg(SELECTED_BG)
+          style.bg(selected_bg())
         } else {
           style
         }
@@ -593,7 +619,7 @@ fn render_errors(frame: &mut Frame, area: Rect, state: &mut AppState) {
         ),
         Span::styled(
           grid::fit(&name, cols.name as usize),
-          bg(Style::default().fg(Color::Red)),
+          bg(Style::default().fg(color(Token::Error))),
         ),
         cell_span(entry.id, cols.id as usize, spinner, selected),
         cell_span(entry.pkg, cols.pkg as usize, spinner, selected),
@@ -631,8 +657,8 @@ fn render_errors(frame: &mut Frame, area: Rect, state: &mut AppState) {
 /// doing: a failure shows its cause and a ROM waiting on the modal shows what the name
 /// search found, because those are the two states the user opened the row to act on.
 fn detail_lines(entry: &RomEntry, width: usize) -> Vec<Line<'static>> {
-  let bg = Style::default().bg(SELECTED_BG);
-  let label = |text: &str| Span::styled(grid::fit(text, 12), dim().bg(SELECTED_BG));
+  let bg = Style::default().bg(selected_bg());
+  let label = |text: &str| Span::styled(grid::fit(text, 12), dim().bg(selected_bg()));
   let pad = Span::styled(grid::fit("", 6), bg);
   // What is left once the 6-cell indent and the 12-cell label are taken.
   let rest = width.saturating_sub(18);
@@ -646,10 +672,10 @@ fn detail_lines(entry: &RomEntry, width: usize) -> Vec<Line<'static>> {
     pad.clone(),
     label("file"),
     Span::styled(grid::fit(&entry.file_name, 34), bg),
-    Span::styled(grid::fit(&size, 14), dim().bg(SELECTED_BG)),
+    Span::styled(grid::fit(&size, 14), dim().bg(selected_bg())),
     Span::styled(
       grid::truncate(&format!("source {}", entry.source), rest.saturating_sub(48)),
-      dim().bg(SELECTED_BG),
+      dim().bg(selected_bg()),
     ),
   ]);
 
@@ -658,7 +684,7 @@ fn detail_lines(entry: &RomEntry, width: usize) -> Vec<Line<'static>> {
     label("sha1"),
     Span::styled(
       grid::fit(entry.sha1.as_deref().unwrap_or("—"), 48),
-      dim().bg(SELECTED_BG),
+      dim().bg(selected_bg()),
     ),
     Span::styled(
       grid::truncate(
@@ -669,7 +695,7 @@ fn detail_lines(entry: &RomEntry, width: usize) -> Vec<Line<'static>> {
         },
         rest.saturating_sub(48),
       ),
-      dim().bg(SELECTED_BG),
+      dim().bg(selected_bg()),
     ),
   ]);
 
@@ -694,7 +720,7 @@ fn detail_lines(entry: &RomEntry, width: usize) -> Vec<Line<'static>> {
     Span::styled(grid::fit(&third_value, 48), bg),
     Span::styled(
       grid::truncate(third_note, rest.saturating_sub(48)),
-      dim().bg(SELECTED_BG),
+      dim().bg(selected_bg()),
     ),
   ]);
 
@@ -745,7 +771,7 @@ fn row_line(
   };
   let bg = |style: Style| {
     if selected {
-      style.bg(SELECTED_BG)
+      style.bg(selected_bg())
     } else {
       style
     }
@@ -789,18 +815,18 @@ fn row_line(
 
 fn cell_span(cell: Cell, width: usize, spinner: &str, selected: bool) -> Span<'static> {
   let (glyph, color) = match cell {
-    Cell::Todo => ("·", Color::DarkGray),
-    Cell::Running => (spinner, Color::Cyan),
-    Cell::Waiting => (spinner, Color::Yellow),
-    Cell::Done => ("✓", Color::Green),
-    Cell::Unchanged => ("=", Color::DarkGray),
-    Cell::Failed => ("✗", Color::Red),
+    Cell::Todo => ("·", color(Token::Empty)),
+    Cell::Running => (spinner, color(Token::Accent)),
+    Cell::Waiting => (spinner, color(Token::Warn)),
+    Cell::Done => ("✓", color(Token::Success)),
+    Cell::Unchanged => ("=", color(Token::Muted)),
+    Cell::Failed => ("✗", color(Token::Error)),
   };
   let style = Style::default().fg(color);
   Span::styled(
     grid::fit(glyph, width),
     if selected {
-      style.bg(SELECTED_BG)
+      style.bg(selected_bg())
     } else {
       style
     },
@@ -809,17 +835,17 @@ fn cell_span(cell: Cell, width: usize, spinner: &str, selected: bool) -> Span<'s
 
 fn dot_span(dot: Dot, width: usize, selected: bool) -> Span<'static> {
   let (glyph, color) = match dot {
-    Dot::Todo => ("·", Color::DarkGray),
-    Dot::Running => ("◐", Color::Green),
-    Dot::Fresh => ("●", Color::Green),
-    Dot::Unchanged => ("●", Color::DarkGray),
-    Dot::Missing => ("○", Color::Red),
+    Dot::Todo => ("·", color(Token::Empty)),
+    Dot::Running => ("◐", color(Token::Success)),
+    Dot::Fresh => ("●", color(Token::Success)),
+    Dot::Unchanged => ("●", color(Token::Muted)),
+    Dot::Missing => ("○", color(Token::Error)),
   };
   let style = Style::default().fg(color);
   Span::styled(
     grid::fit(glyph, width),
     if selected {
-      style.bg(SELECTED_BG)
+      style.bg(selected_bg())
     } else {
       style
     },
@@ -829,11 +855,11 @@ fn dot_span(dot: Dot, width: usize, selected: bool) -> Span<'static> {
 /// The name carries the outcome, so a row can be read without looking at its cells.
 fn name_style(entry: &RomEntry) -> Style {
   if entry.failed() {
-    Style::default().fg(Color::Red)
+    Style::default().fg(color(Token::Error))
   } else if entry.finished() && entry.unchanged {
     dim()
   } else if entry.finished() {
-    Style::default().fg(Color::Green)
+    Style::default().fg(color(Token::Success))
   } else if entry.started_at.is_some() {
     Style::default().add_modifier(Modifier::BOLD)
   } else {
@@ -843,13 +869,13 @@ fn name_style(entry: &RomEntry) -> Style {
 
 fn status_style(entry: &RomEntry) -> Style {
   if entry.failed() {
-    Style::default().fg(Color::Red)
+    Style::default().fg(color(Token::Error))
   } else if entry.id == Cell::Waiting || entry.status.starts_with("retrying") {
-    Style::default().fg(Color::Yellow)
+    Style::default().fg(color(Token::Warn))
   } else if entry.finished() || entry.started_at.is_none() {
     dim()
   } else {
-    Style::default().fg(Color::Cyan)
+    Style::default().fg(color(Token::Accent))
   }
 }
 
@@ -863,11 +889,11 @@ fn footer_line(len: usize, height: usize, offset: usize) -> Line<'static> {
 
   let mut spans = vec![Span::styled(grid::fit(&scroll, 34), dim())];
   for (glyph, label, color) in [
-    ("●", " fetched  ", Color::Green),
-    ("●", " up to date  ", Color::DarkGray),
-    ("○", " missing  ", Color::Red),
-    ("◐", " in progress  ", Color::Green),
-    ("·", " not tried", Color::DarkGray),
+    ("●", " fetched  ", color(Token::Success)),
+    ("●", " up to date  ", color(Token::Muted)),
+    ("○", " missing  ", color(Token::Error)),
+    ("◐", " in progress  ", color(Token::Success)),
+    ("·", " not tried", color(Token::Empty)),
   ] {
     spans.push(Span::styled(glyph, Style::default().fg(color)));
     spans.push(Span::styled(label, dim()));
@@ -887,7 +913,7 @@ fn render_unidentified(frame: &mut Frame, area: Rect, state: &mut AppState) {
   let rows = visible_rows(state);
   let block = styled_block(
     format!(" to identify · {} waiting ", rows.len()),
-    Color::Yellow,
+    color(Token::Warn),
   );
   let inner = block.inner(area);
   frame.render_widget(block, area);
@@ -917,7 +943,7 @@ fn render_unidentified(frame: &mut Frame, area: Rect, state: &mut AppState) {
   frame.render_widget(
     Paragraph::new(Line::from(Span::styled(
       "─".repeat(inner.width as usize),
-      dim(),
+      faint(),
     ))),
     chunks[1],
   );
@@ -947,7 +973,7 @@ fn render_unidentified(frame: &mut Frame, area: Rect, state: &mut AppState) {
       let selected = pos == cursor;
       let bg = |style: Style| {
         if selected {
-          style.bg(WAITING_BG)
+          style.bg(waiting_bg())
         } else {
           style
         }
@@ -962,7 +988,7 @@ fn render_unidentified(frame: &mut Frame, area: Rect, state: &mut AppState) {
         .map(|t| grid::format_elapsed(t.elapsed()))
         .unwrap_or_else(|| "—".to_string());
       let (count, count_style) = match entry.candidates {
-        Some(0) | None => ("none".to_string(), Style::default().fg(Color::Red)),
+        Some(0) | None => ("none".to_string(), Style::default().fg(color(Token::Error))),
         Some(n) => (n.to_string(), Style::default()),
       };
 
@@ -970,7 +996,7 @@ fn render_unidentified(frame: &mut Frame, area: Rect, state: &mut AppState) {
         Span::styled(grid::fit(&(row + 1).to_string(), w_index), bg(dim())),
         Span::styled(
           grid::fit(&file, w_file),
-          bg(Style::default().fg(Color::Yellow)),
+          bg(Style::default().fg(color(Token::Warn))),
         ),
         Span::styled(grid::fit(&waiting, w_wait), bg(dim())),
         Span::styled(grid::fit(&count, w_count), bg(count_style)),
@@ -989,7 +1015,7 @@ fn keys(pairs: &[(&str, String)]) -> Paragraph<'static> {
   for (key, what) in pairs {
     spans.push(Span::styled(
       key.to_string(),
-      Style::default().fg(Color::Cyan),
+      Style::default().fg(color(Token::Accent)),
     ));
     spans.push(Span::styled(what.clone(), dim()));
   }
@@ -1039,7 +1065,7 @@ fn hints_or_notice(state: &AppState, hints: Paragraph<'static>) -> Paragraph<'st
   match &state.notice {
     Some(msg) => Paragraph::new(Line::from(Span::styled(
       msg.clone(),
-      Style::default().fg(Color::Yellow),
+      Style::default().fg(color(Token::Warn)),
     ))),
     None => hints,
   }
@@ -1060,7 +1086,7 @@ pub(super) fn render_modal(
 
   let block = styled_block(
     format!(" identify · {} · {} ", modal.row + 1, modal.filename),
-    Color::Yellow,
+    color(Token::Warn),
   );
   let inner = block.inner(popup);
   frame.render_widget(block, popup);
@@ -1125,7 +1151,7 @@ pub(super) fn render_modal(
         let selected = i == modal.cursor;
         let bg = |style: Style| {
           if selected {
-            style.bg(WAITING_BG)
+            style.bg(waiting_bg())
           } else {
             style
           }
@@ -1136,7 +1162,7 @@ pub(super) fn render_modal(
             grid::fit(&name, w_name),
             bg(if selected {
               Style::default()
-                .fg(Color::Yellow)
+                .fg(color(Token::Warn))
                 .add_modifier(Modifier::BOLD)
             } else {
               Style::default()
@@ -1173,18 +1199,21 @@ pub(super) fn render_modal(
     ),
     ModalMode::Input => (
       Line::from(vec![
-        Span::styled(grid::fit("game id", 10), Style::default().fg(Color::Yellow)),
+        Span::styled(
+          grid::fit("game id", 10),
+          Style::default().fg(color(Token::Warn)),
+        ),
         Span::styled(
           modal.input.clone(),
           Style::default().add_modifier(Modifier::BOLD),
         ),
-        Span::styled("█", Style::default().fg(Color::Yellow)),
+        Span::styled("█", Style::default().fg(color(Token::Warn))),
         Span::styled(
           match &modal.input_status {
             Some(msg) => format!("   {}", msg),
             None => String::new(),
           },
-          Style::default().fg(Color::Red),
+          Style::default().fg(color(Token::Error)),
         ),
       ]),
       vec![("enter", " look up  "), ("esc", " back to the list")],
@@ -1195,7 +1224,7 @@ pub(super) fn render_modal(
         Span::styled(
           game_name.clone(),
           Style::default()
-            .fg(Color::Green)
+            .fg(color(Token::Success))
             .add_modifier(Modifier::BOLD),
         ),
         Span::styled(format!("   id {}", game_id), dim()),

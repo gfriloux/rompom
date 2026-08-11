@@ -75,6 +75,9 @@ single casual setup, Skraper is simpler.
   `maxthreads` value, and rompom sizes its ScreenScraper semaphore from it. A tier
   allowing one thread means one lookup at a time, whatever the machine — downloads and
   packaging still run in parallel around it, but identification is the bottleneck.
+- A terminal announcing **truecolor** via `COLORTERM` gets the full palette; anything
+  else falls back to sixteen colours, which stays legible but loses the selected-row
+  highlight (the `▌` cursor still marks it).
 - A **Nerd Font** in your terminal — the media columns are Nerd Font glyphs and render as
   identical empty boxes without one. `--ascii` replaces them with letters if you would
   rather not install a font.

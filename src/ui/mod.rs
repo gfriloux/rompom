@@ -1,6 +1,7 @@
 mod errors;
 mod grid;
 mod modal;
+mod palette;
 mod rate;
 mod render;
 

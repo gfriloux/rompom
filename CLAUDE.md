@@ -165,6 +165,8 @@ src/
     mod.rs                  — Ui + RomBar + AppState + RomEntry + Cell/Dot, modal public types
     errors.rs               — classify()/tally()/log(): failure causes bucketed for the
                               errors view and written to <system>.errors.log
+    palette.rs              — the nine colour roles of the design spec, and what each
+                              becomes without truecolor; the only place with a raw Color
     grid.rs                 — column widths, text fitting, scroll window, elapsed format;
                               pure arithmetic, and the only testable part of the interface
     rate.rs                 — Rate: sliding one-minute window feeding the sparkline,
@@ -686,6 +688,18 @@ Byte volume is counted **per finished file** (`bar.rom_done(bytes)`,
 `internetarchive` nor `screenscraper` reports anything while a transfer is in flight —
 see the handoffs in `.claude/plans/v0.19.0/` — so the figure advances in steps, and there
 is no per-download percentage in the `rom` cell.
+
+**Colour.** Every colour in `render.rs` goes through `palette::color(Token)` — nine
+roles, resolved once from `COLORTERM`. Without an explicit `truecolor`/`24bit` we assume
+the narrower terminal: `TERM=xterm-256color` says nothing either way, and getting it
+wrong flattens `#2b323c` (empty cells) and `#5b6673` (labels) onto the same black. In the
+16-colour fallback the selected-row background becomes `Color::Reset` rather than a
+wrong dark — nothing there is dark enough to sit behind text — so the `▌` cursor and the
+bold name are what mark the selection.
+
+Two greys, not one: `dim()` is `Muted` (labels, units, secondary text) and `faint()` is
+`Empty` (rules, unfilled bar segments, `·` cells). They are the same colour without
+truecolor and visibly different with it.
 
 **Step cells** (`id`, `pkg`, `rom`) — `Cell` in `ui/mod.rs`:
 
