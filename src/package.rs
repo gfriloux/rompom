@@ -28,7 +28,6 @@ pub struct Package {
   pub rom_url: String,
   pub hash: String,
   pub jeu: Option<JeuInfo>,
-  pub name: String,
   pub medias: Medias,
   /// (filename, rom_url, sha1) for disc 2, 3, …  Empty for single-disc.
   pub extra_discs: Vec<(String, String, String)>,
@@ -221,10 +220,10 @@ impl Package {
   /// to nothing and collide with every other such title, so they fall back to the ROM
   /// hash, which is stable across runs.
   pub fn normalize_name(&self) -> String {
-    let stem = Path::new(&self.name)
+    let stem = Path::new(&self.rom)
       .file_stem()
       .and_then(|s| s.to_str())
-      .unwrap_or(&self.name);
+      .unwrap_or(&self.rom);
 
     let mut out = String::with_capacity(stem.len());
     for c in stem.chars() {
@@ -276,7 +275,6 @@ impl Package {
       rom_url: url.to_string(),
       hash: hash.to_string(),
       jeu,
-      name: file.to_string(),
       medias,
       extra_discs,
     })
@@ -675,7 +673,6 @@ mod tests {
       rom_url: "https://example.invalid/rom.zip".to_string(),
       hash: hash.to_string(),
       jeu: None,
-      name: rom_name.to_string(),
       medias: Medias::default(),
       extra_discs: Vec::new(),
     }
