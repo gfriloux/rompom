@@ -264,7 +264,7 @@ pub(crate) fn handle_download_medias(
             ctx
               .ss
               .media_download(m)
-              .fetch_with_progress(&dest, |read, total| bar.rom_progress(read, total))
+              .fetch_with_progress(&dest, |read, total| bar.media_progress(read, total))
               .map_err(|e| media_failure(kind, &e))?;
             rom_arc.lock().unwrap().bar.media_done(kind);
           } else {

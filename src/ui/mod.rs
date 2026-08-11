@@ -646,11 +646,28 @@ impl RomBar {
   /// prefix twice, which is honest: those bytes did cross the wire twice.
   pub fn rom_progress(&self, read: u64, total: Option<u64>) {
     let mut s = self.state.lock().unwrap();
+    s.roms[self.index].rom = progress_cell(read, total);
+    self.count_transfer(&mut s, read, total);
+  }
+
+  /// Same, for a media transfer.
+  ///
+  /// It must **not** touch the `rom` cell. Media are fetched *after* the ROM itself, so
+  /// sharing `rom_progress` between the two overwrote the `✓` that `CopyRom` had just put
+  /// there, and the column ended the run showing whatever the last media left behind —
+  /// `100%` when it announced a size, the spinner when it did not.
+  pub fn media_progress(&self, read: u64, total: Option<u64>) {
+    let mut s = self.state.lock().unwrap();
+    self.count_transfer(&mut s, read, total);
+  }
+
+  /// The part both transfers share: the run's byte volume, and the two figures the
+  /// detail line reads.
+  fn count_transfer(&self, s: &mut AppState, read: u64, total: Option<u64>) {
     let entry = &mut s.roms[self.index];
     let delta = transfer_delta(read, entry.transferred);
     entry.transferred = read;
     entry.transfer_total = total;
-    entry.rom = progress_cell(read, total);
     s.bytes += delta;
   }
 
@@ -1185,6 +1202,84 @@ impl Drop for Ui {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  /// One row, and a bar on it. Enough to drive the transitions a handler makes.
+  fn one_row() -> (Arc<Mutex<AppState>>, RomBar) {
+    let state = Arc::new(Mutex::new(AppState {
+      roms: vec![RomEntry::queued(RomInfo {
+        label: "Devil World.zip".to_string(),
+        file_name: "/roms/Devil World.zip".to_string(),
+        size: None,
+        sha1: None,
+        source: String::new(),
+      })],
+      total: 1,
+      system: "nes".to_string(),
+      header: String::new(),
+      tick: 0,
+      selected: 0,
+      scroll: 0,
+      follow: true,
+      filter: Filter::All,
+      notice: None,
+      started: Instant::now(),
+      bytes: 0,
+      rate: Rate::new(),
+      workers: None,
+      modal: None,
+      pending: Vec::new(),
+      finished_at: None,
+      quit: false,
+      open_row: None,
+    }));
+    let bar = RomBar {
+      state: Arc::clone(&state),
+      index: 0,
+    };
+    (state, bar)
+  }
+
+  /// Media are fetched **after** the ROM, so a media transfer must leave the `rom` cell
+  /// alone. Sharing `rom_progress` between the two overwrote the `✓` the copy had just
+  /// put there, and the column ended the run showing whatever the last media left —
+  /// `100%` when it announced a size, the spinner when it did not.
+  #[test]
+  fn a_media_transfer_leaves_the_rom_cell_alone() {
+    let (state, bar) = one_row();
+    bar.rom_copied(1_000);
+    assert_eq!(state.lock().unwrap().roms[0].rom, Cell::Done);
+
+    bar.media_progress(512, Some(2_048));
+    bar.media_progress(2_048, Some(2_048));
+    bar.media_done("image");
+    assert_eq!(state.lock().unwrap().roms[0].rom, Cell::Done);
+
+    // A media with no announced size used to leave the spinner behind.
+    bar.media_progress(300, None);
+    bar.media_done("wheel");
+    assert_eq!(state.lock().unwrap().roms[0].rom, Cell::Done);
+  }
+
+  /// Both kinds of transfer feed the same byte counter — that is the part they share.
+  #[test]
+  fn both_transfers_count_towards_the_run_volume() {
+    let (state, bar) = one_row();
+    bar.rom_progress(4_096, Some(4_096));
+    bar.rom_done();
+    bar.media_progress(1_024, Some(1_024));
+    bar.media_done("video");
+    assert_eq!(state.lock().unwrap().bytes, 4_096 + 1_024);
+  }
+
+  /// And the ROM transfer still drives its own cell.
+  #[test]
+  fn a_rom_transfer_drives_the_rom_cell() {
+    let (state, bar) = one_row();
+    bar.rom_progress(62, Some(100));
+    assert_eq!(state.lock().unwrap().roms[0].rom, Cell::Progress(62));
+    bar.rom_done();
+    assert_eq!(state.lock().unwrap().roms[0].rom, Cell::Done);
+  }
 
   /// The ordinary case: a transfer moving forward adds what it has written since.
   #[test]
