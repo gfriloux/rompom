@@ -1,4 +1,4 @@
-mod errors;
+pub(crate) mod errors;
 mod grid;
 mod modal;
 mod palette;

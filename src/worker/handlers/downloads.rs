@@ -11,7 +11,10 @@ use crate::{
   rom::{Rom, RomSource, StepError, StepStatus},
 };
 
-use super::super::{helpers::media_filename, WorkerContext};
+use super::super::{
+  helpers::{media_failure, media_filename},
+  WorkerContext,
+};
 
 /// Size of a file that was just written, for the run's transfer volume.
 ///
@@ -248,7 +251,7 @@ pub(crate) fn handle_download_medias(
               .ss
               .media_download(m)
               .fetch(&dest)
-              .map_err(|e| StepError::Transient(format!("media {}: {}", kind, e)))?;
+              .map_err(|e| media_failure(kind, &e))?;
             rom_arc.lock().unwrap().bar.media_done(kind, written(&dest));
           } else {
             rom_arc.lock().unwrap().bar.media_skipped(kind);

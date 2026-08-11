@@ -282,6 +282,8 @@ LookupSS → WaitModal* → BuildPackage → DownloadRom ────┐
   from `source.file_name` (the actual disc-1 basename), not from the virtual `filename`.
 - **`DownloadMedias`** — iterates 8 canonical media kinds. For each: skips if sha1 already valid
   on disk (`media_skipped`), downloads otherwise (`media_done`), or marks unavailable if SS has none.
+  A failure goes through **`media_failure()`**, never through the library error's `Display`
+  — see *Credentials never reach a message* below.
 - **`SaveState`** — writes `RomStateEntry` into shared `SystemState` (flushed to disk by
   `main.rs` every 30 s and once more after all workers join). Persists `extra_disc_sha1s` for multi-disc games.
   Emits `bar.finish()`. It does **not** touch `remaining` — see below.
@@ -462,6 +464,24 @@ the "queued" state `new_rom_bar()` set.
 
 On "no", the file is deleted and a fresh run starts.
 Second Ctrl-C triggers `std::process::exit(1)` immediately.
+
+### Credentials never reach a message
+
+The ScreenScraper media URL is not a public CDN link: it is the `mediaJeu.php` API call
+ScreenScraper handed back, and `base_query()` puts `devid`, `devpassword`, `ssid` and
+`sspassword` in every request. Two consequences, and they pull in opposite directions:
+
+- **It must never be quoted.** `screenscraper::download::Error` interpolates it in its
+  `Download` and `Body` variants, so `format!("media {}: {}", kind, e)` wrote both
+  passwords into the grid, the errors view, `<system>.errors.log`, the end-of-run summary
+  and `<system>.debug.log`. `worker::helpers::media_failure()` composes the sentence from
+  the error **variant** instead — the same rule `lookup_failure()` follows on the
+  identification path. `Io` and `ChecksumMismatch` carry only a local path and two sha1s,
+  so those are quoted in full.
+- **It must never reach a PKGBUILD.** `build_pkgbuild` deliberately *rebuilds* a public
+  `https://screenscraper.fr/medias/{systemeid}/{jeuid}/{slug}.{ext}` URL from the media
+  slug rather than writing `m.url` — a PKGBUILD is published. This is laundering, not
+  duplication, and `TODO.md` carries a warning against "simplifying" it.
 
 ## RomSourceData / Rom structs
 
