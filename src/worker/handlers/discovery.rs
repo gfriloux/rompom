@@ -321,7 +321,10 @@ pub(crate) fn handle_lookup_ss(
     // Store candidates in this step's data and unlock WaitModal.
     {
       let mut rom = rom_arc.lock().unwrap();
-      rom.bar.set_candidates(display_candidates.len());
+      rom.bar.set_candidates(
+        display_candidates.len(),
+        display_candidates.first().map(|c| c.name.clone()),
+      );
       if let StepData::LookupSS {
         ref mut candidates, ..
       } = rom.pipeline[step_idx].data
@@ -401,6 +404,7 @@ pub(crate) fn handle_wait_modal(
   ctx
     .modal_tx
     .send(ModalRequest {
+      row: rom_arc.lock().unwrap().bar.row(),
       filename: filename.clone(),
       sha1: sha1_opt,
       candidates,

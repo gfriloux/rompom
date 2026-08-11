@@ -286,8 +286,9 @@ are above and below it.
 |---|---|
 | `↑` `↓` | move the cursor; the selected ROM unfolds three detail lines below it |
 | `g` / `G` | jump to the top / back to the bottom (`G` also re-enables auto-scrolling) |
-| `f` | cycle the filter: all → active → errors |
+| `f` | cycle the filter: all → active → errors → to identify |
 | `e` | jump straight to the errors view |
+| `m` | jump to the ROMs waiting to be identified |
 | `w` | in the errors view, write `<system>.errors.log` |
 | `esc` | leave a filtered view |
 | `Ctrl-C` | interrupt, saving `<system>.run.yml` |
@@ -314,12 +315,22 @@ be read. `G` gives it back.
 
 ### Unidentified ROMs
 
-When a ROM is not found automatically on ScreenScraper, rompom pauses on that ROM and opens
-an identification modal. It presents a list of candidates from a name-based search — navigate
-with the arrow keys and press Enter to confirm. If none match, press `i` to enter a
-ScreenScraper game ID manually.
+When a ROM is not found automatically on ScreenScraper, it goes into a waiting list and the
+run carries on around it. The first one opens its identification modal straight away; after
+that they queue up, and the banner counts them (`? 3 to id`).
 
-Other ROMs continue processing in parallel while the modal is open.
+Press `m` for the list: what each ROM has been waiting, how many candidates a name search
+found, and the one ScreenScraper ranked first — often enough to decide without opening
+anything. `enter` opens the modal for the selected ROM, `s` skips it.
+
+In the modal, navigate the candidates with the arrow keys and press Enter to confirm. If
+none match, press `i` to enter a ScreenScraper game ID manually. Other ROMs keep processing
+in parallel throughout.
+
+> ScreenScraper returns its search results "sorted by probability" and **no match
+> percentage** — the `score` field in its API is a user rating out of 20, not a relevance
+> figure. rompom therefore shows you its top pick rather than a number it would have had to
+> invent.
 
 ### Interrupting a run
 

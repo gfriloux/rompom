@@ -23,6 +23,9 @@ const SPARK_WIDTH: usize = 30;
 /// Background of the selected row and of the detail lines under it.
 const SELECTED_BG: Color = Color::Rgb(0x16, 0x1c, 0x24);
 
+/// Same, in the yellow of the "to identify" view.
+const WAITING_BG: Color = Color::Rgb(0x1c, 0x1a, 0x14);
+
 // ── Top-level render ────────────────────────────────────────────────────────
 
 /// Takes the state mutably because the scroll offset lives in it and the renderer is
@@ -35,7 +38,7 @@ pub(super) fn render(frame: &mut Frame, state: &mut AppState) {
 
   // A filtered view hides the banner: it is a different question — "what went wrong" —
   // and the run-wide progress has nothing to say about it.
-  let constraints: &[Constraint] = if state.filter == Filter::Errors {
+  let constraints: &[Constraint] = if state.filter.is_focused() {
     &[Constraint::Min(1), Constraint::Length(1)]
   } else {
     &[
@@ -52,6 +55,9 @@ pub(super) fn render(frame: &mut Frame, state: &mut AppState) {
   if state.filter == Filter::Errors {
     render_errors(frame, areas[0], state);
     frame.render_widget(hints_or_notice(state, errors_help_line()), areas[1]);
+  } else if state.filter == Filter::Unidentified {
+    render_unidentified(frame, areas[0], state);
+    frame.render_widget(hints_or_notice(state, unidentified_help_line()), areas[1]);
   } else {
     render_banner(frame, areas[0], state);
     render_grid(frame, areas[1], state);
@@ -628,6 +634,115 @@ fn footer_line(len: usize, height: usize, offset: usize) -> Line<'static> {
   Line::from(spans)
 }
 
+// ── To-identify view ──────────────────────────────────────────────────────
+
+/// The ROMs blocked on the user, and how long each has been waiting.
+///
+/// The last column is the candidate ScreenScraper ranked first, not a match score:
+/// `jeuRecherche` returns its list "sorted by probability" and no percentage at all, so
+/// the name is the only real thing to put there — and it is often enough to decide
+/// without opening the modal.
+fn render_unidentified(frame: &mut Frame, area: Rect, state: &mut AppState) {
+  let rows = visible_rows(state);
+  let block = styled_block(
+    format!(" to identify · {} waiting ", rows.len()),
+    Color::Yellow,
+  );
+  let inner = block.inner(area);
+  frame.render_widget(block, area);
+
+  let chunks = Layout::default()
+    .direction(Direction::Vertical)
+    .constraints([
+      Constraint::Length(1),
+      Constraint::Length(1),
+      Constraint::Min(0),
+    ])
+    .split(inner);
+
+  let (w_index, w_file, w_wait, w_count) = (6usize, 38usize, 12usize, 12usize);
+  let w_best = (inner.width as usize).saturating_sub(w_index + w_file + w_wait + w_count);
+
+  frame.render_widget(
+    Paragraph::new(Line::from(vec![
+      Span::styled(grid::fit("#", w_index), dim()),
+      Span::styled(grid::fit("file", w_file), dim()),
+      Span::styled(grid::fit("waiting", w_wait), dim()),
+      Span::styled(grid::fit("candidates", w_count), dim()),
+      Span::styled("best match".to_string(), dim()),
+    ])),
+    chunks[0],
+  );
+  frame.render_widget(
+    Paragraph::new(Line::from(Span::styled(
+      "─".repeat(inner.width as usize),
+      dim(),
+    ))),
+    chunks[1],
+  );
+
+  if rows.is_empty() {
+    frame.render_widget(
+      Paragraph::new(Line::from(Span::styled(
+        "nothing waiting — press esc to go back".to_string(),
+        dim().add_modifier(Modifier::ITALIC),
+      ))),
+      chunks[2],
+    );
+    return;
+  }
+
+  let height = chunks[2].height as usize;
+  let cursor = rows.iter().position(|&i| i == state.selected).unwrap_or(0);
+  state.scroll = grid::clamp_scroll(state.scroll, rows.len(), height, cursor);
+
+  let items: Vec<ListItem> = rows
+    .iter()
+    .enumerate()
+    .skip(state.scroll)
+    .take(height)
+    .map(|(pos, &row)| {
+      let entry = &state.roms[row];
+      let selected = pos == cursor;
+      let bg = |style: Style| {
+        if selected {
+          style.bg(WAITING_BG)
+        } else {
+          style
+        }
+      };
+      let file = if selected {
+        format!("▌{}", entry.file_name)
+      } else {
+        entry.file_name.clone()
+      };
+      let waiting = entry
+        .waiting_since
+        .map(|t| grid::format_elapsed(t.elapsed()))
+        .unwrap_or_else(|| "—".to_string());
+      let (count, count_style) = match entry.candidates {
+        Some(0) | None => ("none".to_string(), Style::default().fg(Color::Red)),
+        Some(n) => (n.to_string(), Style::default()),
+      };
+
+      ListItem::new(Line::from(vec![
+        Span::styled(grid::fit(&(row + 1).to_string(), w_index), bg(dim())),
+        Span::styled(
+          grid::fit(&file, w_file),
+          bg(Style::default().fg(Color::Yellow)),
+        ),
+        Span::styled(grid::fit(&waiting, w_wait), bg(dim())),
+        Span::styled(grid::fit(&count, w_count), bg(count_style)),
+        Span::styled(
+          grid::fit(entry.best_candidate.as_deref().unwrap_or("—"), w_best),
+          bg(Style::default()),
+        ),
+      ]))
+    })
+    .collect();
+  frame.render_widget(List::new(items), chunks[2]);
+}
+
 fn keys(pairs: &[(&str, String)]) -> Paragraph<'static> {
   let mut spans = Vec::new();
   for (key, what) in pairs {
@@ -642,16 +757,29 @@ fn keys(pairs: &[(&str, String)]) -> Paragraph<'static> {
 
 fn help_line(state: &AppState) -> Paragraph<'static> {
   let failed = state.roms.iter().filter(|r| r.failed()).count();
+  let waiting = state.roms.iter().filter(|r| r.id == Cell::Waiting).count();
   let filter = match state.filter {
     Filter::All => " filter: all  ",
     Filter::Active => " filter: active  ",
     Filter::Errors => " filter: errors  ",
+    Filter::Unidentified => " filter: to identify  ",
   };
   keys(&[
     ("↑↓", " select  ".to_string()),
     ("g/G", " top/bottom  ".to_string()),
     ("f", filter.to_string()),
     ("e", format!(" errors ({})  ", failed)),
+    ("m", format!(" to identify ({})  ", waiting)),
+    ("ctrl-c", " stop".to_string()),
+  ])
+}
+
+fn unidentified_help_line() -> Paragraph<'static> {
+  keys(&[
+    ("↑↓", " select  ".to_string()),
+    ("enter", " identify  ".to_string()),
+    ("s", " skip  ".to_string()),
+    ("esc", " back  ".to_string()),
     ("ctrl-c", " stop".to_string()),
   ])
 }

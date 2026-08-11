@@ -616,8 +616,9 @@ own would shift every other column as the selection moved. Three detail lines un
 underneath, taking rows from the same window: the file it came from, its sha1, and then
 whichever of the cause / the name-search result / the output directory the row is about.
 
-**Filters.** `AppState::filter` is `All | Active | Errors`; `f` cycles, `e` jumps to the
-errors view, `esc` comes back. `visible_rows()` maps the filter to row indices, and
+**Filters.** `AppState::filter` is `All | Active | Errors | Unidentified`; `f` cycles,
+`e` and `m` jump straight to a view, `esc` comes back. `Filter::is_focused()` says which
+ones draw their own block instead of the grid and the banner. `visible_rows()` maps the filter to row indices, and
 `selected` stays an index into `roms` — a ROM keeps its identity across a filter change,
 so leaving the errors view puts the cursor back on the same ROM and not on whatever now
 occupies that position.
@@ -631,6 +632,18 @@ exhausted quota or a flaky link. `errors::classify()` matches on the cause text,
 that is all that survives — the step is gone by the time the row is drawn — and a
 checksum failure wins over the transfer that carried it, since re-running fixes a flaky
 link and never fixes a mirror serving the wrong file.
+
+The **to-identify** view (`m`, yellow) lists the ROMs blocked on the user, how long each
+has been waiting, and the candidate ScreenScraper ranked **first** — not a match score.
+`jeuRecherche` returns its list "sorted by probability" and no percentage at all (the
+API's own `score` field is a user rating out of 20), so the name is the only real thing
+to put there, and it is often enough to decide without opening the modal. `enter` opens
+the parked request for the selected row, `s` answers it `Cancelled`.
+
+`enter` cannot open the modal itself: `show_modal` owns the terminal. The key handler
+sets `AppState::open_row` and the render loop, which does own it, resolves that to a
+parked request. `ModalRequest::row` carries the grid row rather than being matched on the
+file name — a name can be rewritten by an identification landing in between.
 
 `w` writes `<system>.errors.log` into the working directory — where `state.yml` and
 `run.yml` already go — one tab-separated line per failure with the **whole** cause, which

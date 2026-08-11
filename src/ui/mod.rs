@@ -130,6 +130,10 @@ pub struct ModalCandidate {
 
 /// Request sent by a discovery worker when a ROM cannot be identified.
 pub struct ModalRequest {
+  /// Which grid row is waiting on this. Carried rather than matched on the file name:
+  /// the row is what the "to identify" view selects, and a name can be rewritten by an
+  /// identification landing in between.
+  pub row: usize,
   pub filename: String,
   pub sha1: Option<String>,
   pub candidates: Vec<ModalCandidate>,
@@ -231,6 +235,8 @@ pub(crate) enum Filter {
   /// Started and not finished — what the workers are on right now.
   Active,
   Errors,
+  /// Blocked on the user, and holding a blocking-pool worker while they wait.
+  Unidentified,
 }
 
 impl Filter {
@@ -238,8 +244,14 @@ impl Filter {
     match self {
       Filter::All => Filter::Active,
       Filter::Active => Filter::Errors,
-      Filter::Errors => Filter::All,
+      Filter::Errors => Filter::Unidentified,
+      Filter::Unidentified => Filter::All,
     }
+  }
+
+  /// Whether this filter draws its own block instead of the grid and the banner.
+  pub(crate) fn is_focused(self) -> bool {
+    matches!(self, Filter::Errors | Filter::Unidentified)
   }
 }
 
@@ -270,6 +282,11 @@ pub(crate) struct RomEntry {
   pub(crate) source: String,
   /// How many candidates `jeu_recherche` returned, once it has run.
   pub(crate) candidates: Option<usize>,
+  /// The candidate ScreenScraper ranked first. Its own ordering is the only ranking
+  /// there is — `jeuRecherche` sorts by probability and returns no score.
+  pub(crate) best_candidate: Option<String>,
+  /// Since when this ROM has been blocked on the user.
+  pub(crate) waiting_since: Option<Instant>,
   pub(crate) status: String,
   pub(crate) id: Cell,
   pub(crate) pkg: Cell,
@@ -298,6 +315,8 @@ impl RomEntry {
       sha1: info.sha1,
       source: info.source,
       candidates: None,
+      best_candidate: None,
+      waiting_since: None,
       status: "queued".to_string(),
       id: Cell::Todo,
       pkg: Cell::Todo,
@@ -368,6 +387,9 @@ pub(crate) struct AppState {
   /// parked request is a blocked blocking-pool worker. That is the cost of letting more
   /// than one ROM wait at a time, and why `N_BLOCKING_WORKERS` is what it is.
   pub(crate) pending: Vec<ModalRequest>,
+  /// A row whose parked request the user asked to open. Set by the key handler and
+  /// consumed by the render loop, which is the only place that owns the terminal.
+  pub(crate) open_row: Option<usize>,
 }
 
 impl AppState {
@@ -433,9 +455,17 @@ impl RomBar {
     }
   }
 
-  /// How many candidates the name search came back with, for the detail lines.
-  pub fn set_candidates(&self, n: usize) {
-    self.state.lock().unwrap().roms[self.index].candidates = Some(n);
+  /// What the name search came back with: how many, and the one ScreenScraper put first.
+  pub fn set_candidates(&self, n: usize, best: Option<String>) {
+    let mut s = self.state.lock().unwrap();
+    let entry = &mut s.roms[self.index];
+    entry.candidates = Some(n);
+    entry.best_candidate = best;
+  }
+
+  /// Which grid row this bar drives, so a `ModalRequest` can name it.
+  pub fn row(&self) -> usize {
+    self.index
   }
 
   // ── Identification ──────────────────────────────────────────────────────
@@ -474,7 +504,12 @@ impl RomBar {
 
   /// The worker is blocked on the user, not on the machine.
   pub fn waiting_for_user(&self) {
-    self.state.lock().unwrap().roms[self.index].id = Cell::Waiting;
+    {
+      let mut s = self.state.lock().unwrap();
+      let entry = &mut s.roms[self.index];
+      entry.id = Cell::Waiting;
+      entry.waiting_since = Some(Instant::now());
+    }
     self.set_status("to identify");
   }
 
@@ -700,6 +735,7 @@ pub(crate) fn visible_rows(state: &AppState) -> Vec<usize> {
       Filter::All => true,
       Filter::Active => r.started_at.is_some() && !r.finished(),
       Filter::Errors => r.failed(),
+      Filter::Unidentified => r.id == Cell::Waiting,
     })
     .map(|(i, _)| i)
     .collect()
@@ -721,8 +757,23 @@ fn navigate(state: &Mutex<AppState>, code: KeyCode) {
   match code {
     KeyCode::Char('f') => s.filter = s.filter.next(),
     KeyCode::Char('e') => s.filter = Filter::Errors,
+    KeyCode::Char('m') => s.filter = Filter::Unidentified,
     KeyCode::Char('w') if s.filter == Filter::Errors => {
       s.notice = Some(write_errors_log(&s));
+      return;
+    }
+    // Handing the row to the render loop rather than opening here: `show_modal` owns
+    // the terminal, and this runs on the same thread but outside the draw.
+    KeyCode::Enter if s.filter == Filter::Unidentified => {
+      s.open_row = Some(s.selected);
+      return;
+    }
+    KeyCode::Char('s') if s.filter == Filter::Unidentified => {
+      let row = s.selected;
+      if let Some(i) = s.pending.iter().position(|r| r.row == row) {
+        let req = s.pending.remove(i);
+        let _ = req.response.send(ModalResponse::Cancelled);
+      }
       return;
     }
     KeyCode::Esc => s.filter = Filter::All,
@@ -787,6 +838,7 @@ impl Ui {
       workers: None,
       modal: None,
       pending: Vec::new(),
+      open_row: None,
     }));
 
     let running = Arc::new(AtomicBool::new(true));
@@ -846,11 +898,23 @@ impl Ui {
           }
         }
 
-        if open_now {
-          let req = state_r.lock().unwrap().pending.pop();
-          if let Some(req) = req {
-            show_modal(req, &mut terminal, &state_r, &interrupted_r, &queue_r);
+        // Either the user picked a row in the "to identify" view, or a lone request
+        // just turned up with nobody ahead of it.
+        let req = {
+          let mut s = state_r.lock().unwrap();
+          match s.open_row.take() {
+            Some(row) => s
+              .pending
+              .iter()
+              .position(|r| r.row == row)
+              .map(|i| s.pending.remove(i)),
+            None if open_now => s.pending.pop(),
+            None => None,
           }
+        };
+
+        if let Some(req) = req {
+          show_modal(req, &mut terminal, &state_r, &interrupted_r, &queue_r);
         } else if crossterm::event::poll(Duration::from_millis(TICK_MS)).unwrap_or(false) {
           if let Ok(Event::Key(key)) = crossterm::event::read() {
             if key.kind != KeyEventKind::Press {
