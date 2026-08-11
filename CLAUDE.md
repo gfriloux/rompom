@@ -156,7 +156,7 @@ src/
   queue.rs                  — TaskQueue (LIFO, two priority lanes: main + blocking) + Semaphore (interruptible)
   rom/
     mod.rs                  — Rom struct + new_folder() / new_ia() pipeline constructors
-    step.rs                 — Step, StepKind, StepStatus, StepError, StepData, Phase
+    step.rs                 — Step, StepKind, StepStatus, StepError, StepData
     source.rs               — RomSourceData / RomSource / IaSource / FolderSource
   state.rs                  — SystemState + RomStateEntry (serde YAML): per-run state persisted to
                               <system>.state.yml in the working directory. Tracks ss_game_id, rom_sha1,
@@ -887,7 +887,14 @@ stage is:
 3. A column in `grid::columns()` and its span in `render::row_line()`
 
 `PANELS`, `PanelDef`, `RomPhase` and `render_active()` are gone: they existed to decide
-which of two panels a ROM belonged to, and there is only one list now.
+which of two panels a ROM belonged to, and there is only one list now. `Phase` and
+`StepKind::phase()` went the same way in v0.20 — they mapped a step onto the panel it
+belonged to.
+
+`StepData` carries exactly one thing, `LookupSS { candidates }`, because `LookupSS` and
+`WaitModal` run on different pools and cannot hand them over directly. Every other step
+passes its results through the `Rom`; the per-kind payloads that used to sit here were
+only ever written, and being a second, staler copy of the truth is not a use.
 
 ## Nix stack
 

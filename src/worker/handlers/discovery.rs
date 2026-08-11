@@ -347,7 +347,7 @@ pub(crate) fn handle_lookup_ss(
 /// most one modal can be open whatever the workers do.
 pub(crate) fn handle_wait_modal(
   rom_arc: &Arc<Mutex<Rom>>,
-  step_idx: usize,
+  _step_idx: usize,
   ctx: &WorkerContext,
 ) -> Result<StepStatus, StepError> {
   // Read the candidates that LookupSS stored in its step data.
@@ -457,15 +457,6 @@ pub(crate) fn handle_wait_modal(
 
   // Queued for packaging regardless of found/cancelled.
   rom_arc.lock().unwrap().bar.queued_for_packaging();
-
-  // Store jeu also in the WaitModal step data (optional, for telemetry).
-  {
-    let mut rom = rom_arc.lock().unwrap();
-    let jeu_clone = rom.jeu.clone();
-    if let StepData::WaitModal { ref mut jeu, .. } = rom.pipeline[step_idx].data {
-      **jeu = jeu_clone;
-    }
-  }
 
   Ok(StepStatus::Done)
 }
