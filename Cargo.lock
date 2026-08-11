@@ -308,7 +308,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -368,7 +368,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -823,8 +823,8 @@ dependencies = [
 
 [[package]]
 name = "internet_archive"
-version = "0.2.0"
-source = "git+https://github.com/gfriloux/internetarchive?tag=v0.2.0#9480cf9fbaeb7413ecc34be6f1043fdfc60c358e"
+version = "0.3.0"
+source = "git+https://github.com/gfriloux/internetarchive?tag=v0.3.0#19b375e1c900ef4ce6969a8ba57be46993e0743a"
 dependencies = [
  "reqwest",
  "serde",
@@ -1347,7 +1347,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -1410,8 +1410,8 @@ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
 name = "screenscraper"
-version = "0.7.0"
-source = "git+https://github.com/gfriloux/screenscraper?tag=v0.7.0#6b46e8374fcccf8b3e8708edfa305a515391aee1"
+version = "0.8.0"
+source = "git+https://github.com/gfriloux/screenscraper?tag=v0.8.0#68673f785badbcba12ac8d8a20297719ad3f9bb1"
 dependencies = [
  "reqwest",
  "serde",
@@ -1739,7 +1739,7 @@ dependencies = [
  "getrandom 0.4.2",
  "once_cell",
  "rustix 1.1.4",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

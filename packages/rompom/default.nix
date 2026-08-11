@@ -19,8 +19,8 @@ pkgs.pkgsStatic.rustPlatform.buildRustPackage {
   cargoLock = {
     lockFile = ../../Cargo.lock;
     outputHashes = {
-      "internet_archive-0.2.0" = "sha256-W80Y7x0e1t5zpMSdE6mVXqzF7088CJh3UwaRPcTV658=";
-      "screenscraper-0.7.0" = "sha256-iQpVyZmBXB90N+93Waoo0yDIc0+UZR+xJc61S9ETdoI=";
+      "internet_archive-0.3.0" = "sha256-c6pciyhMQZU8yglV7r6fwyaeA77E+HfT6a/aXg9Fkk8=";
+      "screenscraper-0.8.0" = "sha256-IM+LMZRJugTXI4r6uA1M5y4sTlx+MWfTUBvPVidTovA=";
     };
   };
 

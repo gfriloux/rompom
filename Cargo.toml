@@ -10,9 +10,9 @@ version = "0.19.0"
 # version this code has never been compiled against, and the failure would land on
 # whoever built it rather than here.
 [dependencies]
-screenscraper = { git = "https://github.com/gfriloux/screenscraper", tag = "v0.7.0" }
+screenscraper = { git = "https://github.com/gfriloux/screenscraper", tag = "v0.8.0" }
 #screenscraper = { path = "../screenscraper" }
-internet_archive = { git = "https://github.com/gfriloux/internetarchive", tag = "v0.2.0" }
+internet_archive = { git = "https://github.com/gfriloux/internetarchive", tag = "v0.3.0" }
 sha1 = "0.10.6"
 md-5 = "0.10.6"
 crc32fast = "1.5.0"
