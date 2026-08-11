@@ -6,8 +6,11 @@ use std::{
 
 use internet_archive::download::{Download, DownloadMethod};
 
+use screenscraper::jeuinfo::Media;
+
 use crate::{
   hash::sha1_file,
+  package::media_url,
   rom::{Rom, RomSource, StepError, StepStatus},
 };
 
@@ -233,11 +236,14 @@ pub(crate) fn handle_download_medias(
   _step_idx: usize,
   ctx: &WorkerContext,
 ) -> Result<StepStatus, StepError> {
-  let (filename, medias) = {
+  let (filename, medias, jeu_id) = {
     let mut rom = rom_arc.lock().unwrap();
     let filename = rom.source.filename.clone();
     let medias = rom.medias.take(); // temporarily take ownership
-    (filename, medias)
+                                    // The game ID the public media path is built from. Absent only when the user skipped
+                                    // identification — in which case there are no medias to fetch either.
+    let jeu_id = rom.jeu.as_ref().map(|j| j.id.clone()).unwrap_or_default();
+    (filename, medias, jeu_id)
   };
 
   let directory = Path::new(&filename).with_extension("");
@@ -257,13 +263,21 @@ pub(crate) fn handle_download_medias(
         Some(m) => {
           rom_arc.lock().unwrap().bar.start_media(kind);
           let dest = directory.join(media_filename(kind, &m.format));
+          // Fetched from the public path, never from the `mediaJeu.php` URL the API
+          // handed back: pulling every asset of every ROM through the API is how an
+          // account gets rate-limited off ScreenScraper. Same link the PKGBUILD carries,
+          // built by the same function.
+          let direct = Media {
+            url: media_url(ctx.system.id, &jeu_id, kind, m),
+            ..m.clone()
+          };
           let needs_download =
-            !dest.exists() || ctx.ss.media_download(m).verify_sha1(&dest).is_err();
+            !dest.exists() || ctx.ss.media_download(&direct).verify_sha1(&dest).is_err();
           if needs_download {
             let bar = rom_arc.lock().unwrap().bar.handle();
             ctx
               .ss
-              .media_download(m)
+              .media_download(&direct)
               .fetch_with_progress(&dest, |read, total| bar.media_progress(read, total))
               .map_err(|e| media_failure(kind, &e))?;
             rom_arc.lock().unwrap().bar.media_done(kind);

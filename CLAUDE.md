@@ -282,8 +282,9 @@ LookupSS → WaitModal* → BuildPackage → DownloadRom ────┐
   from `source.file_name` (the actual disc-1 basename), not from the virtual `filename`.
 - **`DownloadMedias`** — iterates 8 canonical media kinds. For each: skips if sha1 already valid
   on disk (`media_skipped`), downloads otherwise (`media_done`), or marks unavailable if SS has none.
-  A failure goes through **`media_failure()`**, never through the library error's `Display`
-  — see *Credentials never reach a message* below.
+  Each asset is fetched from `package::media_url()` — the public path, not the API URL the
+  response carried. A failure goes through **`media_failure()`**, never through the library
+  error's `Display` — see *Credentials never reach a message* below.
 - **`SaveState`** — writes `RomStateEntry` into shared `SystemState` (flushed to disk by
   `main.rs` every 30 s and once more after all workers join). Persists `extra_disc_sha1s` for multi-disc games.
   Emits `bar.finish()`. It does **not** touch `remaining` — see below.
@@ -478,10 +479,14 @@ ScreenScraper handed back, and `base_query()` puts `devid`, `devpassword`, `ssid
   the error **variant** instead — the same rule `lookup_failure()` follows on the
   identification path. `Io` and `ChecksumMismatch` carry only a local path and two sha1s,
   so those are quoted in full.
-- **It must never reach a PKGBUILD.** `build_pkgbuild` deliberately *rebuilds* a public
-  `https://screenscraper.fr/medias/{systemeid}/{jeuid}/{slug}.{ext}` URL from the media
-  slug rather than writing `m.url` — a PKGBUILD is published. This is laundering, not
-  duplication, and `TODO.md` carries a warning against "simplifying" it.
+- **It must never reach a PKGBUILD, nor be the URL rompom fetches.** `package::media_url()`
+  builds the public `https://screenscraper.fr/medias/{systemeid}/{jeuid}/{file}` path from
+  the media slug, and it is used **twice**: for the PKGBUILD `sources`, and for rompom's
+  own download. A PKGBUILD is published, and pulling every asset of every ROM through
+  `mediaJeu.php` is how an account gets rate-limited off ScreenScraper. The public path
+  wants a `Referer`, which the `screenscraper` library sends on every media request.
+  This is laundering, not duplication, and `TODO.md` carries a warning against
+  "simplifying" it.
 
 ## RomSourceData / Rom structs
 

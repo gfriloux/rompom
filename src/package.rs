@@ -65,6 +65,40 @@ fn media_slug(url: &str) -> &str {
   }
 }
 
+/// The public media URL — the only one that may leave this process.
+///
+/// ScreenScraper hands back a `mediaJeu.php` API call in `Media::url`, with `devid`,
+/// `devpassword`, `ssid` and `sspassword` in the query string. That URL is unusable on
+/// two counts: it cannot go into a PKGBUILD, which is published, and it must not be what
+/// rompom fetches either — pulling every asset of every ROM through the API is how an
+/// account gets rate-limited off the service. The direct path under
+/// `screenscraper.fr/medias/` bypasses the API; it wants a `Referer`, which the
+/// `screenscraper` library sends on every media request.
+///
+/// Built once and used twice: for the PKGBUILD `sources`, and for rompom's own download.
+/// The two were allowed to differ for as long as the media feature has existed, and the
+/// downloads took the wrong one the whole time.
+pub(crate) fn media_url(system_id: u32, jeu_id: &str, kind: &str, m: &Media) -> String {
+  let fmt = media_ext(&m.format);
+  let slug = sanitize_token(media_slug(&m.url));
+  let region = sanitize_token(m.region.as_deref().unwrap_or("wor"));
+  // The remote file name does not follow from the asset kind alone: some carry the region
+  // in parentheses, some as a suffix already inside the slug, some not at all.
+  let file = match kind {
+    "video" => "video.mp4".to_string(),
+    "manual" => format!("{}.pdf", slug),
+    "marquee" => format!("marquee.{}", fmt),
+    "bezel" => format!("bezel-16-9({}).{}", region, fmt),
+    "screenshot" => format!("ss({}).{}", region, fmt),
+    // image, thumbnail, wheel: ScreenScraper's own slug, extension appended.
+    _ => format!("{}.{}", slug, fmt),
+  };
+  format!(
+    "https://screenscraper.fr/medias/{}/{}/{}",
+    system_id, jeu_id, file
+  )
+}
+
 fn render_template(src: &str, ctx: &minijinja::Value) -> String {
   let mut env = Environment::new();
   env.set_trim_blocks(true);
@@ -363,69 +397,63 @@ impl Package {
     // in filenames, so they go through the token whitelist before anything else.
     if let Some(ref x) = self.medias.video {
       sources.push(shell_quote(&format!(
-        "video.mp4::https://screenscraper.fr/medias/{}/{}/video.mp4",
-        system.id, jeu_id
+        "video.mp4::{}",
+        media_url(system.id, &jeu_id, "video", x)
       )));
       sha1sums.push(shell_quote(&sanitize_sha1(&x.sha1)));
     }
     if let Some(ref x) = self.medias.bezel {
-      let fmt = media_ext(&x.format);
-      let region = sanitize_token(x.region.as_deref().unwrap_or("wor"));
       sources.push(shell_quote(&format!(
-        "bezel.{}::https://screenscraper.fr/medias/{}/{}/bezel-16-9({}).{}",
-        fmt, system.id, jeu_id, region, fmt
+        "bezel.{}::{}",
+        media_ext(&x.format),
+        media_url(system.id, &jeu_id, "bezel", x)
       )));
       sha1sums.push(shell_quote(&sanitize_sha1(&x.sha1)));
     }
     if let Some(ref x) = self.medias.image {
-      let fmt = media_ext(&x.format);
-      let slug = sanitize_token(media_slug(&x.url));
       sources.push(shell_quote(&format!(
-        "image.{}::https://screenscraper.fr/medias/{}/{}/{}.{}",
-        fmt, system.id, jeu_id, slug, fmt
+        "image.{}::{}",
+        media_ext(&x.format),
+        media_url(system.id, &jeu_id, "image", x)
       )));
       sha1sums.push(shell_quote(&sanitize_sha1(&x.sha1)));
     }
     if let Some(ref x) = self.medias.thumbnail {
-      let fmt = media_ext(&x.format);
-      let slug = sanitize_token(media_slug(&x.url));
       sources.push(shell_quote(&format!(
-        "thumbnail.{}::https://screenscraper.fr/medias/{}/{}/{}.{}",
-        fmt, system.id, jeu_id, slug, fmt
+        "thumbnail.{}::{}",
+        media_ext(&x.format),
+        media_url(system.id, &jeu_id, "thumbnail", x)
       )));
       sha1sums.push(shell_quote(&sanitize_sha1(&x.sha1)));
     }
     if let Some(ref x) = self.medias.marquee {
-      let fmt = media_ext(&x.format);
       sources.push(shell_quote(&format!(
-        "marquee.{}::https://screenscraper.fr/medias/{}/{}/marquee.{}",
-        fmt, system.id, jeu_id, fmt
+        "marquee.{}::{}",
+        media_ext(&x.format),
+        media_url(system.id, &jeu_id, "marquee", x)
       )));
       sha1sums.push(shell_quote(&sanitize_sha1(&x.sha1)));
     }
     if let Some(ref x) = self.medias.screenshot {
-      let fmt = media_ext(&x.format);
-      let region = sanitize_token(x.region.as_deref().unwrap_or("wor"));
       sources.push(shell_quote(&format!(
-        "screenshot.{}::https://screenscraper.fr/medias/{}/{}/ss({}).{}",
-        fmt, system.id, jeu_id, region, fmt
+        "screenshot.{}::{}",
+        media_ext(&x.format),
+        media_url(system.id, &jeu_id, "screenshot", x)
       )));
       sha1sums.push(shell_quote(&sanitize_sha1(&x.sha1)));
     }
     if let Some(ref x) = self.medias.wheel {
-      let fmt = media_ext(&x.format);
-      let slug = sanitize_token(media_slug(&x.url));
       sources.push(shell_quote(&format!(
-        "wheel.{}::https://screenscraper.fr/medias/{}/{}/{}.{}",
-        fmt, system.id, jeu_id, slug, fmt
+        "wheel.{}::{}",
+        media_ext(&x.format),
+        media_url(system.id, &jeu_id, "wheel", x)
       )));
       sha1sums.push(shell_quote(&sanitize_sha1(&x.sha1)));
     }
     if let Some(ref x) = self.medias.manual {
-      let slug = sanitize_token(media_slug(&x.url));
       sources.push(shell_quote(&format!(
-        "manual.pdf::https://screenscraper.fr/medias/{}/{}/{}.pdf",
-        system.id, jeu_id, slug
+        "manual.pdf::{}",
+        media_url(system.id, &jeu_id, "manual", x)
       )));
       sha1sums.push(shell_quote(&sanitize_sha1(&x.sha1)));
     }
@@ -562,6 +590,116 @@ impl Package {
 
 #[cfg(test)]
 mod tests {
+
+  // ── media_url ────────────────────────────────────────────────────────────
+
+  /// A `Media` as ScreenScraper returns it: the `url` is the `mediaJeu.php` call, with
+  /// the credentials this function exists to keep out of everything downstream.
+  fn api_media(slug: &str, format: &str, region: Option<&str>) -> Media {
+    Media {
+      name: slug.to_string(),
+      parent: "jeu".to_string(),
+      url: format!(
+        "https://api.screenscraper.fr/api2/mediaJeu.php?devid=x&devpassword=y&ssid=z&\
+         sspassword=w&systemeid=3&jeuid=65388&media={}",
+        slug
+      ),
+      region: region.map(str::to_string),
+      crc: String::new(),
+      md5: String::new(),
+      sha1: String::new(),
+      size: None,
+      format: format.to_string(),
+    }
+  }
+
+  /// The URLs a real PKGBUILD carries, for `Captain Tsubasa II` on the NES. They are the
+  /// public media path — no API call, and no credentials — and they are now also what
+  /// rompom itself fetches.
+  #[test]
+  fn the_media_url_is_the_public_path() {
+    let base = "https://screenscraper.fr/medias/3/65388";
+    for (kind, slug, format, region, expected) in [
+      ("video", "video", "mp4", None, format!("{}/video.mp4", base)),
+      (
+        "image",
+        "sstitlejp",
+        "png",
+        None,
+        format!("{}/sstitlejp.png", base),
+      ),
+      (
+        "thumbnail",
+        "box-2Djp",
+        "png",
+        None,
+        format!("{}/box-2Djp.png", base),
+      ),
+      (
+        "screenshot",
+        "ss",
+        "png",
+        Some("jp"),
+        format!("{}/ss(jp).png", base),
+      ),
+      (
+        "wheel",
+        "wheeljp",
+        "png",
+        None,
+        format!("{}/wheeljp.png", base),
+      ),
+      (
+        "manual",
+        "manueljp",
+        "pdf",
+        None,
+        format!("{}/manueljp.pdf", base),
+      ),
+      (
+        "bezel",
+        "bezel-16-9",
+        "png",
+        Some("wor"),
+        format!("{}/bezel-16-9(wor).png", base),
+      ),
+      (
+        "marquee",
+        "marquee",
+        "png",
+        None,
+        format!("{}/marquee.png", base),
+      ),
+    ] {
+      assert_eq!(
+        media_url(3, "65388", kind, &api_media(slug, format, region)),
+        expected,
+        "{}",
+        kind
+      );
+    }
+  }
+
+  /// Whatever the asset, the credentials ScreenScraper put in `Media::url` never come
+  /// out the other side — this URL goes into a published PKGBUILD.
+  #[test]
+  fn the_media_url_never_carries_the_credentials() {
+    for kind in [
+      "video",
+      "image",
+      "thumbnail",
+      "screenshot",
+      "wheel",
+      "manual",
+      "bezel",
+      "marquee",
+    ] {
+      let url = media_url(3, "65388", kind, &api_media("sstitlejp", "png", Some("jp")));
+      for secret in ["devid", "devpassword", "ssid", "sspassword", "mediaJeu"] {
+        assert!(!url.contains(secret), "{} leaks {}", kind, secret);
+      }
+    }
+  }
 
   // ── media_slug ───────────────────────────────────────────────────────────
 
