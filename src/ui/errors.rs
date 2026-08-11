@@ -83,6 +83,25 @@ pub(crate) fn tally(causes: &[String]) -> String {
     .join(" · ")
 }
 
+/// The contents of `<system>.errors.log`: a header, then one line per failure.
+///
+/// One line each, tab-separated, because this file exists to be read by something other
+/// than a human eye — `grep`, `cut`, a loop that re-runs the names. The cause is written
+/// **whole**, unlike in the view, where it is cut to a column; that is the point of
+/// writing it out at all. Newlines inside a cause are flattened for the same reason a
+/// grid row flattens them: one failure has to stay one line.
+pub(crate) fn log(system: &str, failures: &[(String, String)]) -> String {
+  let mut out = format!("# rompom {} — {} failures\n", system, failures.len());
+  for (label, cause) in failures {
+    out.push_str(&format!(
+      "{}\t{}\n",
+      label.replace('\t', " "),
+      cause.replace(['\n', '\t'], " ")
+    ));
+  }
+  out
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -157,5 +176,42 @@ mod tests {
   #[test]
   fn nothing_to_tally_says_nothing() {
     assert_eq!(tally(&[]), "");
+  }
+
+  /// One failure per line, name and cause separated by a tab, so the file can be cut
+  /// and grepped rather than only read.
+  #[test]
+  fn the_log_is_one_line_per_failure() {
+    let failures = vec![
+      (
+        "Bahamut Lagoon (J)".to_string(),
+        "sha1 mismatch".to_string(),
+      ),
+      ("Front Mission (J)".to_string(), "HTTP 503".to_string()),
+    ];
+    assert_eq!(
+      log("snes", &failures),
+      "# rompom snes — 2 failures\n\
+       Bahamut Lagoon (J)\tsha1 mismatch\n\
+       Front Mission (J)\tHTTP 503\n"
+    );
+  }
+
+  /// The whole point of the file is the cause the view had to cut — so it is written
+  /// whole, and a newline inside it is flattened rather than allowed to split the line.
+  #[test]
+  fn the_log_keeps_the_whole_cause_on_one_line() {
+    let long = "too many unrecognised ROMs today — ScreenScraper says come back tomorrow";
+    let failures = vec![("Umihara Kawase".to_string(), format!("{}\nretry?", long))];
+    let out = log("snes", &failures);
+    assert!(out.contains(long));
+    assert_eq!(out.lines().count(), 2);
+  }
+
+  /// A run with nothing to report still writes a header, so an empty file is
+  /// distinguishable from one that was never written.
+  #[test]
+  fn an_empty_log_still_says_which_run_it_is() {
+    assert_eq!(log("snes", &[]), "# rompom snes — 0 failures\n");
   }
 }

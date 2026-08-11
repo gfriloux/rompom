@@ -288,6 +288,7 @@ are above and below it.
 | `g` / `G` | jump to the top / back to the bottom (`G` also re-enables auto-scrolling) |
 | `f` | cycle the filter: all → active → errors |
 | `e` | jump straight to the errors view |
+| `w` | in the errors view, write `<system>.errors.log` |
 | `esc` | leave a filtered view |
 | `Ctrl-C` | interrupt, saving `<system>.run.yml` |
 
@@ -296,6 +297,16 @@ attempts instead of the media dots, and counts the causes by kind underneath:
 
 ```
 9 checksum · 4 screenscraper · 2 download
+```
+
+`w` writes those failures to `<system>.errors.log` in the current directory, one
+tab-separated line each, with the **whole** cause rather than the cut-down version the
+column has room for:
+
+```
+# rompom snes — 2 failures
+Bahamut Lagoon (J)	Checksum mismatch: expected 3f9a…, got 0c41…
+Umihara Kawase	too many unrecognised ROMs today — ScreenScraper says come back tomorrow
 ```
 
 Moving the cursor stops the automatic scrolling — a list sliding under the cursor cannot

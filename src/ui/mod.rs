@@ -346,6 +346,9 @@ pub(crate) struct AppState {
   /// off — the user is reading something — and `G` turns it back on.
   pub(crate) follow: bool,
   pub(crate) filter: Filter,
+  /// One-off message shown in place of the key hints — what `w` just wrote, or why it
+  /// could not. Cleared by the next keypress, so it never becomes stale furniture.
+  pub(crate) notice: Option<String>,
   /// When the run started, which is what the throughput window is keyed on.
   pub(crate) started: Instant,
   /// Bytes written by ROM and media transfers so far.
@@ -653,6 +656,34 @@ fn plain_line(entry: &RomEntry, done: usize, total: usize) -> String {
   format!("[{}/{}] {} {}{}", done, total, marker, entry.label, tail)
 }
 
+/// Writes `<system>.errors.log` next to the other run files, and says what happened.
+///
+/// Into the working directory, like `state.yml` and `run.yml`: that is where rompom
+/// already writes, and where the user is standing when they press the key.
+fn write_errors_log(state: &AppState) -> String {
+  let failures: Vec<(String, String)> = state
+    .roms
+    .iter()
+    .filter(|r| r.failed())
+    .map(|r| {
+      (
+        r.label.clone(),
+        r.error
+          .clone()
+          .unwrap_or_else(|| "unknown cause".to_string()),
+      )
+    })
+    .collect();
+
+  let path = format!("{}.errors.log", state.system);
+  match std::fs::write(&path, errors::log(&state.system, &failures)) {
+    Ok(()) => format!("wrote {} ({} failures)", path, failures.len()),
+    // Said on screen rather than swallowed: a keypress that silently does nothing is
+    // indistinguishable from one that is not bound.
+    Err(e) => format!("could not write {}: {}", path, e),
+  }
+}
+
 /// Row indices the current filter shows, in arrival order.
 pub(crate) fn visible_rows(state: &AppState) -> Vec<usize> {
   state
@@ -679,10 +710,15 @@ pub(crate) fn visible_rows(state: &AppState) -> Vec<usize> {
 /// back: it means "take me to where the run is", which is what following does.
 fn navigate(state: &Mutex<AppState>, code: KeyCode) {
   let mut s = state.lock().unwrap();
+  s.notice = None;
 
   match code {
     KeyCode::Char('f') => s.filter = s.filter.next(),
     KeyCode::Char('e') => s.filter = Filter::Errors,
+    KeyCode::Char('w') if s.filter == Filter::Errors => {
+      s.notice = Some(write_errors_log(&s));
+      return;
+    }
     KeyCode::Esc => s.filter = Filter::All,
     _ => {}
   }
@@ -738,6 +774,7 @@ impl Ui {
       scroll: 0,
       follow: true,
       filter: Filter::All,
+      notice: None,
       started: Instant::now(),
       bytes: 0,
       rate: Rate::new(),

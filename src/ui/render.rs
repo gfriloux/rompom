@@ -51,11 +51,11 @@ pub(super) fn render(frame: &mut Frame, state: &mut AppState) {
 
   if state.filter == Filter::Errors {
     render_errors(frame, areas[0], state);
-    frame.render_widget(errors_help_line(), areas[1]);
+    frame.render_widget(hints_or_notice(state, errors_help_line()), areas[1]);
   } else {
     render_banner(frame, areas[0], state);
     render_grid(frame, areas[1], state);
-    frame.render_widget(help_line(state), areas[2]);
+    frame.render_widget(hints_or_notice(state, help_line(state)), areas[2]);
   }
 
   if let Some(ref modal) = state.modal {
@@ -659,9 +659,21 @@ fn help_line(state: &AppState) -> Paragraph<'static> {
 fn errors_help_line() -> Paragraph<'static> {
   keys(&[
     ("↑↓", " select  ".to_string()),
+    ("w", " write <system>.errors.log  ".to_string()),
     ("esc", " back  ".to_string()),
     ("ctrl-c", " stop".to_string()),
   ])
+}
+
+/// The hint line, unless something has just happened that is worth saying instead.
+fn hints_or_notice(state: &AppState, hints: Paragraph<'static>) -> Paragraph<'static> {
+  match &state.notice {
+    Some(msg) => Paragraph::new(Line::from(Span::styled(
+      msg.clone(),
+      Style::default().fg(Color::Yellow),
+    ))),
+    None => hints,
+  }
 }
 
 // ── Modal rendering ────────────────────────────────────────────────────────

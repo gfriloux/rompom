@@ -163,7 +163,8 @@ src/
                               rom_mtime, rom_size, per-media sha1s, and extra_disc_sha1s for each ROM.
   ui/
     mod.rs                  — Ui + RomBar + AppState + RomEntry + Cell/Dot, modal public types
-    errors.rs               — classify()/tally(): failure causes bucketed for the errors view
+    errors.rs               — classify()/tally()/log(): failure causes bucketed for the
+                              errors view and written to <system>.errors.log
     grid.rs                 — column widths, text fitting, scroll window, elapsed format;
                               pure arithmetic, and the only testable part of the interface
     rate.rs                 — Rate: sliding one-minute window feeding the sparkline,
@@ -621,6 +622,12 @@ exhausted quota or a flaky link. `errors::classify()` matches on the cause text,
 that is all that survives — the step is gone by the time the row is drawn — and a
 checksum failure wins over the transfer that carried it, since re-running fixes a flaky
 link and never fixes a mirror serving the wrong file.
+
+`w` writes `<system>.errors.log` into the working directory — where `state.yml` and
+`run.yml` already go — one tab-separated line per failure with the **whole** cause, which
+is the point of writing it at all. What it wrote, or why it could not, replaces the hint
+line (`AppState::notice`, cleared by the next keypress): a key that silently does nothing
+is indistinguishable from one that is not bound.
 
 **Following.** `AppState::follow` starts true and the window tracks the workers. Any
 cursor move turns it off and `grid::clamp_scroll()` takes over, moving the window only
