@@ -11,7 +11,7 @@ use crate::{
 };
 
 use super::super::{
-  helpers::{lookup_failure, search_name, NAME_REGIONS},
+  helpers::{candidate_from, lookup_failure, search_name, NAME_REGIONS},
   WorkerContext,
 };
 
@@ -302,20 +302,10 @@ pub(crate) fn handle_lookup_ss(
       },
     };
 
+    let lang_refs: Vec<&str> = ctx.lang.iter().map(|s| s.as_str()).collect();
     let display_candidates: Vec<ModalCandidate> = search_results
       .iter()
-      .map(|j| {
-        let date = j.find_date(&["wor", "eu", "us", "fr"]);
-        ModalCandidate {
-          name: j.find_name(NAME_REGIONS),
-          game_id: j.id.clone(),
-          year: if date == "Unknown" || date.len() < 4 {
-            None
-          } else {
-            Some(date[..4].to_string())
-          },
-        }
-      })
+      .map(|j| candidate_from(j, &lang_refs))
       .collect();
 
     // Store candidates in this step's data and unlock WaitModal.

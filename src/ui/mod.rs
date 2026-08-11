@@ -121,11 +121,22 @@ pub(crate) fn is_plain() -> bool {
 // ── Modal public types ─────────────────────────────────────────────────────
 
 /// One game candidate returned by `jeu_recherche`, for display in the modal.
+///
+/// Everything here comes out of the `JeuInfo` the search already returned — the API
+/// documents `jeuRecherche` as "identical to jeuInfos but without the ROM information",
+/// so the media list, the publisher and the genre cost no extra call. The design handoff
+/// budgeted one `jeuInfos` per candidate for this.
 #[derive(Clone)]
 pub struct ModalCandidate {
   pub name: String,
   pub game_id: String,
   pub year: Option<String>,
+  /// Which of the nine tracked assets this candidate has, in `MEDIA_ICONS` order.
+  pub media: [Dot; MEDIA_COUNT],
+  pub publisher: Option<String>,
+  pub genre: Option<String>,
+  pub players: Option<String>,
+  pub region: Option<String>,
 }
 
 /// Request sent by a discovery worker when a ROM cannot be identified.
@@ -178,8 +189,8 @@ pub(crate) enum Cell {
 }
 
 /// State of one media asset in a grid row.
-#[derive(Clone, Copy, PartialEq)]
-pub(crate) enum Dot {
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Dot {
   /// Not attempted yet.
   Todo,
   Running,
@@ -213,6 +224,9 @@ enum ModalMode {
 
 /// Display state stored in `AppState` so the render function can draw the modal.
 pub(crate) struct ModalDisplayState {
+  /// The grid row being identified, so the modal title names the same number the
+  /// "to identify" view does.
+  row: usize,
   filename: String,
   sha1: Option<String>,
   candidates: Vec<ModalCandidate>,

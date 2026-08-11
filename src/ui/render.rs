@@ -65,7 +65,7 @@ pub(super) fn render(frame: &mut Frame, state: &mut AppState) {
   }
 
   if let Some(ref modal) = state.modal {
-    render_modal(frame, frame.area(), modal);
+    render_modal(frame, frame.area(), modal, &state.roms);
   }
 }
 
@@ -806,62 +806,74 @@ fn hints_or_notice(state: &AppState, hints: Paragraph<'static>) -> Paragraph<'st
 
 // ── Modal rendering ────────────────────────────────────────────────────────
 
-pub(super) fn render_modal(frame: &mut Frame, area: Rect, modal: &ModalDisplayState) {
+pub(super) fn render_modal(
+  frame: &mut Frame,
+  area: Rect,
+  modal: &ModalDisplayState,
+  roms: &[RomEntry],
+) {
   use ratatui::widgets::Clear;
 
-  let popup = centered_rect(78, 72, area);
+  let popup = centered_rect(84, 76, area);
   frame.render_widget(Clear, popup);
 
-  let block = Block::default()
-    .borders(Borders::ALL)
-    .border_type(BorderType::Rounded)
-    .border_style(Style::default().fg(Color::Yellow))
-    .title(" ROM not identified — manual selection ")
-    .title_style(
-      Style::default()
-        .fg(Color::Yellow)
-        .add_modifier(Modifier::BOLD),
-    );
-
+  let block = styled_block(
+    format!(" identify · {} · {} ", modal.row + 1, modal.filename),
+    Color::Yellow,
+  );
   let inner = block.inner(popup);
   frame.render_widget(block, popup);
 
-  // Layout: [file info] [sep] [candidates] [sep] [controls / input]
   let chunks = Layout::default()
     .direction(Direction::Vertical)
     .constraints([
-      Constraint::Length(2), // filename + sha1
-      Constraint::Length(1), // empty separator
-      Constraint::Min(2),    // candidate list
-      Constraint::Length(1), // empty separator
-      Constraint::Length(2), // keyboard hints / input line
+      Constraint::Length(1), // sha1 + size
+      Constraint::Length(1), // blank
+      Constraint::Length(1), // column headers
+      Constraint::Min(1),    // candidates
+      Constraint::Length(1), // blank
+      Constraint::Length(1), // selection / input / confirmation
+      Constraint::Length(1), // hints
     ])
     .split(inner);
 
-  // — File info ——————————————————————————————————————————————————————————————
-  let info = vec![
-    Line::from(vec![
-      Span::styled("File : ", dim()),
-      Span::styled(
-        modal.filename.clone(),
-        Style::default().add_modifier(Modifier::BOLD),
-      ),
-    ]),
-    Line::from(vec![
-      Span::styled("SHA1 : ", dim()),
-      Span::styled(modal.sha1.clone().unwrap_or_else(|| "—".to_string()), dim()),
-    ]),
-  ];
-  frame.render_widget(Paragraph::new(info), chunks[0]);
+  // — sha1 line ————————————————————————————————————————————————————————————
+  let size = roms
+    .get(modal.row)
+    .and_then(|r| r.size)
+    .map(grid::format_bytes)
+    .unwrap_or_else(|| "—".to_string());
+  frame.render_widget(
+    Paragraph::new(Line::from(vec![
+      Span::styled(grid::fit("sha1", 10), dim()),
+      Span::styled(grid::fit(modal.sha1.as_deref().unwrap_or("—"), 44), dim()),
+      Span::styled(format!("{} · no hash hit", size), dim()),
+    ])),
+    chunks[0],
+  );
 
-  // — Candidate list ─────────────────────────────────────────────────────────
+  // — Candidates ——————————————————————————————————————————————————————————
+  // The same nine columns as the grid, in the same order and with the same glyphs: a
+  // candidate's assets read exactly like a finished ROM's.
+  let (w_name, w_year, w_id) = (36usize, 7usize, 9usize);
+  let mut header = vec![
+    Span::styled(grid::fit("  candidate", w_name), dim()),
+    Span::styled(grid::fit("year", w_year), dim()),
+    Span::styled(grid::fit("id", w_id), dim()),
+  ];
+  for &(_, icon) in media_icons() {
+    header.push(Span::styled(grid::fit(icon, 3), dim()));
+  }
+  header.push(Span::styled("rank".to_string(), dim()));
+  frame.render_widget(Paragraph::new(Line::from(header)), chunks[2]);
+
   if modal.candidates.is_empty() {
     frame.render_widget(
       Paragraph::new(Line::from(Span::styled(
         "No results from ScreenScraper. Press i to enter a game ID manually, or Esc to skip.",
         dim(),
       ))),
-      chunks[2],
+      chunks[3],
     );
   } else {
     let items: Vec<ListItem> = modal
@@ -870,115 +882,119 @@ pub(super) fn render_modal(frame: &mut Frame, area: Rect, modal: &ModalDisplaySt
       .enumerate()
       .map(|(i, c)| {
         let selected = i == modal.cursor;
-        let arrow = if selected { "▶  " } else { "   " };
-        let name_style = if selected {
-          Style::default()
-            .fg(Color::Yellow)
-            .add_modifier(Modifier::BOLD)
-        } else {
-          Style::default()
+        let bg = |style: Style| {
+          if selected {
+            style.bg(WAITING_BG)
+          } else {
+            style
+          }
         };
-        let year = c.year.as_deref().unwrap_or("????");
-        ListItem::new(Line::from(vec![
-          Span::styled(arrow.to_string(), name_style),
-          Span::styled(format!("{:<50}", &c.name), name_style),
-          Span::styled(format!("  [id:{:>6}]  {}", c.game_id, year), dim()),
-        ]))
+        let name = format!("{} {}", if selected { "▶" } else { " " }, c.name);
+        let mut spans = vec![
+          Span::styled(
+            grid::fit(&name, w_name),
+            bg(if selected {
+              Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD)
+            } else {
+              Style::default()
+            }),
+          ),
+          Span::styled(
+            grid::fit(c.year.as_deref().unwrap_or("????"), w_year),
+            bg(dim()),
+          ),
+          Span::styled(grid::fit(&c.game_id, w_id), bg(dim())),
+        ];
+        for dot in c.media {
+          spans.push(dot_span(dot, 3, selected));
+        }
+        // ScreenScraper sorts its results by probability and returns no score, so the
+        // only honest thing to show is where in that order this one came.
+        spans.push(Span::styled(format!("{}", i + 1), bg(dim())));
+        ListItem::new(Line::from(spans))
       })
       .collect();
-    frame.render_widget(List::new(items), chunks[2]);
+    frame.render_widget(List::new(items), chunks[3]);
   }
 
-  // — Controls / input / confirmation ──────────────────────────────────────
-  match &modal.mode {
-    ModalMode::List => {
-      let hints = vec![
-        Line::from(vec![
-          Span::styled("↑↓", Style::default().fg(Color::Yellow)),
-          Span::raw(" navigate  "),
-          Span::styled("Enter", Style::default().fg(Color::Yellow)),
-          Span::raw(" confirm  "),
-          Span::styled("i", Style::default().fg(Color::Yellow)),
-          Span::raw(" type game ID  "),
-          Span::styled("Esc", Style::default().fg(Color::Yellow)),
-          Span::raw(" skip"),
-        ]),
-        Line::default(),
-      ];
-      frame.render_widget(Paragraph::new(hints), chunks[4]);
-    }
-
-    ModalMode::Input => {
-      let status_line = match &modal.input_status {
-        Some(msg) => Line::from(Span::styled(msg.clone(), Style::default().fg(Color::Red))),
-        None => Line::from(vec![
-          Span::styled("Enter", Style::default().fg(Color::Yellow)),
-          Span::raw(" look up  "),
-          Span::styled("Esc", Style::default().fg(Color::Yellow)),
-          Span::raw(" back to list"),
-        ]),
-      };
-      let lines = vec![
-        Line::from(vec![
-          Span::styled("Game ID: ", Style::default().fg(Color::Yellow)),
-          Span::styled(
-            modal.input.clone(),
-            Style::default().add_modifier(Modifier::BOLD),
-          ),
-          Span::styled("█", Style::default().fg(Color::Yellow)),
-        ]),
-        status_line,
-      ];
-      frame.render_widget(Paragraph::new(lines), chunks[4]);
-    }
-
-    ModalMode::Confirming { game_id, game_name } => {
-      use ratatui::widgets::Clear;
-
-      // In Confirming mode, replace the candidate list area with the found game info.
-      let confirm_block = Block::default()
-        .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(Color::Green))
-        .title(" Game found ")
-        .title_style(
+  // — Selection / input / confirmation ————————————————————————————————————
+  let (detail, hints) = match &modal.mode {
+    ModalMode::List => (
+      selection_line(modal),
+      vec![
+        ("↑↓", " navigate  "),
+        ("enter", " confirm  "),
+        ("i", " type a game ID  "),
+        ("esc", " skip"),
+      ],
+    ),
+    ModalMode::Input => (
+      Line::from(vec![
+        Span::styled(grid::fit("game id", 10), Style::default().fg(Color::Yellow)),
+        Span::styled(
+          modal.input.clone(),
+          Style::default().add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("█", Style::default().fg(Color::Yellow)),
+        Span::styled(
+          match &modal.input_status {
+            Some(msg) => format!("   {}", msg),
+            None => String::new(),
+          },
+          Style::default().fg(Color::Red),
+        ),
+      ]),
+      vec![("enter", " look up  "), ("esc", " back to the list")],
+    ),
+    ModalMode::Confirming { game_id, game_name } => (
+      Line::from(vec![
+        Span::styled(grid::fit("found", 10), dim()),
+        Span::styled(
+          game_name.clone(),
           Style::default()
             .fg(Color::Green)
             .add_modifier(Modifier::BOLD),
-        );
-      let confirm_inner = confirm_block.inner(chunks[2]);
-      frame.render_widget(Clear, chunks[2]);
-      frame.render_widget(confirm_block, chunks[2]);
+        ),
+        Span::styled(format!("   id {}", game_id), dim()),
+      ]),
+      vec![("enter", " confirm  "), ("esc", " back to the input")],
+    ),
+  };
 
-      let found_lines = vec![
-        Line::from(vec![
-          Span::styled("Name : ", dim()),
-          Span::styled(
-            game_name.clone(),
-            Style::default()
-              .fg(Color::Green)
-              .add_modifier(Modifier::BOLD),
-          ),
-        ]),
-        Line::from(vec![
-          Span::styled("ID   : ", dim()),
-          Span::styled(game_id.clone(), Style::default().fg(Color::Green)),
-        ]),
-      ];
-      frame.render_widget(Paragraph::new(found_lines), confirm_inner);
+  frame.render_widget(Paragraph::new(detail), chunks[5]);
+  frame.render_widget(
+    keys(
+      &hints
+        .iter()
+        .map(|(k, v)| (*k, v.to_string()))
+        .collect::<Vec<_>>(),
+    ),
+    chunks[6],
+  );
+}
 
-      let hints = vec![
-        Line::from(vec![
-          Span::styled("Enter", Style::default().fg(Color::Green)),
-          Span::raw(" confirm  "),
-          Span::styled("Esc", Style::default().fg(Color::Yellow)),
-          Span::raw(" back to input"),
-        ]),
-        Line::default(),
-      ];
-      frame.render_widget(Paragraph::new(hints), chunks[4]);
-    }
-  }
+/// Publisher, genre, players, region and asset count for the highlighted candidate.
+///
+/// All five come out of the search result itself — no extra ScreenScraper call — which
+/// is what makes it affordable to show them at all.
+fn selection_line(modal: &ModalDisplayState) -> Line<'static> {
+  let Some(c) = modal.candidates.get(modal.cursor) else {
+    return Line::default();
+  };
+  let media = c.media.iter().filter(|d| **d == Dot::Fresh).count();
+  let mut parts: Vec<String> = [&c.publisher, &c.genre, &c.players, &c.region]
+    .into_iter()
+    .flatten()
+    .cloned()
+    .collect();
+  parts.push(format!("{} of {} media", media, MEDIA_COUNT));
+
+  Line::from(vec![
+    Span::styled(grid::fit("selection", 10), dim()),
+    Span::styled(parts.join(" · "), Style::default()),
+  ])
 }
 
 fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {

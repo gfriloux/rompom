@@ -748,8 +748,14 @@ thread can act on Ctrl-C without a signal handler.
 Call `summary()` before dropping `Ui`, print after (terminal is restored on drop).
 
 **Modal types (public, in `ui/mod.rs`):**
-- `ModalCandidate { name: String, game_id: String, year: Option<String> }` — one search result row
-- `ModalRequest { filename, sha1, candidates, response: Sender<ModalResponse>, fetch_by_id: Box<dyn Fn(u32) -> Result<String, String> + Send> }` — sent by a worker, blocks on `response`
+- `ModalCandidate` — one search result row: `name`, `game_id`, `year`, `media: [Dot; 9]`,
+  `publisher`, `genre`, `players`, `region`. All of it comes out of the `JeuInfo` that
+  `jeu_recherche` already returned (the API documents it as "identical to jeuInfos but
+  without the ROM information"), so the modal costs **no extra call** — `candidate_from()`
+  in `worker/helpers.rs` is the projection, and it is where the media names live.
+- `ModalRequest { row, filename, sha1, candidates, response, fetch_by_id }` — sent by a
+  worker, which then blocks on `response`. `row` is the grid row, which is how the
+  "to identify" view finds the request belonging to a selected line.
 - `ModalResponse` — `SelectedId(String)` | `ManualId(String)` | `Cancelled`
 
 **Parking.** Requests land in `AppState::pending` rather than opening a modal on
@@ -757,10 +763,18 @@ arrival. The first one to turn up with nothing else waiting opens by itself, so 
 with a single unidentified ROM behaves as it always has; once a queue has formed the user
 decides when to work through it while the rest of the run carries on.
 
+The modal draws the **same nine media columns as the grid**, in the same order and with
+the same glyphs, so a candidate's assets read exactly like a finished ROM's. Its last
+column is the **rank** — where ScreenScraper put that result — because there is no score
+to show. Under the list, `selection_line()` gives the highlighted candidate's publisher,
+genre, players, region and asset count, again from data already in hand.
+
 **Modal UX (handled entirely inside the render thread via `show_modal()`):**
 - **List mode** (default): shows `jeu_recherche` candidates; ↑/↓ navigate, Enter confirm, `i` switch to Input, Esc cancel
 - **Input mode**: digit-only text field; Enter calls `fetch_by_id` closure (brief "Looking up…" indicator), on success transitions to Confirming, on failure shows inline error and stays in Input; Esc returns to List
-- **Confirming mode**: shows a green "Game found" block with name and ID; Enter sends `ManualId`, Esc returns to Input
+- **Confirming mode**: the found name and ID replace the selection line — inside the same
+  block, rather than as a second popup drawn over the candidate list; Enter sends
+  `ManualId`, Esc returns to Input
 - **Ctrl-C** in any mode: sends `Cancelled`, clears modal, triggers shutdown (same two-press logic as the render loop)
 - **On entry**: if `interrupted` is already true (Ctrl-C was pressed before the modal request was processed), `show_modal()` sends `Cancelled` immediately without displaying anything
 
