@@ -218,11 +218,33 @@ pub(crate) struct ModalDisplayState {
 
 // ── App state ──────────────────────────────────────────────────────────────
 
+/// What the grid knows about a ROM before the pipeline has touched it.
+///
+/// Passed whole to `new_rom_bar` rather than as five positional arguments, three of
+/// which are strings that would be trivial to swap at the call site.
+pub struct RomInfo {
+  /// Logical name: the file name, or the group name for a multi-disc game.
+  pub label: String,
+  /// The file this row actually comes from — the IA path or the local path.
+  pub file_name: String,
+  /// Known up front for an IA source; computed by `ComputeHashes` for a folder one.
+  pub size: Option<u64>,
+  pub sha1: Option<String>,
+  /// Where it comes from, for the detail lines: `archive.org/<item>` or a directory.
+  pub source: String,
+}
+
 /// One ROM, for the whole run. There is exactly one of these per ROM and it never
 /// moves: its index in `AppState::roms` is its arrival order, which is its row.
 pub(crate) struct RomEntry {
   /// Scraped name once identified, file name until then.
   pub(crate) label: String,
+  pub(crate) file_name: String,
+  pub(crate) size: Option<u64>,
+  pub(crate) sha1: Option<String>,
+  pub(crate) source: String,
+  /// How many candidates `jeu_recherche` returned, once it has run.
+  pub(crate) candidates: Option<usize>,
   pub(crate) status: String,
   pub(crate) id: Cell,
   pub(crate) pkg: Cell,
@@ -241,9 +263,14 @@ pub(crate) struct RomEntry {
 
 impl RomEntry {
   /// A ROM as it enters the grid: on screen, in arrival order, nothing done yet.
-  pub(crate) fn queued(file_name: &str) -> Self {
+  pub(crate) fn queued(info: RomInfo) -> Self {
     RomEntry {
-      label: file_name.to_string(),
+      label: info.label,
+      file_name: info.file_name,
+      size: info.size,
+      sha1: info.sha1,
+      source: info.source,
+      candidates: None,
       status: "queued".to_string(),
       id: Cell::Todo,
       pkg: Cell::Todo,
@@ -282,6 +309,14 @@ pub(crate) struct AppState {
   /// Shown in place of the grid while the sources are still being collected.
   pub(crate) header: String,
   pub(crate) tick: usize,
+  /// Row the cursor is on. Its details are unfolded underneath it.
+  pub(crate) selected: usize,
+  /// First visible row. Owned by the renderer, which is the only thing that knows how
+  /// tall the grid is.
+  pub(crate) scroll: usize,
+  /// Whether the window tracks the workers on its own. Moving the cursor turns this
+  /// off — the user is reading something — and `G` turns it back on.
+  pub(crate) follow: bool,
   /// When set, the render function draws the modal overlay.
   pub(crate) modal: Option<ModalDisplayState>,
 }
@@ -336,6 +371,22 @@ impl RomBar {
     if let Some(i) = media_index(kind) {
       self.state.lock().unwrap().roms[self.index].media[i] = dot;
     }
+  }
+
+  /// What `ComputeHashes` found. An IA row already has both from the item metadata;
+  /// a folder row only learns them here.
+  pub fn set_hashes(&self, sha1: Option<String>, size: u64) {
+    let mut s = self.state.lock().unwrap();
+    let entry = &mut s.roms[self.index];
+    entry.sha1 = sha1;
+    if size > 0 {
+      entry.size = Some(size);
+    }
+  }
+
+  /// How many candidates the name search came back with, for the detail lines.
+  pub fn set_candidates(&self, n: usize) {
+    self.state.lock().unwrap().roms[self.index].candidates = Some(n);
   }
 
   // ── Identification ──────────────────────────────────────────────────────
@@ -556,6 +607,38 @@ fn plain_line(entry: &RomEntry, done: usize, total: usize) -> String {
   format!("[{}/{}] {} {}{}", done, total, marker, entry.label, tail)
 }
 
+/// Moves the cursor, and decides whether the window still follows the workers.
+///
+/// Any deliberate move turns following off: the user is reading a particular row, and a
+/// list that keeps sliding under the cursor cannot be read. `G` is the way back — it
+/// means "take me to where the run is", which is exactly what following does.
+fn navigate(state: &Mutex<AppState>, code: KeyCode) {
+  let mut s = state.lock().unwrap();
+  let last = match s.roms.len() {
+    0 => return,
+    n => n - 1,
+  };
+  match code {
+    KeyCode::Up => {
+      s.selected = s.selected.saturating_sub(1);
+      s.follow = false;
+    }
+    KeyCode::Down => {
+      s.selected = (s.selected + 1).min(last);
+      s.follow = false;
+    }
+    KeyCode::Char('g') => {
+      s.selected = 0;
+      s.follow = false;
+    }
+    KeyCode::Char('G') => {
+      s.selected = last;
+      s.follow = true;
+    }
+    _ => {}
+  }
+}
+
 // ── Ui ─────────────────────────────────────────────────────────────────────
 
 impl Ui {
@@ -566,6 +649,9 @@ impl Ui {
       system: String::new(),
       header: String::from("Collecting..."),
       tick: 0,
+      selected: 0,
+      scroll: 0,
+      follow: true,
       modal: None,
     }));
 
@@ -602,8 +688,8 @@ impl Ui {
         state_r.lock().unwrap().tick += 1;
         terminal
           .draw(|frame| {
-            let state = state_r.lock().unwrap();
-            render(frame, &state);
+            let mut state = state_r.lock().unwrap();
+            render(frame, &mut state);
           })
           .unwrap();
 
@@ -611,14 +697,16 @@ impl Ui {
           show_modal(req, &mut terminal, &state_r, &interrupted_r, &queue_r);
         } else if crossterm::event::poll(Duration::from_millis(TICK_MS)).unwrap_or(false) {
           if let Ok(Event::Key(key)) = crossterm::event::read() {
-            if key.kind == KeyEventKind::Press
-              && key.code == KeyCode::Char('c')
-              && key.modifiers.contains(KeyModifiers::CONTROL)
-            {
+            if key.kind != KeyEventKind::Press {
+              continue;
+            }
+            if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
               if interrupted_r.swap(true, Ordering::SeqCst) {
                 std::process::exit(1);
               }
               queue_r.shutdown();
+            } else {
+              navigate(&state_r, key.code);
             }
           }
         }
@@ -645,14 +733,14 @@ impl Ui {
     self.state.lock().unwrap().header = format!("Fetching metadata: {}", item);
   }
 
-  /// `_index` is ignored — the row index is assigned from `roms.len()`, which is the
-  /// arrival order the grid is ordered by.
+  /// Appends a row. Its index is `roms.len()`, which is the arrival order the grid is
+  /// ordered by and never re-sorted from.
   /// `total` is recorded so the banner can show `done/total`.
-  pub fn new_rom_bar(&self, _index: usize, total: usize, filename: &str) -> RomBar {
+  pub fn new_rom_bar(&self, total: usize, info: RomInfo) -> RomBar {
     let mut s = self.state.lock().unwrap();
     s.total = total;
     let bar_index = s.roms.len();
-    s.roms.push(RomEntry::queued(filename));
+    s.roms.push(RomEntry::queued(info));
     RomBar {
       state: Arc::clone(&self.state),
       index: bar_index,

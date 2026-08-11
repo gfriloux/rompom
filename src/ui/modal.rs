@@ -62,8 +62,8 @@ pub(super) fn show_modal(
 
     terminal
       .draw(|frame| {
-        let s = state.lock().unwrap();
-        render(frame, &s);
+        let mut s = state.lock().unwrap();
+        render(frame, &mut s);
       })
       .unwrap();
 
@@ -123,8 +123,8 @@ pub(super) fn show_modal(
                 }
                 terminal
                   .draw(|frame| {
-                    let s = state.lock().unwrap();
-                    render(frame, &s);
+                    let mut s = state.lock().unwrap();
+                    render(frame, &mut s);
                   })
                   .unwrap();
 

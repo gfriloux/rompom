@@ -252,12 +252,38 @@ either way. A run with no terminal at all needs nothing else:
 rompom -s snes --plain --resume no < /dev/null
 ```
 
-In a terminal, rompom opens a UI split into three panels:
+### The interface
 
-- **Discovery** — ROM identification in progress: querying ScreenScraper, generating PKGBUILDs
-- **Downloads** — ROM and media asset downloads
-- **Completed** — finished ROMs, with per-media icons showing what was downloaded, already
-  up-to-date, or unavailable
+In a terminal, rompom opens a full-screen grid: **one row per ROM, in the order it was
+collected, for the whole run**. A ROM never moves — columns say how far it got.
+
+```
+#     rom                        id   pkg  rom   󰗚  󰕧  󰋩  󰋫  󰹙  󱂬  󰯃  󰊢  󰂺  time    status
+1198  Yoshi's Island             ✓    ✓    ✓     ●  ●  ●  ●  ●  ●  ●  ●  ○  4.6s    done
+1199  Bahamut Lagoon (J)         ✓    ✓    ✗     ·  ·  ·  ·  ·  ·  ·  ·  ·  18.2s   sha1 mismatch
+1201  Kirby Super Star           =    =    =     ●  ●  ●  ●  ●  ●  ●  ●  ○  0.2s    unchanged
+1206  Super Mario RPG            ⠹    ·    ·     ·  ·  ·  ·  ·  ·  ·  ·  ·  1.2s    identifying
+1208  Zelda: Link to the Past    ·    ·    ·     ·  ·  ·  ·  ·  ·  ·  ·  ·  —       queued
+```
+
+- **`id` / `pkg` / `rom`** — identification, PKGBUILD, ROM transfer. `·` not reached,
+  spinner running, `✓` done, `=` nothing to do, `✗` failed.
+- **The nine dots** — one per tracked asset, in the order of the header icons
+  (description, video, image, thumbnail, screenshot, bezel, marquee, wheel, manual).
+  `●` green fetched now, `●` gray already up to date, `○` red not on ScreenScraper,
+  `◐` in progress, `·` not tried.
+
+The window scrolls itself to keep the working area in view. The footer says how many ROMs
+are above and below it.
+
+| key | effect |
+|---|---|
+| `↑` `↓` | move the cursor; the selected ROM unfolds three detail lines below it |
+| `g` / `G` | jump to the top / back to the bottom (`G` also re-enables auto-scrolling) |
+| `Ctrl-C` | interrupt, saving `<system>.run.yml` |
+
+Moving the cursor stops the automatic scrolling — a list sliding under the cursor cannot
+be read. `G` gives it back.
 
 ### Unidentified ROMs
 

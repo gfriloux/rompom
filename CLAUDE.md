@@ -597,6 +597,18 @@ The list is **never re-sorted**: a ROM's row index is its arrival order. The win
 scrolls itself to keep the active band on screen (`grid::active_anchor()` +
 `grid::scroll_offset()`), and the footer says what is off screen.
 
+**Selection.** `↑` `↓` `g` `G` move `AppState::selected`; the row is drawn on
+`SELECTED_BG` with a `▌` in the first cell of the *name* column — a cursor column of its
+own would shift every other column as the selection moved. Three detail lines unfold
+underneath, taking rows from the same window: the file it came from, its sha1, and then
+whichever of the cause / the name-search result / the output directory the row is about.
+
+**Following.** `AppState::follow` starts true and the window tracks the workers. Any
+cursor move turns it off and `grid::clamp_scroll()` takes over, moving the window only
+when the selection would leave it; `G` turns following back on. `render()` takes
+`&mut AppState` because the scroll offset lives there and the renderer is the only thing
+that knows the height of the grid on this frame.
+
 **Step cells** (`id`, `pkg`, `rom`) — `Cell` in `ui/mod.rs`:
 
 | glyph | meaning | colour |
@@ -618,16 +630,22 @@ from ScreenScraper, `◐` in progress, `·` not tried. The first dot (descriptio
 - `roms: Vec<RomEntry>` — one per ROM, index = arrival order = row. **The single source
   of truth**: the summary, the counters and the plain-mode lines are all derived from it.
 - `total`, `system` (banner title), `header` (shown while collecting), `tick` (spinner),
-  `modal`
+  `selected` / `scroll` / `follow`, `modal`
 
 **`RomEntry`** — `label` (scraped name, file name until identified), `status`, the three
 `Cell`s, `media: [Dot; 9]`, `started_at` / `finished_at` (the `time` column, and `—` while
-queued), `error`, `unchanged`.
+queued), `error`, `unchanged`, plus what the detail lines need: `file_name`, `size`,
+`sha1`, `source`, `candidates`.
+
+**`RomInfo`** — what `main::rom_info()` knows at collection time and hands to
+`new_rom_bar`. An IA source already carries `size` and `sha1` from the item metadata; a
+folder source leaves both `None` until `ComputeHashes` calls `bar.set_hashes()` — zeroes
+would render as a confident `0 B`.
 
 **`grid.rs`** — all the layout arithmetic, and the only part of the interface that can be
 tested: `columns(width)` (widths from the spec), `fit()` / `truncate()` (a value one cell
 too long shifts every column after it on that row), `active_anchor()`, `scroll_offset()`,
-`format_elapsed()`.
+`clamp_scroll()`, `format_bytes()`, `format_elapsed()`.
 
 **`RomBar`** — public handle given to each `Rom`; holds `Arc<Mutex<AppState>>` + `index`.
 Methods update the shared state; the render thread reads it autonomously.

@@ -161,6 +161,36 @@ fn collect_sources(source: &Source, ui: &Ui) -> Result<Vec<RomSourceData>, Strin
   Ok(sources)
 }
 
+/// What the grid can show about a ROM before any step has run.
+///
+/// An Internet Archive source already carries its size and sha1 in the item metadata; a
+/// folder source learns both in `ComputeHashes`, so they start as `None` rather than as
+/// zeroes, which would render as a confident `0 B`.
+fn rom_info(source: &RomSourceData) -> ui::RomInfo {
+  let (size, sha1, origin) = match &source.source {
+    RomSource::InternetArchive(ia) => (
+      Some(ia.size),
+      ia.sha1.clone(),
+      format!("archive.org/{}", ia.metadata.item),
+    ),
+    RomSource::Folder(f) => (
+      None,
+      None,
+      f.local_path
+        .parent()
+        .map(|p| p.display().to_string())
+        .unwrap_or_default(),
+    ),
+  };
+  ui::RomInfo {
+    label: source.filename.clone(),
+    file_name: source.file_name.clone(),
+    size,
+    sha1,
+    source: origin,
+  }
+}
+
 /// Something went wrong while running: no config directory, unreadable config, unknown
 /// system, a system with no source, ScreenScraper refusing the credentials.
 const EXIT_FAILURE: i32 = 1;
@@ -570,9 +600,8 @@ fn main() {
   let total = sources.len();
   let roms: Vec<Arc<Mutex<Rom>>> = sources
     .into_iter()
-    .enumerate()
-    .map(|(i, source)| {
-      let bar = ui.new_rom_bar(i + 1, total, &source.filename);
+    .map(|source| {
+      let bar = ui.new_rom_bar(total, rom_info(&source));
       if matches!(&source.source, RomSource::Folder(_)) {
         Rom::new_folder(source, bar)
       } else {

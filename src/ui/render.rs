@@ -15,9 +15,14 @@ use super::{
 /// Cells taken by the progress bar in the banner.
 const BAR_WIDTH: usize = 40;
 
+/// Background of the selected row and of the detail lines under it.
+const SELECTED_BG: Color = Color::Rgb(0x16, 0x1c, 0x24);
+
 // ── Top-level render ────────────────────────────────────────────────────────
 
-pub(super) fn render(frame: &mut Frame, state: &AppState) {
+/// Takes the state mutably because the scroll offset lives in it and the renderer is
+/// the only thing that knows how tall the grid is on this frame.
+pub(super) fn render(frame: &mut Frame, state: &mut AppState) {
   let areas = Layout::default()
     .direction(Direction::Vertical)
     .constraints([
@@ -112,7 +117,7 @@ fn counter_spans(state: &AppState) -> Vec<Span<'static>> {
 
 // ── Grid ──────────────────────────────────────────────────────────────────
 
-fn render_grid(frame: &mut Frame, area: Rect, state: &AppState) {
+fn render_grid(frame: &mut Frame, area: Rect, state: &mut AppState) {
   let title = if state.total > 0 {
     format!(" roms · arrival order · {}/{} ", state.done(), state.total)
   } else {
@@ -149,25 +154,125 @@ fn render_grid(frame: &mut Frame, area: Rect, state: &AppState) {
     );
   } else {
     let height = chunks[2].height as usize;
-    let anchor = grid::active_anchor(&state.roms);
-    let offset = grid::scroll_offset(state.roms.len(), height, anchor);
+    let len = state.roms.len();
+    state.selected = state.selected.min(len - 1);
+
+    // Following tracks the workers; once the user has moved the cursor the window only
+    // budges when the selection would otherwise leave it.
+    state.scroll = if state.follow {
+      grid::scroll_offset(len, height, grid::active_anchor(&state.roms))
+    } else {
+      grid::clamp_scroll(state.scroll, len, height, state.selected)
+    };
+    let offset = state.scroll;
     let spinner = SPINNER_FRAMES[state.tick % SPINNER_FRAMES.len()];
 
-    let items: Vec<ListItem> = state
-      .roms
-      .iter()
-      .enumerate()
-      .skip(offset)
-      .take(height)
-      .map(|(i, entry)| ListItem::new(row_line(i, entry, &cols, spinner)))
-      .collect();
+    // Built row by row rather than mapped, because the selected row is followed by
+    // three detail lines that take rows from the same window.
+    let mut items: Vec<ListItem> = Vec::with_capacity(height);
+    for (i, entry) in state.roms.iter().enumerate().skip(offset) {
+      if items.len() >= height {
+        break;
+      }
+      let selected = i == state.selected;
+      items.push(ListItem::new(row_line(i, entry, &cols, spinner, selected)));
+      if selected {
+        for line in detail_lines(entry, inner.width as usize) {
+          if items.len() >= height {
+            break;
+          }
+          items.push(ListItem::new(line));
+        }
+      }
+    }
     frame.render_widget(List::new(items), chunks[2]);
 
     frame.render_widget(Paragraph::new(Line::from(rule)), chunks[3]);
-    frame.render_widget(
-      Paragraph::new(footer_line(state.roms.len(), height, offset)),
-      chunks[4],
-    );
+    frame.render_widget(Paragraph::new(footer_line(len, height, offset)), chunks[4]);
+  }
+}
+
+/// The three lines unfolded under the selected row.
+///
+/// The first is always the file it came from. The other two follow what the ROM is
+/// doing: a failure shows its cause and a ROM waiting on the modal shows what the name
+/// search found, because those are the two states the user opened the row to act on.
+fn detail_lines(entry: &RomEntry, width: usize) -> Vec<Line<'static>> {
+  let bg = Style::default().bg(SELECTED_BG);
+  let label = |text: &str| Span::styled(grid::fit(text, 12), dim().bg(SELECTED_BG));
+  let pad = Span::styled(grid::fit("", 6), bg);
+  // What is left once the 6-cell indent and the 12-cell label are taken.
+  let rest = width.saturating_sub(18);
+
+  let size = entry
+    .size
+    .map(grid::format_bytes)
+    .unwrap_or_else(|| "—".to_string());
+
+  let first = Line::from(vec![
+    pad.clone(),
+    label("file"),
+    Span::styled(grid::fit(&entry.file_name, 34), bg),
+    Span::styled(grid::fit(&size, 14), dim().bg(SELECTED_BG)),
+    Span::styled(
+      grid::truncate(&format!("source {}", entry.source), rest.saturating_sub(48)),
+      dim().bg(SELECTED_BG),
+    ),
+  ]);
+
+  let second = Line::from(vec![
+    pad.clone(),
+    label("sha1"),
+    Span::styled(
+      grid::fit(entry.sha1.as_deref().unwrap_or("—"), 48),
+      dim().bg(SELECTED_BG),
+    ),
+    Span::styled(
+      grid::truncate(
+        if entry.id == Cell::Waiting {
+          "no hash match on screenscraper"
+        } else {
+          ""
+        },
+        rest.saturating_sub(48),
+      ),
+      dim().bg(SELECTED_BG),
+    ),
+  ]);
+
+  let (third_label, third_value, third_note) = if let Some(cause) = &entry.error {
+    ("error", cause.clone(), "")
+  } else if entry.id == Cell::Waiting {
+    (
+      "search",
+      match entry.candidates {
+        Some(n) => format!("{} candidate(s) by name", n),
+        None => "searching by name".to_string(),
+      },
+      "enter opens the modal",
+    )
+  } else {
+    ("output", format!("./{}/", dir_name(&entry.label)), "")
+  };
+
+  let third = Line::from(vec![
+    pad,
+    label(third_label),
+    Span::styled(grid::fit(&third_value, 48), bg),
+    Span::styled(
+      grid::truncate(third_note, rest.saturating_sub(48)),
+      dim().bg(SELECTED_BG),
+    ),
+  ]);
+
+  vec![first, second, third]
+}
+
+/// The output directory rompom writes for a ROM: its logical name without extension.
+fn dir_name(label: &str) -> String {
+  match label.rsplit_once('.') {
+    Some((stem, _)) if !stem.is_empty() => stem.to_string(),
+    _ => label.to_string(),
   }
 }
 
@@ -191,39 +296,60 @@ fn header_line(cols: &Columns) -> Line<'static> {
   Line::from(spans)
 }
 
-fn row_line(index: usize, entry: &RomEntry, cols: &Columns, spinner: &str) -> Line<'static> {
+fn row_line(
+  index: usize,
+  entry: &RomEntry,
+  cols: &Columns,
+  spinner: &str,
+  selected: bool,
+) -> Line<'static> {
+  // The cursor takes the first cell of the name column rather than a column of its own:
+  // every other column would shift by one as the selection moved.
+  let name = if selected {
+    format!("▌{}", entry.label)
+  } else {
+    entry.label.clone()
+  };
+  let bg = |style: Style| {
+    if selected {
+      style.bg(SELECTED_BG)
+    } else {
+      style
+    }
+  };
+
   let mut spans = vec![
     Span::styled(
       grid::fit(&(index + 1).to_string(), cols.index as usize),
-      dim(),
+      bg(dim()),
     ),
-    Span::styled(
-      grid::fit(&entry.label, cols.name as usize),
-      name_style(entry),
-    ),
-    cell_span(entry.id, cols.id as usize, spinner),
-    cell_span(entry.pkg, cols.pkg as usize, spinner),
-    cell_span(entry.rom, cols.rom as usize, spinner),
+    Span::styled(grid::fit(&name, cols.name as usize), bg(name_style(entry))),
+    cell_span(entry.id, cols.id as usize, spinner, selected),
+    cell_span(entry.pkg, cols.pkg as usize, spinner, selected),
+    cell_span(entry.rom, cols.rom as usize, spinner, selected),
   ];
 
   for i in 0..MEDIA_COUNT {
-    spans.push(dot_span(entry.media[i], cols.media_cell as usize));
+    spans.push(dot_span(entry.media[i], cols.media_cell as usize, selected));
   }
 
   let time = entry
     .elapsed()
     .map(grid::format_elapsed)
     .unwrap_or_else(|| "—".to_string());
-  spans.push(Span::styled(grid::fit(&time, cols.time as usize), dim()));
   spans.push(Span::styled(
-    grid::truncate(&entry.status, cols.status as usize),
-    status_style(entry),
+    grid::fit(&time, cols.time as usize),
+    bg(dim()),
+  ));
+  spans.push(Span::styled(
+    grid::fit(&entry.status, cols.status as usize),
+    bg(status_style(entry)),
   ));
 
   Line::from(spans)
 }
 
-fn cell_span(cell: Cell, width: usize, spinner: &str) -> Span<'static> {
+fn cell_span(cell: Cell, width: usize, spinner: &str, selected: bool) -> Span<'static> {
   let (glyph, color) = match cell {
     Cell::Todo => ("·", Color::DarkGray),
     Cell::Running => (spinner, Color::Cyan),
@@ -232,10 +358,18 @@ fn cell_span(cell: Cell, width: usize, spinner: &str) -> Span<'static> {
     Cell::Unchanged => ("=", Color::DarkGray),
     Cell::Failed => ("✗", Color::Red),
   };
-  Span::styled(grid::fit(glyph, width), Style::default().fg(color))
+  let style = Style::default().fg(color);
+  Span::styled(
+    grid::fit(glyph, width),
+    if selected {
+      style.bg(SELECTED_BG)
+    } else {
+      style
+    },
+  )
 }
 
-fn dot_span(dot: Dot, width: usize) -> Span<'static> {
+fn dot_span(dot: Dot, width: usize, selected: bool) -> Span<'static> {
   let (glyph, color) = match dot {
     Dot::Todo => ("·", Color::DarkGray),
     Dot::Running => ("◐", Color::Green),
@@ -243,7 +377,15 @@ fn dot_span(dot: Dot, width: usize) -> Span<'static> {
     Dot::Unchanged => ("●", Color::DarkGray),
     Dot::Missing => ("○", Color::Red),
   };
-  Span::styled(grid::fit(glyph, width), Style::default().fg(color))
+  let style = Style::default().fg(color);
+  Span::styled(
+    grid::fit(glyph, width),
+    if selected {
+      style.bg(SELECTED_BG)
+    } else {
+      style
+    },
+  )
 }
 
 /// The name carries the outcome, so a row can be read without looking at its cells.
@@ -296,10 +438,16 @@ fn footer_line(len: usize, height: usize, offset: usize) -> Line<'static> {
 }
 
 fn help_line() -> Paragraph<'static> {
-  Paragraph::new(Line::from(vec![
-    Span::styled("ctrl-c", Style::default().fg(Color::Cyan)),
-    Span::styled(" stop", dim()),
-  ]))
+  let mut spans = Vec::new();
+  for (key, what) in [
+    ("↑↓", " select  "),
+    ("g/G", " top/bottom  "),
+    ("ctrl-c", " stop"),
+  ] {
+    spans.push(Span::styled(key, Style::default().fg(Color::Cyan)));
+    spans.push(Span::styled(what, dim()));
+  }
+  Paragraph::new(Line::from(spans))
 }
 
 // ── Modal rendering ────────────────────────────────────────────────────────

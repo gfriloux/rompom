@@ -100,6 +100,11 @@ pub(crate) fn handle_compute_hashes(
     rom.size = size;
   }
 
+  {
+    let rom = rom_arc.lock().unwrap();
+    rom.bar.set_hashes(rom.sha1.clone(), rom.size);
+  }
+
   // ── Compute sha1 for extra discs (no fast-path for multi-disc extras) ────
   let extra_disc_sha1s: Vec<String> = extra_disc_paths
     .iter()
@@ -316,6 +321,7 @@ pub(crate) fn handle_lookup_ss(
     // Store candidates in this step's data and unlock WaitModal.
     {
       let mut rom = rom_arc.lock().unwrap();
+      rom.bar.set_candidates(display_candidates.len());
       if let StepData::LookupSS {
         ref mut candidates, ..
       } = rom.pipeline[step_idx].data

@@ -9,6 +9,9 @@ use std::time::Duration;
 
 use super::{RomEntry, MEDIA_COUNT};
 
+#[cfg(test)]
+use super::RomInfo;
+
 /// Cells taken by one media dot, gap included.
 const MEDIA_CELL: u16 = 3;
 
@@ -108,6 +111,43 @@ pub(crate) fn scroll_offset(len: usize, height: usize, anchor: usize) -> usize {
   anchor.saturating_sub(lead).min(len - height)
 }
 
+/// Keeps `selected` inside the window, moving it as little as possible.
+///
+/// Recentring on every keypress the way the follow mode does would make the whole list
+/// slide under a cursor the user is trying to aim with. The window only moves when the
+/// selection is about to leave it.
+pub(crate) fn clamp_scroll(scroll: usize, len: usize, height: usize, selected: usize) -> usize {
+  if len <= height || height == 0 {
+    return 0;
+  }
+  let max = len - height;
+  // Clamped first: the list shrinks between frames — a resize, a shorter filter — and a
+  // remembered offset past the end would otherwise scroll into empty space.
+  let scroll = scroll.min(max);
+  if selected < scroll {
+    selected
+  } else if selected >= scroll + height {
+    (selected + 1 - height).min(max)
+  } else {
+    scroll
+  }
+}
+
+/// `1.5 MiB`, `912 KiB`, `29.2 GiB` — the unit a ROM collection is actually discussed in.
+pub(crate) fn format_bytes(bytes: u64) -> String {
+  const KIB: f64 = 1024.0;
+  let b = bytes as f64;
+  if b < KIB {
+    format!("{} B", bytes)
+  } else if b < KIB * KIB {
+    format!("{:.0} KiB", b / KIB)
+  } else if b < KIB * KIB * KIB {
+    format!("{:.1} MiB", b / (KIB * KIB))
+  } else {
+    format!("{:.1} GiB", b / (KIB * KIB * KIB))
+  }
+}
+
 /// `4.6s`, `42s`, `3m 10s`, `1h 04m` — one shape per order of magnitude.
 ///
 /// Tenths below ten seconds only: past that they are noise, and the column is 10 cells.
@@ -130,7 +170,13 @@ mod tests {
   use std::time::Instant;
 
   fn entry(started: bool, finished: bool) -> RomEntry {
-    let mut e = RomEntry::queued("rom.zip");
+    let mut e = RomEntry::queued(RomInfo {
+      label: "rom.zip".to_string(),
+      file_name: "rom.zip".to_string(),
+      size: None,
+      sha1: None,
+      source: String::new(),
+    });
     if started {
       e.started_at = Some(Instant::now());
     }
@@ -272,6 +318,43 @@ mod tests {
   #[test]
   fn a_zero_height_window_does_not_divide_by_zero() {
     assert_eq!(scroll_offset(100, 0, 50), 0);
+  }
+
+  /// A selection inside the window leaves it exactly where it was: aiming with the
+  /// cursor must not make the whole list slide.
+  #[test]
+  fn a_visible_selection_does_not_move_the_window() {
+    assert_eq!(clamp_scroll(40, 100, 30, 50), 40);
+    assert_eq!(clamp_scroll(40, 100, 30, 40), 40);
+    assert_eq!(clamp_scroll(40, 100, 30, 69), 40);
+  }
+
+  /// Past either edge the window follows by the smallest step that brings the selection
+  /// back — one row, not a recentring.
+  #[test]
+  fn the_window_follows_a_selection_that_leaves_it() {
+    assert_eq!(clamp_scroll(40, 100, 30, 39), 39);
+    assert_eq!(clamp_scroll(40, 100, 30, 70), 41);
+  }
+
+  /// A window taller than the list never scrolls, and an offset remembered from a
+  /// longer list — a resize, a filter that shrank — still lands on the selection
+  /// instead of scrolling into empty space.
+  #[test]
+  fn the_clamped_window_stays_within_the_list() {
+    assert_eq!(clamp_scroll(12, 5, 20, 3), 0);
+    assert_eq!(clamp_scroll(999, 100, 30, 50), 50);
+    assert_eq!(clamp_scroll(999, 100, 30, 95), 70);
+    assert_eq!(clamp_scroll(5, 100, 0, 3), 0);
+  }
+
+  /// The unit changes with the magnitude, and a ROM-sized file reads in MiB.
+  #[test]
+  fn byte_sizes_read_in_the_unit_of_their_magnitude() {
+    assert_eq!(format_bytes(512), "512 B");
+    assert_eq!(format_bytes(1024), "1 KiB");
+    assert_eq!(format_bytes(1_572_864), "1.5 MiB");
+    assert_eq!(format_bytes(31_353_665_945), "29.2 GiB");
   }
 
   /// One shape per order of magnitude, and the widest still fits the 10-cell column.
