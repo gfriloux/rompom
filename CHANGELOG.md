@@ -12,6 +12,34 @@ git-cliff; they are preserved verbatim, with far more detail, in
 [SemVer]: https://semver.org/
 [Conventional Commits]: https://www.conventionalcommits.org/
 
+## [0.19.0] — 2026-08-11
+
+### Features
+
+- **ui**: Fall back to 16 colors without truecolor ([`2705bb8`](https://github.com/gfriloux/rompom/commit/2705bb80190746a7e0769d8bc0e5a21b0c78585d))
+- **ui**: Show the end-of-run report inside the interface ([`be86350`](https://github.com/gfriloux/rompom/commit/be863503bc143535586df8bb0b1c138d973e2da5))
+- **ui**: Fold the grid below 100 columns ([`08ccc5a`](https://github.com/gfriloux/rompom/commit/08ccc5a624a4811d0444f10f81f1906590f4c8d2))
+- **ui**: Align the identification modal on the grid columns ([`fad0d73`](https://github.com/gfriloux/rompom/commit/fad0d73e8e35a73d67d6d51e7de8b493a5fb1b65))
+- **ui**: Filter the grid on ROMs awaiting identification ([`073f476`](https://github.com/gfriloux/rompom/commit/073f476ad90e20ac4485d2d9eb77801d30f18f5e))
+- **ui**: Write <system>.errors.log from the errors view ([`3af319c`](https://github.com/gfriloux/rompom/commit/3af319c13bbf59e1a2a314cc505cbadd5b66743e))
+- **ui**: Filter the grid on failed ROMs ([`ebb0614`](https://github.com/gfriloux/rompom/commit/ebb0614236ed2d3a8aede72f44aa316f47377e2f))
+- **ui**: Show run throughput, volume and ETA ([`c03fac1`](https://github.com/gfriloux/rompom/commit/c03fac1eae40fe09cd37a9b3ab2c7d21dfa942df))
+- **ui**: Unfold the selected ROM's details ([`63b7ef9`](https://github.com/gfriloux/rompom/commit/63b7ef93f1c06b8b4f8db9426aabd7d36281501c))
+- **ui**: Show one line per ROM in arrival order ([`b93dee0`](https://github.com/gfriloux/rompom/commit/b93dee038f9edcf42f46d4630924e3fe36446d4a))
+
+### Refactoring
+
+- **pipeline**: Let the render thread serialise identification modals ([`a240f1d`](https://github.com/gfriloux/rompom/commit/a240f1dcd0bc35701a94be9f774a3953033d5f31))
+
+### Documentation
+
+- Record what v0.19.0 closed in the roadmap ([`8aee437`](https://github.com/gfriloux/rompom/commit/8aee437c9213ac2e40b2e088f20f2fca07e68052))
+- Hand off download progress reporting to internetarchive and screenscraper ([`857dcfc`](https://github.com/gfriloux/rompom/commit/857dcfc0a350d39ba7103b243cd408e13d2195c4))
+
+### Miscellaneous
+
+- **plans**: Plan v0.19.0 — the "turn 4" TUI rewrite ([`2aa4c0c`](https://github.com/gfriloux/rompom/commit/2aa4c0cc52f02b57b60eb28d7d5846f01ba5f6cb))
+
 ## [0.18.0] — 2026-08-10
 
 ### Features

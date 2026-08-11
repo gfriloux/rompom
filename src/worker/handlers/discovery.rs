@@ -11,7 +11,7 @@ use crate::{
 };
 
 use super::super::{
-  helpers::{lookup_failure, search_name, NAME_REGIONS},
+  helpers::{candidate_from, lookup_failure, search_name, NAME_REGIONS},
   WorkerContext,
 };
 
@@ -98,6 +98,11 @@ pub(crate) fn handle_compute_hashes(
     rom.crc32 = Some(crc32);
     rom.mtime = mtime;
     rom.size = size;
+  }
+
+  {
+    let rom = rom_arc.lock().unwrap();
+    rom.bar.set_hashes(rom.sha1.clone(), rom.size);
   }
 
   // ── Compute sha1 for extra discs (no fast-path for multi-disc extras) ────
@@ -273,8 +278,8 @@ pub(crate) fn handle_lookup_ss(
       rom.jeu = Some(jeu);
       rom.bar.found(&name);
     }
-    // Transition bar to Packaging/waiting (WaitModal will be Skipped).
-    rom_arc.lock().unwrap().bar.preparing_pending();
+    // WaitModal will be Skipped: the ROM is now queued for packaging.
+    rom_arc.lock().unwrap().bar.queued_for_packaging();
     Ok(StepStatus::Done)
   } else {
     // ── Not found: run jeu_recherche and hand off to WaitModal ────────
@@ -297,25 +302,19 @@ pub(crate) fn handle_lookup_ss(
       },
     };
 
+    let lang_refs: Vec<&str> = ctx.lang.iter().map(|s| s.as_str()).collect();
     let display_candidates: Vec<ModalCandidate> = search_results
       .iter()
-      .map(|j| {
-        let date = j.find_date(&["wor", "eu", "us", "fr"]);
-        ModalCandidate {
-          name: j.find_name(NAME_REGIONS),
-          game_id: j.id.clone(),
-          year: if date == "Unknown" || date.len() < 4 {
-            None
-          } else {
-            Some(date[..4].to_string())
-          },
-        }
-      })
+      .map(|j| candidate_from(j, &lang_refs))
       .collect();
 
     // Store candidates in this step's data and unlock WaitModal.
     {
       let mut rom = rom_arc.lock().unwrap();
+      rom.bar.set_candidates(
+        display_candidates.len(),
+        display_candidates.first().map(|c| c.name.clone()),
+      );
       if let StepData::LookupSS {
         ref mut candidates, ..
       } = rom.pipeline[step_idx].data
@@ -339,10 +338,13 @@ pub(crate) fn handle_lookup_ss(
 
 /// Block until the user identifies the ROM via the modal dialog.
 ///
-/// Acquires `modal_sem` (capacity 1) to serialise modals, sends a
-/// `ModalRequest`, and blocks on the response channel.  After the user
-/// responds (or cancels), stores the resolved `JeuInfo` in `rom.jeu` and
-/// transitions the bar to Packaging/waiting.
+/// Sends a `ModalRequest` and blocks on the response channel. The request is parked by
+/// the render thread until the user gets to it, so several ROMs can be waiting at once —
+/// each one holding a blocking-pool worker for as long as it waits. After the user
+/// responds (or cancels), stores the resolved `JeuInfo` in `rom.jeu`.
+///
+/// Nothing serialises the modals here: there is one render thread and one screen, so at
+/// most one modal can be open whatever the workers do.
 pub(crate) fn handle_wait_modal(
   rom_arc: &Arc<Mutex<Rom>>,
   step_idx: usize,
@@ -385,11 +387,6 @@ pub(crate) fn handle_wait_modal(
   // Signal the UI that we're waiting for user input.
   rom_arc.lock().unwrap().bar.waiting_for_user();
 
-  // Serialise modal display: only one modal open at a time.
-  if !ctx.modal_sem.acquire() {
-    return Err(StepError::Interrupted);
-  }
-
   let (resp_tx, resp_rx) = crossbeam_channel::bounded::<ModalResponse>(1);
   let ss_for_closure = Arc::clone(&ctx.ss);
   let system_id = ctx.system.id;
@@ -397,6 +394,7 @@ pub(crate) fn handle_wait_modal(
   ctx
     .modal_tx
     .send(ModalRequest {
+      row: rom_arc.lock().unwrap().bar.row(),
       filename: filename.clone(),
       sha1: sha1_opt,
       candidates,
@@ -418,8 +416,6 @@ pub(crate) fn handle_wait_modal(
   let response = resp_rx
     .recv()
     .map_err(|_| StepError::Fatal("modal response channel closed".to_string()))?;
-
-  ctx.modal_sem.release();
 
   // ── Resolve JeuInfo from the user's response ───────────────────────────
   //
@@ -459,8 +455,8 @@ pub(crate) fn handle_wait_modal(
     rom_arc.lock().unwrap().bar.not_found();
   }
 
-  // Transition bar to Packaging/waiting regardless of found/cancelled.
-  rom_arc.lock().unwrap().bar.preparing_pending();
+  // Queued for packaging regardless of found/cancelled.
+  rom_arc.lock().unwrap().bar.queued_for_packaging();
 
   // Store jeu also in the WaitModal step data (optional, for telemetry).
   {

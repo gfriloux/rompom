@@ -176,23 +176,34 @@ correction est arrivée avec ses tests : le dépôt est passé de 0 à 34 tests.
   chemin** : sans terminal de contrôle, `enable_raw_mode().unwrap()` paniquait sur le
   thread de rendu et `install_panic_hook()` avalait le message — le run allait au bout
   sans rien afficher et sans rien signaler.
-- [ ] **P2.7 — Refonte TUI « turn 4 » (design handoff Claude Design)** : spec complète
-  dans **`design/tui/`** (`handoff.md` + `mockups.dc.html`, maquettes `4a/4b/4c`).
-  Supprime la découpe par phase (`PANELS`/`RomPhase`/`render_active()` disparaissent) au
-  profit d'une grille unique : une ligne par ROM à sa place d'arrivée, colonnes d'état
-  (id/pkg/rom + 9 pastilles médias), bandeau progression + sparkline débit + ETA,
-  sélection avec lignes de détail, vues filtrées erreurs (`e`) et à-identifier (`m`,
-  avec `a` = accepter les candidats ≥ 90 %), modal réaligné, vue repliée < 100 colonnes,
-  bilan de fin dans l'alternate screen (quitter avec `q`, `Summary::print()` en repli
-  non-interactif). Haute fidélité : couleurs/largeurs/raccourcis définitifs, garder les
-  glyphes Nerd Font de `MEDIA_ICONS`. Fichiers : `ui/render.rs` (réécrit), `ui/mod.rs`,
-  `ui/modal.rs`, `summary.rs`. *(gros)*
-  - Prérequis P1.2 **satisfait** (v0.17), et P2.3 / P2.6 sont arrivés avant elle en
-    v0.18 : le statut retry existe, et `Summary::print()` est déjà le repli
-    non-interactif. La refonte doit donc les **conserver**, pas les fournir.
-  - Le repli `--plain` de P2.6 ne passe pas par `render()` : il ne sera pas cassé par la
-    réécriture, mais `plain_line()` et `ui::is_plain()` doivent survivre.
-  - Handoff versionné dans `design/tui/` depuis le 2026-08-10.
+- [x] **P2.7 — Refonte TUI « turn 4 »** — *fait le 2026-08-11 (v0.19.0)*. La découpe par
+  phase a disparu (`PANELS`, `PanelDef`, `RomPhase`, `render_active()`, `render_panel()`,
+  `render_completed()`, `CompletedEntry`) : une ligne par ROM à sa place d'arrivée, pour
+  tout le run. Livré : grille (cellules `id`/`pkg`/`rom` + 9 pastilles), sélection avec
+  trois lignes de détail, bandeau progression + sparkline + débit + ETA + workers actifs,
+  vues filtrées erreurs (`e`) et à identifier (`m`), `w` → `<system>.errors.log`, modal
+  réaligné sur les colonnes de la grille, vue repliée < 100 colonnes, bilan de fin dans
+  l'écran (`q` pour quitter), palette truecolor + repli 16 couleurs. `--plain`,
+  `plain_line()`, `Summary::print()` et le statut `retrying` sont conservés intacts.
+  - **Trois demandes de la spec sans source de données**, constatées avant de coder :
+    - **`62 %` / débit instantané / `rom 2.4/3.9 MiB`** — ni `internetarchive` ni
+      `screenscraper` n'expose la progression d'un téléchargement. Handoffs écrits
+      (`.claude/plans/v0.19.0/handoff_*.md`), colonne en spinner en attendant. Le volume
+      et le débit **moyen** sont livrés, comptés par fichier terminé.
+    - **`meilleur score 91 %` et la touche `a`** — `jeuRecherche` classe par probabilité
+      et ne renvoie **aucun** pourcentage ; le champ `score` de l'API SS est une note
+      utilisateur sur 20. Remplacés par le **rang** dans le modal et par le **nom du
+      premier candidat** dans la vue `m`. Pas d'acceptation en masse : elle se serait
+      appuyée sur un chiffre inventé.
+    - **`r` / `R`** — descendus en P3 (voir ci-dessous) : c'est du pipeline, pas de l'UI.
+  - **Bonne surprise** : `jeu_recherche` renvoie des `JeuInfo` **complets** (l'API est
+    « identique à jeuInfos sans les infos ROM »), donc les pastilles médias par candidat
+    et la ligne `selection` du modal ne coûtent **aucun** appel supplémentaire. Le
+    handoff en budgétait un par candidat et prévenait que ce serait peut-être trop cher.
+  - **Trouvé en chemin** : `find_desc()` répond `"Unknown"` et non une chaîne vide quand
+    un jeu n'a pas de synopsis — tester la vacuité allumait la pastille description en
+    vert pour **tous** les candidats.
+  - **Effet de bord** : `modal_sem` supprimé (cf. P3), ce qui ferme la fuite de permit.
 
 ## P3 — Dette et long terme
 
@@ -208,9 +219,25 @@ correction est arrivée avec ses tests : le dépôt est passé de 0 à 34 tests.
   testée.
 - [ ] Nettoyer le code mort : `StepData` quasi entier, `Phase`/`StepKind::phase()`,
   `Package.name` ≡ `Package.rom`.
-- [ ] Fuite de permit `modal_sem` sur chemin d'erreur (`discovery.rs:355-384`) → guard
-  RAII ; `debug_assert!` anti-wrap dans `dec_wait_for` ; `cancelled` sous le mutex
-  du Semaphore (supprime le polling 50ms) ; retry sans `thread::sleep` bloquant.
+- [ ] `debug_assert!` anti-wrap dans `dec_wait_for` ; `cancelled` sous le mutex du
+  Semaphore (supprime le polling 50 ms) ; retry sans `thread::sleep` bloquant.
+  *(la fuite de permit `modal_sem` est close en v0.19 — le sémaphore a été supprimé, pas
+  emballé dans un guard : il sérialisait ce que le thread de rendu sérialise déjà, et sa
+  capacité de 1 était ce qui empêchait la vue « à identifier » d'avoir quoi que ce soit
+  à lister)*
+- [ ] **`r` / `R` — relancer les ROMs en échec depuis la TUI** *(descendu de P2.7)*.
+  Ce n'est pas de l'UI : il faut ré-armer le DAG (steps `Failed`/`Skipped` remis à
+  `Pending`), ré-incrémenter `remaining` sans casser l'invariant anti-underflow, et
+  repousser dans la queue. Après la fin du run la queue est arrêtée et les workers
+  joints, donc un `R` sur l'écran de bilan demanderait de relancer un pool. Mérite son
+  propre plan. En attendant, `w` écrit `<system>.errors.log` et relancer
+  `rompom -s <system>` refait exactement les ROMs échoués — leur `state.yml` n'a rien
+  enregistré. *(moyen)*
+- [ ] **Progression par téléchargement** — bloqué en amont, handoffs écrits dans
+  `.claude/plans/v0.19.0/`. Au retour des deux libs : variante `Cell::Progress(u8)`,
+  `RomBar::rom_progress()`, et `ui/rate.rs` alimenté à l'octet plutôt qu'au fichier
+  terminé. La colonne `rom` fait déjà 6 cellules, calibrée pour `62%`. *(petit une fois
+  débloqué, deux dépôts voisins + hashes Nix)*
 - [ ] Templates : `mkdir -p 0700 -p` (voulu : `-m 0700`) et `ls *.pdf,` (virgule
   parasite) dans multidisc/psx/ps2-package.jinja. *(le `sed` Sega CD cassable par `|`
   est corrigé — `sed_pattern()`, cf. P0.1)*
@@ -256,7 +283,11 @@ correction est arrivée avec ses tests : le dépôt est passé de 0 à 34 tests.
    P2.6. Les tests de P1.6 sont passés **avant** P2.4 exprès : les deux fonctions que
    P2.4 corrige n'avaient aucune couverture, et le diff des tests montre exactement ce
    que les correctifs ont changé.
-5. **v0.19** — refonte TUI « turn 4 » (P2.7), seule. Ses prérequis sont tous en place ;
-   c'est une réécriture de `ui/render.rs` qui mérite son propre lot.
+5. **v0.19.0 — livrée le 2026-08-11.** Refonte TUI « turn 4 » (P2.7), seule, comme prévu.
+   Trois morceaux de la spec sont **sortis du périmètre faute de données** et non par
+   manque de temps : le pourcentage par téléchargement (aucune des deux libs ne le
+   rapporte), le score de pertinence (ScreenScraper n'en renvoie pas) et la relance
+   `r`/`R` (du pipeline, pas de l'UI). Les deux premiers ont un handoff, le troisième un
+   point P3.
 6. **Ensuite** — dette P3 au fil de l'eau (dont la migration reqwest 0.12 / rustls, qui
    demande de bouger les trois dépôts ensemble), puis contribution SS sur base saine.

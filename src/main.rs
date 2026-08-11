@@ -39,7 +39,10 @@ use crate::worker::{lookup_failure, WorkerContext};
 /// Extra main-pool workers beyond the SS-semaphore limit.
 /// Keeps downloads and packaging running while SS slots are saturated.
 const N_EXTRA_MAIN_WORKERS: usize = 8;
-const N_BLOCKING_WORKERS: usize = 2;
+/// Blocking-pool workers, one per ROM that can sit waiting for the user at the same
+/// time. It used to be 2, next to a `modal_sem` of capacity 1 — so exactly one ROM could
+/// ever be waiting, and the "to identify" view had nothing to list.
+const N_BLOCKING_WORKERS: usize = 8;
 
 /// How often the accumulated ROM state is written to disk mid-run.
 const FLUSH_INTERVAL_MS: u64 = 30_000;
@@ -159,6 +162,36 @@ fn collect_sources(source: &Source, ui: &Ui) -> Result<Vec<RomSourceData>, Strin
   }
 
   Ok(sources)
+}
+
+/// What the grid can show about a ROM before any step has run.
+///
+/// An Internet Archive source already carries its size and sha1 in the item metadata; a
+/// folder source learns both in `ComputeHashes`, so they start as `None` rather than as
+/// zeroes, which would render as a confident `0 B`.
+fn rom_info(source: &RomSourceData) -> ui::RomInfo {
+  let (size, sha1, origin) = match &source.source {
+    RomSource::InternetArchive(ia) => (
+      Some(ia.size),
+      ia.sha1.clone(),
+      format!("archive.org/{}", ia.metadata.item),
+    ),
+    RomSource::Folder(f) => (
+      None,
+      None,
+      f.local_path
+        .parent()
+        .map(|p| p.display().to_string())
+        .unwrap_or_default(),
+    ),
+  };
+  ui::RomInfo {
+    label: source.filename.clone(),
+    file_name: source.file_name.clone(),
+    size,
+    sha1,
+    source: origin,
+  }
 }
 
 /// Something went wrong while running: no config directory, unreadable config, unknown
@@ -549,6 +582,7 @@ fn main() {
   let interrupted = Arc::new(AtomicBool::new(false));
   let queue = TaskQueue::new();
   let ui = Ui::new(Arc::clone(&interrupted), Arc::clone(&queue));
+  ui.set_system(&system_name);
   let sources = match collect_sources(&source, &ui) {
     Ok(sources) => sources,
     Err(message) => {
@@ -569,9 +603,8 @@ fn main() {
   let total = sources.len();
   let roms: Vec<Arc<Mutex<Rom>>> = sources
     .into_iter()
-    .enumerate()
-    .map(|(i, source)| {
-      let bar = ui.new_rom_bar(i + 1, total, &source.filename);
+    .map(|source| {
+      let bar = ui.new_rom_bar(total, rom_info(&source));
       if matches!(&source.source, RomSource::Folder(_)) {
         Rom::new_folder(source, bar)
       } else {
@@ -678,6 +711,10 @@ fn main() {
     return;
   }
 
+  let n_main = n_disc + N_EXTRA_MAIN_WORKERS;
+  let active = Arc::new(AtomicUsize::new(0));
+  ui.set_workers(Arc::clone(&active), n_main + N_BLOCKING_WORKERS);
+
   let ctx = Arc::new(WorkerContext {
     queue: Arc::clone(&queue),
     ss: Arc::clone(&ss),
@@ -686,8 +723,8 @@ fn main() {
     state: Arc::clone(&state),
     modal_tx,
     ss_sem: Semaphore::new(n_disc),
-    modal_sem: Semaphore::new(1),
     remaining: Arc::new(AtomicUsize::new(remaining_count)),
+    active,
     interrupted: Arc::clone(&interrupted),
     debug_log_path,
   });
@@ -712,7 +749,6 @@ fn main() {
 
   // ── Launch workers ────────────────────────────────────────────────────
 
-  let n_main = n_disc + N_EXTRA_MAIN_WORKERS;
   let mut handles: Vec<thread::JoinHandle<()>> = Vec::with_capacity(n_main + N_BLOCKING_WORKERS);
 
   for _ in 0..n_main {
@@ -830,8 +866,16 @@ fn main() {
 
   let mut summary = ui.summary();
   summary.step_avg_durations = step_avg_durations;
+
+  // The report is shown inside the interface, which the user leaves with `q`. Printing
+  // after the terminal is restored is the fallback for `--plain` — and the only path
+  // that ever worked before, which is why `Summary::print()` is still here.
+  ui.finish_run();
+  ui.wait_for_quit(&interrupted);
   drop(ui);
-  summary.print();
+  if ui::is_plain() {
+    summary.print();
+  }
 }
 
 #[cfg(test)]

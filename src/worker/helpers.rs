@@ -1,10 +1,11 @@
 use std::{collections::HashMap, path::Path};
 
-use screenscraper::ApiFailure;
+use screenscraper::{jeuinfo::JeuInfo, ApiFailure};
 
 use crate::{
   package::{media_ext, Medias},
   rom::StepError,
+  ui::{Dot, ModalCandidate, MEDIA_COUNT},
 };
 
 pub(crate) const NAME_REGIONS: &[&str] = &["wor", "eu", "us", "fr", "jp", "ss"];
@@ -128,11 +129,174 @@ pub(crate) fn check_media_changes(
   (changed, lines)
 }
 
+// ── Modal candidates ───────────────────────────────────────────────────────
+
+/// The nine tracked assets, in `MEDIA_ICONS` order, and the ScreenScraper media name
+/// each one is fetched under.
+///
+/// `description` has no media name: it comes from the synopsis, which is text on the
+/// game rather than a file to download. `video` is the one asset with a fallback —
+/// `video-normalized` when ScreenScraper has re-encoded it, the raw upload otherwise.
+const CANDIDATE_MEDIA: [&str; MEDIA_COUNT - 1] = [
+  "video",
+  "sstitle",
+  "box-2D",
+  "ss",
+  "bezel-16-9",
+  "marquee",
+  "wheel",
+  "manuel",
+];
+
+/// Projects a search result into what the modal shows.
+///
+/// Nothing here calls ScreenScraper: `jeuRecherche` is documented as "identical to the
+/// jeuInfos API but without the ROM information", so each result already carries its
+/// media list, publisher and genres. The design handoff assumed one `jeuInfos` call per
+/// candidate would be needed, and warned that it might be too expensive to do at all.
+pub(crate) fn candidate_from(jeu: &JeuInfo, lang: &[&str]) -> ModalCandidate {
+  let mut media = [Dot::Missing; MEDIA_COUNT];
+  // A synopsis in one of the configured languages is what fills description.xml.
+  // `find_desc` says `"Unknown"` rather than an empty string when there is none, so an
+  // emptiness test would have lit this dot green for every candidate.
+  if jeu.find_desc(lang) != "Unknown" {
+    media[0] = Dot::Fresh;
+  }
+  for (i, name) in CANDIDATE_MEDIA.iter().enumerate() {
+    let found = if *name == "video" {
+      jeu.media("video-normalized").or_else(|| jeu.media("video"))
+    } else {
+      jeu.media(name)
+    };
+    if found.is_some() {
+      media[i + 1] = Dot::Fresh;
+    }
+  }
+
+  let date = jeu.find_date(&["wor", "eu", "us", "fr"]);
+  let genre = jeu.find_genre(lang);
+
+  ModalCandidate {
+    name: jeu.find_name(NAME_REGIONS),
+    game_id: jeu.id.clone(),
+    year: (date != "Unknown" && date.len() >= 4).then(|| date[..4].to_string()),
+    media,
+    publisher: jeu.editeur.as_ref().map(|e| e.text.clone()),
+    genre: (!genre.is_empty() && genre != "Unknown").then_some(genre),
+    players: jeu.joueurs.as_ref().map(|j| j.text.clone()),
+    region: jeu.noms.first().map(|n| n.region.clone()),
+  }
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
   use screenscraper::jeuinfo::Media;
   use std::path::PathBuf;
+
+  // ── candidate_from ───────────────────────────────────────────────────────
+
+  /// A search result as `jeuRecherche` returns it. Built by deserialising rather than
+  /// field by field: `JeuInfo` has twenty-odd fields, and this way the fixture is the
+  /// shape of the API response, which is what the projection actually has to survive.
+  fn search_result(with_media: &[&str], with_synopsis: bool) -> JeuInfo {
+    let medias: Vec<String> = with_media
+      .iter()
+      .map(|name| {
+        format!(
+          r#"{{"type":"{}","parent":"jeu","url":"https://example.invalid/m","crc":"0",
+              "md5":"0","sha1":"0","format":"png"}}"#,
+          name
+        )
+      })
+      .collect();
+    let synopsis = if with_synopsis {
+      r#"[{"langue":"fr","text":"Un jeu."}]"#
+    } else {
+      "null"
+    };
+    let json = format!(
+      r#"{{
+        "id": "149021",
+        "noms": [{{"region":"jp","text":"Ganbare Goemon 2"}}],
+        "editeur": {{"id":"12","text":"Konami"}},
+        "joueurs": {{"text":"2"}},
+        "topstaff": "0",
+        "rotation": "0",
+        "synopsis": {},
+        "dates": [{{"region":"wor","text":"1993-01-07"}}],
+        "genres": [{{"id":"3","principale":"1",
+                    "noms":[{{"langue":"fr","text":"Action"}}]}}],
+        "medias": [{}]
+      }}"#,
+      synopsis,
+      medias.join(",")
+    );
+    serde_json::from_str(&json).expect("fixture should deserialise as a JeuInfo")
+  }
+
+  /// Everything the modal shows comes out of the search result itself — no second call.
+  #[test]
+  fn a_candidate_is_built_from_the_search_result_alone() {
+    let c = candidate_from(&search_result(&["ss", "wheel"], true), &["fr"]);
+    assert_eq!(c.name, "Ganbare Goemon 2");
+    assert_eq!(c.game_id, "149021");
+    assert_eq!(c.year.as_deref(), Some("1993"));
+    assert_eq!(c.publisher.as_deref(), Some("Konami"));
+    assert_eq!(c.genre.as_deref(), Some("Action"));
+    assert_eq!(c.players.as_deref(), Some("2"));
+    assert_eq!(c.region.as_deref(), Some("jp"));
+  }
+
+  /// The dots line up with `MEDIA_ICONS`: description, video, image, thumbnail,
+  /// screenshot, bezel, marquee, wheel, manual. A column out of step would attribute
+  /// every asset to the wrong icon.
+  #[test]
+  fn the_media_dots_follow_the_canonical_column_order() {
+    let c = candidate_from(&search_result(&["ss", "wheel"], true), &["fr"]);
+    assert_eq!(c.media[0], Dot::Fresh); // description, from the synopsis
+    assert_eq!(c.media[4], Dot::Fresh); // screenshot, "ss"
+    assert_eq!(c.media[7], Dot::Fresh); // wheel
+    assert_eq!(c.media[1], Dot::Missing); // video
+    assert_eq!(c.media[8], Dot::Missing); // manual
+  }
+
+  /// `find_desc` answers `"Unknown"` and not an empty string when there is no synopsis,
+  /// so testing for emptiness lit the description dot green for every candidate.
+  #[test]
+  fn a_candidate_without_a_synopsis_has_no_description() {
+    let c = candidate_from(&search_result(&["ss"], false), &["fr"]);
+    assert_eq!(c.media[0], Dot::Missing);
+  }
+
+  /// ScreenScraper serves a re-encoded video when it has one and the raw upload
+  /// otherwise; either fills the same column.
+  #[test]
+  fn either_video_form_fills_the_video_column() {
+    assert_eq!(
+      candidate_from(&search_result(&["video"], true), &["fr"]).media[1],
+      Dot::Fresh
+    );
+    assert_eq!(
+      candidate_from(&search_result(&["video-normalized"], true), &["fr"]).media[1],
+      Dot::Fresh
+    );
+  }
+
+  /// A result with nothing but an id must not put "Unknown" on screen as though it were
+  /// a publisher or a genre.
+  #[test]
+  fn a_bare_result_leaves_its_fields_empty() {
+    let jeu: JeuInfo =
+      serde_json::from_str(r#"{"id":"1","noms":[],"topstaff":"0","rotation":"0","medias":[]}"#)
+        .expect("fixture should deserialise as a JeuInfo");
+    let c = candidate_from(&jeu, &["fr"]);
+    assert_eq!(c.year, None);
+    assert_eq!(c.publisher, None);
+    assert_eq!(c.genre, None);
+    assert_eq!(c.region, None);
+    assert!(c.media.iter().all(|d| *d == Dot::Missing));
+  }
 
   // ── lookup_failure ───────────────────────────────────────────────────────
 

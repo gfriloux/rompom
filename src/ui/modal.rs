@@ -50,6 +50,7 @@ pub(super) fn show_modal(
       let mut s = state.lock().unwrap();
       s.tick += 1;
       s.modal = Some(ModalDisplayState {
+        row: req.row,
         filename: req.filename.clone(),
         sha1: req.sha1.clone(),
         candidates: req.candidates.clone(),
@@ -62,8 +63,8 @@ pub(super) fn show_modal(
 
     terminal
       .draw(|frame| {
-        let s = state.lock().unwrap();
-        render(frame, &s);
+        let mut s = state.lock().unwrap();
+        render(frame, &mut s);
       })
       .unwrap();
 
@@ -123,8 +124,8 @@ pub(super) fn show_modal(
                 }
                 terminal
                   .draw(|frame| {
-                    let s = state.lock().unwrap();
-                    render(frame, &s);
+                    let mut s = state.lock().unwrap();
+                    render(frame, &mut s);
                   })
                   .unwrap();
 

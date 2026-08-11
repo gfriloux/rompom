@@ -178,6 +178,7 @@ pub fn restore_bar_for_resumed_rom(rom: &Rom) {
 
   let leaf = &rom.pipeline[rom.pipeline.len() - 1];
   if matches!(leaf.status, StepStatus::Done | StepStatus::Skipped) {
+    rom.bar.restored();
     rom.bar.finish(false);
   }
 }

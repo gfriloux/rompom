@@ -75,6 +75,9 @@ single casual setup, Skraper is simpler.
   `maxthreads` value, and rompom sizes its ScreenScraper semaphore from it. A tier
   allowing one thread means one lookup at a time, whatever the machine — downloads and
   packaging still run in parallel around it, but identification is the bottleneck.
+- A terminal announcing **truecolor** via `COLORTERM` gets the full palette; anything
+  else falls back to sixteen colours, which stays legible but loses the selected-row
+  highlight (the `▌` cursor still marks it).
 - A **Nerd Font** in your terminal — the media columns are Nerd Font glyphs and render as
   identical empty boxes without one. `--ascii` replaces them with letters if you would
   rather not install a font.
@@ -252,21 +255,94 @@ either way. A run with no terminal at all needs nothing else:
 rompom -s snes --plain --resume no < /dev/null
 ```
 
-In a terminal, rompom opens a UI split into three panels:
+### The interface
 
-- **Discovery** — ROM identification in progress: querying ScreenScraper, generating PKGBUILDs
-- **Downloads** — ROM and media asset downloads
-- **Completed** — finished ROMs, with per-media icons showing what was downloaded, already
-  up-to-date, or unavailable
+In a terminal, rompom opens a full-screen grid: **one row per ROM, in the order it was
+collected, for the whole run**. A ROM never moves — columns say how far it got.
+
+A banner sits above it: how far along the run is, how many ROMs are new / unchanged /
+failed / waiting to be identified, and a throughput line — ROMs per minute, MiB/s, the
+ETA, and how many workers are busy. The rates are read over **the last minute**, not over
+the whole run, so they still react when the network slows down. The ETA reads `—` when
+nothing has finished recently, rather than showing a number that is no longer true.
+
+```
+#     rom                        id   pkg  rom   󰗚  󰕧  󰋩  󰋫  󰹙  󱂬  󰯃  󰊢  󰂺  time    status
+1198  Yoshi's Island             ✓    ✓    ✓     ●  ●  ●  ●  ●  ●  ●  ●  ○  4.6s    done
+1199  Bahamut Lagoon (J)         ✓    ✓    ✗     ·  ·  ·  ·  ·  ·  ·  ·  ·  18.2s   sha1 mismatch
+1201  Kirby Super Star           =    =    =     ●  ●  ●  ●  ●  ●  ●  ●  ○  0.2s    unchanged
+1206  Super Mario RPG            ⠹    ·    ·     ·  ·  ·  ·  ·  ·  ·  ·  ·  1.2s    identifying
+1208  Zelda: Link to the Past    ·    ·    ·     ·  ·  ·  ·  ·  ·  ·  ·  ·  —       queued
+```
+
+- **`id` / `pkg` / `rom`** — identification, PKGBUILD, ROM transfer. `·` not reached,
+  spinner running, `✓` done, `=` nothing to do, `✗` failed.
+- **The nine dots** — one per tracked asset, in the order of the header icons
+  (description, video, image, thumbnail, screenshot, bezel, marquee, wheel, manual).
+  `●` green fetched now, `●` gray already up to date, `○` red not on ScreenScraper,
+  `◐` in progress, `·` not tried.
+
+The window scrolls itself to keep the working area in view. The footer says how many ROMs
+are above and below it.
+
+Under 100 columns the grid folds: the arrival number and the elapsed time go, the media
+dots tighten, and the status becomes a word (`scrap`, `pkg`, `rom`, `8/9`, `ok`).
+
+| key | effect |
+|---|---|
+| `↑` `↓` | move the cursor; the selected ROM unfolds three detail lines below it |
+| `g` / `G` | jump to the top / back to the bottom (`G` also re-enables auto-scrolling) |
+| `f` | cycle the filter: all → active → errors → to identify |
+| `e` | jump straight to the errors view |
+| `m` | jump to the ROMs waiting to be identified |
+| `w` | in the errors view, write `<system>.errors.log` |
+| `esc` | leave a filtered view |
+| `q` | leave, once the run has finished |
+| `Ctrl-C` | interrupt, saving `<system>.run.yml` |
+
+When the run ends, the banner turns into a report — what was produced, how fast, how much
+was transferred — with a media coverage block showing what share of the packages ended up
+with each asset. The grid stays as it was, so you can still walk it and open the errors
+view. `q` leaves.
+
+The errors view lists only the ROMs that failed, with the cause and the number of
+attempts instead of the media dots, and counts the causes by kind underneath:
+
+```
+9 checksum · 4 screenscraper · 2 download
+```
+
+`w` writes those failures to `<system>.errors.log` in the current directory, one
+tab-separated line each, with the **whole** cause rather than the cut-down version the
+column has room for:
+
+```
+# rompom snes — 2 failures
+Bahamut Lagoon (J)	Checksum mismatch: expected 3f9a…, got 0c41…
+Umihara Kawase	too many unrecognised ROMs today — ScreenScraper says come back tomorrow
+```
+
+Moving the cursor stops the automatic scrolling — a list sliding under the cursor cannot
+be read. `G` gives it back.
 
 ### Unidentified ROMs
 
-When a ROM is not found automatically on ScreenScraper, rompom pauses on that ROM and opens
-an identification modal. It presents a list of candidates from a name-based search — navigate
-with the arrow keys and press Enter to confirm. If none match, press `i` to enter a
-ScreenScraper game ID manually.
+When a ROM is not found automatically on ScreenScraper, it goes into a waiting list and the
+run carries on around it. The first one opens its identification modal straight away; after
+that they queue up, and the banner counts them (`? 3 to id`).
 
-Other ROMs continue processing in parallel while the modal is open.
+Press `m` for the list: what each ROM has been waiting, how many candidates a name search
+found, and the one ScreenScraper ranked first — often enough to decide without opening
+anything. `enter` opens the modal for the selected ROM, `s` skips it.
+
+In the modal, navigate the candidates with the arrow keys and press Enter to confirm. If
+none match, press `i` to enter a ScreenScraper game ID manually. Other ROMs keep processing
+in parallel throughout.
+
+> ScreenScraper returns its search results "sorted by probability" and **no match
+> percentage** — the `score` field in its API is a user rating out of 20, not a relevance
+> figure. rompom therefore shows you its top pick rather than a number it would have had to
+> invent.
 
 ### Interrupting a run
 

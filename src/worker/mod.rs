@@ -87,10 +87,13 @@ pub struct WorkerContext {
   pub state: Arc<Mutex<SystemState>>,
   pub modal_tx: crossbeam_channel::Sender<ModalRequest>,
   pub ss_sem: Arc<Semaphore>,
-  pub modal_sem: Arc<Semaphore>,
   /// Number of ROMs whose `SaveState` step has not yet completed.
   /// When it reaches zero the queue is shut down.
   pub remaining: Arc<AtomicUsize>,
+  /// Workers currently inside a step handler. Read by the banner, written nowhere else
+  /// — it counts handler time, not queue-waiting time, so it answers "is the pool doing
+  /// anything" rather than "how big is the pool".
+  pub active: Arc<AtomicUsize>,
   /// Set to true by the Ctrl-C handler; workers check it between steps.
   pub interrupted: Arc<AtomicBool>,
   /// If `Some`, path of the debug log file to append per-ROM decision lines to.
@@ -111,7 +114,6 @@ pub fn worker_loop_main(ctx: Arc<WorkerContext>) {
   // Unblock workers stuck in Semaphore::acquire() so they can exit cleanly.
   if ctx.interrupted.load(Ordering::Relaxed) {
     ctx.ss_sem.cancel();
-    ctx.modal_sem.cancel();
   }
 }
 
@@ -125,7 +127,6 @@ pub fn worker_loop_blocking(ctx: Arc<WorkerContext>) {
   }
   if ctx.interrupted.load(Ordering::Relaxed) {
     ctx.ss_sem.cancel();
-    ctx.modal_sem.cancel();
   }
 }
 
@@ -201,7 +202,11 @@ fn execute_step(rom_arc: Arc<Mutex<Rom>>, step_idx: usize, ctx: &WorkerContext) 
     StepKind::SaveState => handle_save_state(&rom_arc, step_idx, ctx),
   });
 
-  let result = match panic::catch_unwind(handler) {
+  ctx.active.fetch_add(1, Ordering::Relaxed);
+  let outcome = panic::catch_unwind(handler);
+  ctx.active.fetch_sub(1, Ordering::Relaxed);
+
+  let result = match outcome {
     Ok(result) => result,
     Err(payload) => {
       // Catching the unwind is only half the job. A handler almost always panics
