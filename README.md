@@ -286,7 +286,17 @@ are above and below it.
 |---|---|
 | `↑` `↓` | move the cursor; the selected ROM unfolds three detail lines below it |
 | `g` / `G` | jump to the top / back to the bottom (`G` also re-enables auto-scrolling) |
+| `f` | cycle the filter: all → active → errors |
+| `e` | jump straight to the errors view |
+| `esc` | leave a filtered view |
 | `Ctrl-C` | interrupt, saving `<system>.run.yml` |
+
+The errors view lists only the ROMs that failed, with the cause and the number of
+attempts instead of the media dots, and counts the causes by kind underneath:
+
+```
+9 checksum · 4 screenscraper · 2 download
+```
 
 Moving the cursor stops the automatic scrolling — a list sliding under the cursor cannot
 be read. `G` gives it back.

@@ -1,3 +1,4 @@
+mod errors;
 mod grid;
 mod modal;
 mod rate;
@@ -220,6 +221,28 @@ pub(crate) struct ModalDisplayState {
 
 // ── App state ──────────────────────────────────────────────────────────────
 
+/// Which rows the grid is showing.
+///
+/// `Errors` draws its own block with its own columns; the other two are the same grid
+/// over a shorter list.
+#[derive(Clone, Copy, PartialEq)]
+pub(crate) enum Filter {
+  All,
+  /// Started and not finished — what the workers are on right now.
+  Active,
+  Errors,
+}
+
+impl Filter {
+  fn next(self) -> Filter {
+    match self {
+      Filter::All => Filter::Active,
+      Filter::Active => Filter::Errors,
+      Filter::Errors => Filter::All,
+    }
+  }
+}
+
 /// What the grid knows about a ROM before the pipeline has touched it.
 ///
 /// Passed whole to `new_rom_bar` rather than as five positional arguments, three of
@@ -261,6 +284,8 @@ pub(crate) struct RomEntry {
   pub(crate) error: Option<String>,
   /// Nothing changed since the last run: ROM, media and description.xml all identical.
   pub(crate) unchanged: bool,
+  /// How many times a step has been attempted. One until a retry says otherwise.
+  pub(crate) attempts: u8,
 }
 
 impl RomEntry {
@@ -282,6 +307,7 @@ impl RomEntry {
       finished_at: None,
       error: None,
       unchanged: false,
+      attempts: 1,
     }
   }
 
@@ -319,6 +345,7 @@ pub(crate) struct AppState {
   /// Whether the window tracks the workers on its own. Moving the cursor turns this
   /// off — the user is reading something — and `G` turns it back on.
   pub(crate) follow: bool,
+  pub(crate) filter: Filter,
   /// When the run started, which is what the throughput window is keyed on.
   pub(crate) started: Instant,
   /// Bytes written by ROM and media transfers so far.
@@ -415,6 +442,7 @@ impl RomBar {
   /// then 4 seconds. From the outside the ROM was simply frozen, and a run slowed down
   /// by a flaky network looked identical to one blocked on something else entirely.
   pub fn retrying(&self, attempt: u8, max: u8) {
+    self.state.lock().unwrap().roms[self.index].attempts = attempt.saturating_add(1);
     self.set_status(format!("retrying ({}/{})...", attempt, max));
   }
 
@@ -625,36 +653,75 @@ fn plain_line(entry: &RomEntry, done: usize, total: usize) -> String {
   format!("[{}/{}] {} {}{}", done, total, marker, entry.label, tail)
 }
 
-/// Moves the cursor, and decides whether the window still follows the workers.
+/// Row indices the current filter shows, in arrival order.
+pub(crate) fn visible_rows(state: &AppState) -> Vec<usize> {
+  state
+    .roms
+    .iter()
+    .enumerate()
+    .filter(|(_, r)| match state.filter {
+      Filter::All => true,
+      Filter::Active => r.started_at.is_some() && !r.finished(),
+      Filter::Errors => r.failed(),
+    })
+    .map(|(i, _)| i)
+    .collect()
+}
+
+/// Moves the cursor and switches filters.
 ///
-/// Any deliberate move turns following off: the user is reading a particular row, and a
-/// list that keeps sliding under the cursor cannot be read. `G` is the way back — it
-/// means "take me to where the run is", which is exactly what following does.
+/// `selected` is an index into `roms`, not into what is on screen: a ROM keeps its
+/// identity across a filter change, so leaving the errors view puts the cursor back on
+/// the same ROM rather than on whatever now sits in that position.
+///
+/// Any deliberate cursor move turns following off — the user is reading a particular
+/// row, and a list that keeps sliding under the cursor cannot be read. `G` is the way
+/// back: it means "take me to where the run is", which is what following does.
 fn navigate(state: &Mutex<AppState>, code: KeyCode) {
   let mut s = state.lock().unwrap();
-  let last = match s.roms.len() {
-    0 => return,
-    n => n - 1,
-  };
+
   match code {
-    KeyCode::Up => {
-      s.selected = s.selected.saturating_sub(1);
-      s.follow = false;
-    }
-    KeyCode::Down => {
-      s.selected = (s.selected + 1).min(last);
-      s.follow = false;
-    }
-    KeyCode::Char('g') => {
-      s.selected = 0;
-      s.follow = false;
-    }
-    KeyCode::Char('G') => {
-      s.selected = last;
-      s.follow = true;
-    }
+    KeyCode::Char('f') => s.filter = s.filter.next(),
+    KeyCode::Char('e') => s.filter = Filter::Errors,
+    KeyCode::Esc => s.filter = Filter::All,
     _ => {}
   }
+
+  let rows = visible_rows(&s);
+  if rows.is_empty() {
+    return;
+  }
+  // A filter change can hide the selected ROM; land on the nearest visible one rather
+  // than on a cursor pointing at a row that is not drawn.
+  let pos = rows
+    .iter()
+    .position(|&i| i == s.selected)
+    .unwrap_or_else(|| {
+      rows
+        .partition_point(|&i| i < s.selected)
+        .min(rows.len() - 1)
+    });
+
+  let pos = match code {
+    KeyCode::Up => {
+      s.follow = false;
+      pos.saturating_sub(1)
+    }
+    KeyCode::Down => {
+      s.follow = false;
+      (pos + 1).min(rows.len() - 1)
+    }
+    KeyCode::Char('g') => {
+      s.follow = false;
+      0
+    }
+    KeyCode::Char('G') => {
+      s.follow = true;
+      rows.len() - 1
+    }
+    _ => pos,
+  };
+  s.selected = rows[pos];
 }
 
 // ── Ui ─────────────────────────────────────────────────────────────────────
@@ -670,6 +737,7 @@ impl Ui {
       selected: 0,
       scroll: 0,
       follow: true,
+      filter: Filter::All,
       started: Instant::now(),
       bytes: 0,
       rate: Rate::new(),

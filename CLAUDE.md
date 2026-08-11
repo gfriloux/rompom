@@ -163,6 +163,7 @@ src/
                               rom_mtime, rom_size, per-media sha1s, and extra_disc_sha1s for each ROM.
   ui/
     mod.rs                  — Ui + RomBar + AppState + RomEntry + Cell/Dot, modal public types
+    errors.rs               — classify()/tally(): failure causes bucketed for the errors view
     grid.rs                 — column widths, text fitting, scroll window, elapsed format;
                               pure arithmetic, and the only testable part of the interface
     rate.rs                 — Rate: sliding one-minute window feeding the sparkline,
@@ -604,6 +605,22 @@ scrolls itself to keep the active band on screen (`grid::active_anchor()` +
 own would shift every other column as the selection moved. Three detail lines unfold
 underneath, taking rows from the same window: the file it came from, its sha1, and then
 whichever of the cause / the name-search result / the output directory the row is about.
+
+**Filters.** `AppState::filter` is `All | Active | Errors`; `f` cycles, `e` jumps to the
+errors view, `esc` comes back. `visible_rows()` maps the filter to row indices, and
+`selected` stays an index into `roms` — a ROM keeps its identity across a filter change,
+so leaving the errors view puts the cursor back on the same ROM and not on whatever now
+occupies that position.
+
+`Errors` is not the grid over a shorter list: it draws its own red-bordered block with
+its own columns (`cause`, `attempts` in place of the dots and the clock) and **hides the
+banner**, which answers a question the view is not asking. Its footer is
+`errors::tally()` — `9 checksum · 4 screenscraper · 2 download`, commonest first. Fifteen
+distinct sentences say nothing; the tally says whether the run hit a bad mirror, an
+exhausted quota or a flaky link. `errors::classify()` matches on the cause text, because
+that is all that survives — the step is gone by the time the row is drawn — and a
+checksum failure wins over the transfer that carried it, since re-running fixes a flaky
+link and never fixes a mirror serving the wrong file.
 
 **Following.** `AppState::follow` starts true and the window tracks the workers. Any
 cursor move turns it off and `grid::clamp_scroll()` takes over, moving the window only

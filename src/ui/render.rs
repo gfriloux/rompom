@@ -10,8 +10,8 @@ use ratatui::{
 
 use super::grid::{self, Columns};
 use super::{
-  media_icons, AppState, Cell, Dot, ModalDisplayState, ModalMode, RomEntry, MEDIA_COUNT,
-  SPINNER_FRAMES,
+  errors, media_icons, visible_rows, AppState, Cell, Dot, Filter, ModalDisplayState, ModalMode,
+  RomEntry, MEDIA_COUNT, SPINNER_FRAMES,
 };
 
 /// Cells taken by the progress bar in the banner.
@@ -33,18 +33,30 @@ pub(super) fn render(frame: &mut Frame, state: &mut AppState) {
   let (elapsed, done, bytes) = (state.started.elapsed(), state.done(), state.bytes);
   state.rate.tick(elapsed, done, bytes);
 
-  let areas = Layout::default()
-    .direction(Direction::Vertical)
-    .constraints([
+  // A filtered view hides the banner: it is a different question — "what went wrong" —
+  // and the run-wide progress has nothing to say about it.
+  let constraints: &[Constraint] = if state.filter == Filter::Errors {
+    &[Constraint::Min(1), Constraint::Length(1)]
+  } else {
+    &[
       Constraint::Length(4), // banner
       Constraint::Min(1),    // grid
       Constraint::Length(1), // key hints
-    ])
+    ]
+  };
+  let areas = Layout::default()
+    .direction(Direction::Vertical)
+    .constraints(constraints)
     .split(frame.area());
 
-  render_banner(frame, areas[0], state);
-  render_grid(frame, areas[1], state);
-  frame.render_widget(help_line(), areas[2]);
+  if state.filter == Filter::Errors {
+    render_errors(frame, areas[0], state);
+    frame.render_widget(errors_help_line(), areas[1]);
+  } else {
+    render_banner(frame, areas[0], state);
+    render_grid(frame, areas[1], state);
+    frame.render_widget(help_line(state), areas[2]);
+  }
 
   if let Some(ref modal) = state.modal {
     render_modal(frame, frame.area(), modal);
@@ -206,15 +218,27 @@ fn render_grid(frame: &mut Frame, area: Rect, state: &mut AppState) {
     );
   } else {
     let height = chunks[2].height as usize;
-    let len = state.roms.len();
-    state.selected = state.selected.min(len - 1);
+    let rows = visible_rows(state);
+    let entries: Vec<&RomEntry> = rows.iter().map(|&i| &state.roms[i]).collect();
+    let len = entries.len();
+    if len == 0 {
+      frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+          "nothing in flight".to_string(),
+          dim().add_modifier(Modifier::ITALIC),
+        ))),
+        chunks[2],
+      );
+      return;
+    }
+    let cursor = rows.iter().position(|&i| i == state.selected).unwrap_or(0);
 
     // Following tracks the workers; once the user has moved the cursor the window only
     // budges when the selection would otherwise leave it.
     state.scroll = if state.follow {
-      grid::scroll_offset(len, height, grid::active_anchor(&state.roms))
+      grid::scroll_offset(len, height, grid::active_anchor(&entries))
     } else {
-      grid::clamp_scroll(state.scroll, len, height, state.selected)
+      grid::clamp_scroll(state.scroll, len, height, cursor)
     };
     let offset = state.scroll;
     let spinner = SPINNER_FRAMES[state.tick % SPINNER_FRAMES.len()];
@@ -222,12 +246,15 @@ fn render_grid(frame: &mut Frame, area: Rect, state: &mut AppState) {
     // Built row by row rather than mapped, because the selected row is followed by
     // three detail lines that take rows from the same window.
     let mut items: Vec<ListItem> = Vec::with_capacity(height);
-    for (i, entry) in state.roms.iter().enumerate().skip(offset) {
+    for (pos, &row) in rows.iter().enumerate().skip(offset) {
       if items.len() >= height {
         break;
       }
-      let selected = i == state.selected;
-      items.push(ListItem::new(row_line(i, entry, &cols, spinner, selected)));
+      let entry = &state.roms[row];
+      let selected = pos == cursor;
+      items.push(ListItem::new(row_line(
+        row, entry, &cols, spinner, selected,
+      )));
       if selected {
         for line in detail_lines(entry, inner.width as usize) {
           if items.len() >= height {
@@ -242,6 +269,118 @@ fn render_grid(frame: &mut Frame, area: Rect, state: &mut AppState) {
     frame.render_widget(Paragraph::new(Line::from(rule)), chunks[3]);
     frame.render_widget(Paragraph::new(footer_line(len, height, offset)), chunks[4]);
   }
+}
+
+// ── Errors view ───────────────────────────────────────────────────────────
+
+fn render_errors(frame: &mut Frame, area: Rect, state: &mut AppState) {
+  let rows = visible_rows(state);
+  let block = styled_block(
+    format!(" errors · {} of {} ", rows.len(), state.total),
+    Color::Red,
+  );
+  let inner = block.inner(area);
+  frame.render_widget(block, area);
+
+  let chunks = Layout::default()
+    .direction(Direction::Vertical)
+    .constraints([
+      Constraint::Length(1),
+      Constraint::Length(1),
+      Constraint::Min(0),
+      Constraint::Length(1),
+      Constraint::Length(1),
+    ])
+    .split(inner);
+
+  let cols = grid::error_columns(inner.width);
+  let rule = Span::styled("─".repeat(inner.width as usize), dim());
+
+  let header = Line::from(vec![
+    Span::styled(grid::fit("#", cols.index as usize), dim()),
+    Span::styled(grid::fit("rom", cols.name as usize), dim()),
+    Span::styled(grid::fit("id", cols.id as usize), dim()),
+    Span::styled(grid::fit("pkg", cols.pkg as usize), dim()),
+    Span::styled(grid::fit("rom", cols.rom as usize), dim()),
+    Span::styled(grid::fit("cause", cols.cause as usize), dim()),
+    Span::styled("attempts".to_string(), dim()),
+  ]);
+  frame.render_widget(Paragraph::new(header), chunks[0]);
+  frame.render_widget(Paragraph::new(Line::from(rule.clone())), chunks[1]);
+
+  if rows.is_empty() {
+    frame.render_widget(
+      Paragraph::new(Line::from(Span::styled(
+        "no failures — press esc to go back".to_string(),
+        dim().add_modifier(Modifier::ITALIC),
+      ))),
+      chunks[2],
+    );
+    return;
+  }
+
+  let height = chunks[2].height as usize;
+  let cursor = rows.iter().position(|&i| i == state.selected).unwrap_or(0);
+  state.scroll = grid::clamp_scroll(state.scroll, rows.len(), height, cursor);
+  let spinner = SPINNER_FRAMES[state.tick % SPINNER_FRAMES.len()];
+
+  let items: Vec<ListItem> = rows
+    .iter()
+    .enumerate()
+    .skip(state.scroll)
+    .take(height)
+    .map(|(pos, &row)| {
+      let entry = &state.roms[row];
+      let selected = pos == cursor;
+      let bg = |style: Style| {
+        if selected {
+          style.bg(SELECTED_BG)
+        } else {
+          style
+        }
+      };
+      let name = if selected {
+        format!("▌{}", entry.label)
+      } else {
+        entry.label.clone()
+      };
+      ListItem::new(Line::from(vec![
+        Span::styled(
+          grid::fit(&(row + 1).to_string(), cols.index as usize),
+          bg(dim()),
+        ),
+        Span::styled(
+          grid::fit(&name, cols.name as usize),
+          bg(Style::default().fg(Color::Red)),
+        ),
+        cell_span(entry.id, cols.id as usize, spinner, selected),
+        cell_span(entry.pkg, cols.pkg as usize, spinner, selected),
+        cell_span(entry.rom, cols.rom as usize, spinner, selected),
+        Span::styled(
+          grid::fit(
+            entry.error.as_deref().unwrap_or("unknown cause"),
+            cols.cause as usize,
+          ),
+          bg(Style::default()),
+        ),
+        Span::styled(
+          grid::fit(&entry.attempts.to_string(), cols.attempts as usize),
+          bg(dim()),
+        ),
+      ]))
+    })
+    .collect();
+  frame.render_widget(List::new(items), chunks[2]);
+
+  frame.render_widget(Paragraph::new(Line::from(rule)), chunks[3]);
+  let causes: Vec<String> = rows
+    .iter()
+    .filter_map(|&i| state.roms[i].error.clone())
+    .collect();
+  frame.render_widget(
+    Paragraph::new(Line::from(Span::styled(errors::tally(&causes), dim()))),
+    chunks[4],
+  );
 }
 
 /// The three lines unfolded under the selected row.
@@ -489,17 +628,40 @@ fn footer_line(len: usize, height: usize, offset: usize) -> Line<'static> {
   Line::from(spans)
 }
 
-fn help_line() -> Paragraph<'static> {
+fn keys(pairs: &[(&str, String)]) -> Paragraph<'static> {
   let mut spans = Vec::new();
-  for (key, what) in [
-    ("↑↓", " select  "),
-    ("g/G", " top/bottom  "),
-    ("ctrl-c", " stop"),
-  ] {
-    spans.push(Span::styled(key, Style::default().fg(Color::Cyan)));
-    spans.push(Span::styled(what, dim()));
+  for (key, what) in pairs {
+    spans.push(Span::styled(
+      key.to_string(),
+      Style::default().fg(Color::Cyan),
+    ));
+    spans.push(Span::styled(what.clone(), dim()));
   }
   Paragraph::new(Line::from(spans))
+}
+
+fn help_line(state: &AppState) -> Paragraph<'static> {
+  let failed = state.roms.iter().filter(|r| r.failed()).count();
+  let filter = match state.filter {
+    Filter::All => " filter: all  ",
+    Filter::Active => " filter: active  ",
+    Filter::Errors => " filter: errors  ",
+  };
+  keys(&[
+    ("↑↓", " select  ".to_string()),
+    ("g/G", " top/bottom  ".to_string()),
+    ("f", filter.to_string()),
+    ("e", format!(" errors ({})  ", failed)),
+    ("ctrl-c", " stop".to_string()),
+  ])
+}
+
+fn errors_help_line() -> Paragraph<'static> {
+  keys(&[
+    ("↑↓", " select  ".to_string()),
+    ("esc", " back  ".to_string()),
+    ("ctrl-c", " stop".to_string()),
+  ])
 }
 
 // ── Modal rendering ────────────────────────────────────────────────────────

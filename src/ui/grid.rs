@@ -53,6 +53,31 @@ pub(crate) fn columns(width: u16) -> Columns {
   }
 }
 
+/// Column widths for the errors view, which trades the media dots and the clock for the
+/// two things a failed ROM is read for.
+pub(crate) struct ErrorColumns {
+  pub(crate) index: u16,
+  pub(crate) name: u16,
+  pub(crate) id: u16,
+  pub(crate) pkg: u16,
+  pub(crate) rom: u16,
+  pub(crate) cause: u16,
+  pub(crate) attempts: u16,
+}
+
+pub(crate) fn error_columns(width: u16) -> ErrorColumns {
+  let fixed = 6 + 30 + 5 + 5 + 6 + 26;
+  ErrorColumns {
+    index: 6,
+    name: 30,
+    id: 5,
+    pkg: 5,
+    rom: 6,
+    cause: 26,
+    attempts: width.saturating_sub(fixed),
+  }
+}
+
 /// Fits `text` into exactly `width` cells: padded with spaces, or cut and marked as cut.
 ///
 /// Grid columns are positional — a value one cell too long shifts every column after it
@@ -86,7 +111,7 @@ pub(crate) fn truncate(text: &str, width: usize) -> String {
 /// The newest ROM that has started and not finished — that is where the workers are.
 /// With nothing in flight, the first ROM still queued, so the window sits on what is
 /// about to happen rather than on the top of a list nobody is reading any more.
-pub(crate) fn active_anchor(roms: &[RomEntry]) -> usize {
+pub(crate) fn active_anchor(roms: &[&RomEntry]) -> usize {
   if let Some(i) = roms
     .iter()
     .rposition(|r| r.started_at.is_some() && r.finished_at.is_none())
@@ -168,6 +193,10 @@ pub(crate) fn format_elapsed(d: Duration) -> String {
 mod tests {
   use super::*;
   use std::time::Instant;
+
+  fn refs(roms: &[RomEntry]) -> Vec<&RomEntry> {
+    roms.iter().collect()
+  }
 
   fn entry(started: bool, finished: bool) -> RomEntry {
     let mut e = RomEntry::queued(RomInfo {
@@ -277,7 +306,7 @@ mod tests {
       entry(true, false),
       entry(false, false),
     ];
-    assert_eq!(active_anchor(&roms), 2);
+    assert_eq!(active_anchor(&refs(&roms)), 2);
   }
 
   /// Between two batches nothing is in flight; the window then sits on what is about to
@@ -285,14 +314,14 @@ mod tests {
   #[test]
   fn with_nothing_in_flight_the_anchor_is_the_first_queued_rom() {
     let roms = vec![entry(true, true), entry(true, true), entry(false, false)];
-    assert_eq!(active_anchor(&roms), 2);
+    assert_eq!(active_anchor(&refs(&roms)), 2);
   }
 
   /// End of run: everything is finished, and the anchor must still be a valid index.
   #[test]
   fn a_finished_run_anchors_on_the_last_row() {
     let roms = vec![entry(true, true), entry(true, true)];
-    assert_eq!(active_anchor(&roms), 1);
+    assert_eq!(active_anchor(&refs(&roms)), 1);
     assert_eq!(active_anchor(&[]), 0);
   }
 
