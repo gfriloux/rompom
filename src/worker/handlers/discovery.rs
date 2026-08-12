@@ -11,7 +11,7 @@ use crate::{
 };
 
 use super::super::{
-  helpers::{candidate_from, lookup_failure, search_name, NAME_REGIONS},
+  helpers::{candidate_from, lookup_failure, rom_unchanged, search_name, NAME_REGIONS},
   WorkerContext,
 };
 
@@ -118,43 +118,18 @@ pub(crate) fn handle_compute_hashes(
 
   // ── Check if ROM is unchanged based on saved state ────────────────────
   let sha1_now: Option<String> = rom_arc.lock().unwrap().sha1.clone();
-  let (unchanged, state_rom_sha1) = {
+  let (unchanged, line) = {
     let state = ctx.state.lock().unwrap();
-    match state.roms.get(&filename) {
-      None => (None, None),
-      Some(entry) => {
-        let current = sha1_now.as_deref().unwrap_or("");
-        let disc1_ok = !current.is_empty() && entry.rom_sha1 == current;
-        // Also verify extra discs match in count and sha1.
-        let extras_ok = entry.extra_disc_sha1s.len() == extra_disc_sha1s.len()
-          && entry
-            .extra_disc_sha1s
-            .iter()
-            .zip(&extra_disc_sha1s)
-            .all(|(saved, cur)| !cur.is_empty() && saved == cur);
-        (Some(disc1_ok && extras_ok), Some(entry.rom_sha1.clone()))
-      }
-    }
+    rom_unchanged(
+      "ComputeHashes",
+      state.roms.get(&filename),
+      sha1_now.as_deref(),
+      &extra_disc_sha1s,
+    )
   };
   {
     let mut rom = rom_arc.lock().unwrap();
-    rom.rom_unchanged = unchanged.unwrap_or(false);
-    let current = sha1_now.as_deref().unwrap_or("?");
-    let line = match (unchanged, state_rom_sha1.as_deref()) {
-      (None, _) => format!(
-        "[ComputeHashes] rom_unchanged: false — no state entry (current sha1={})",
-        current
-      ),
-      (Some(true), _) => format!("[ComputeHashes] rom_unchanged: true  (sha1={})", current),
-      (Some(false), Some(s)) => format!(
-        "[ComputeHashes] rom_unchanged: false — sha1 mismatch (state={}, current={})",
-        s, current
-      ),
-      (Some(false), None) => format!(
-        "[ComputeHashes] rom_unchanged: false — state sha1 empty (current={})",
-        current
-      ),
-    };
+    rom.rom_unchanged = unchanged;
     rom.debug_log.push(line);
   }
 
@@ -198,42 +173,17 @@ pub(crate) fn handle_lookup_ss(
       rom.extra_disc_sha1s.clone()
     };
 
-    let (unchanged, state_rom_sha1) = {
+    let (unchanged, line) = {
       let state = ctx.state.lock().unwrap();
-      match state.roms.get(&filename) {
-        None => (None, None),
-        Some(entry) => {
-          let current = sha1.as_deref().unwrap_or("");
-          let disc1_ok = !current.is_empty() && entry.rom_sha1 == current;
-          // Extra discs must match in count and sha1.
-          let extras_ok = entry.extra_disc_sha1s.len() == extra_disc_sha1s_current.len()
-            && entry
-              .extra_disc_sha1s
-              .iter()
-              .zip(&extra_disc_sha1s_current)
-              .all(|(saved, current)| !current.is_empty() && saved == current);
-          (Some(disc1_ok && extras_ok), Some(entry.rom_sha1.clone()))
-        }
-      }
+      rom_unchanged(
+        "LookupSS",
+        state.roms.get(&filename),
+        sha1.as_deref(),
+        &extra_disc_sha1s_current,
+      )
     };
     let mut rom = rom_arc.lock().unwrap();
-    rom.rom_unchanged = unchanged.unwrap_or(false);
-    let current = sha1.as_deref().unwrap_or("?");
-    let line = match (unchanged, state_rom_sha1.as_deref()) {
-      (None, _) => format!(
-        "[LookupSS] rom_unchanged: false — no state entry (current sha1={})",
-        current
-      ),
-      (Some(true), _) => format!("[LookupSS] rom_unchanged: true  (sha1={})", current),
-      (Some(false), Some(s)) => format!(
-        "[LookupSS] rom_unchanged: false — sha1 mismatch (state={}, current={})",
-        s, current
-      ),
-      (Some(false), None) => format!(
-        "[LookupSS] rom_unchanged: false — state sha1 empty (current={})",
-        current
-      ),
-    };
+    rom.rom_unchanged = unchanged;
     rom.debug_log.push(line);
   }
 

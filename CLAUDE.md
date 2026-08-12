@@ -149,7 +149,8 @@ src/
   emulationstation.rs       — Game struct (serde Serialize) + Game::from_jeuinfo(); serialized via quick-xml
   hash.rs                   — sha1_file / md5_file / crc32_file: streamed, lowercase hex,
                               io::Result (the old `checksums` crate panicked instead)
-  package.rs                — Package + Medias structs
+  package.rs                — Package + Medias structs, MEDIA_KINDS (the canonical asset table)
+                              media_filename() / media_url() — what an asset is called, and where from
                               build(system, lang, pkgver) → Result<bool> / build_pkgbuild() logic
                               check_description_changed() — compares generated XML with disk, no I/O
                               read_pkgver(dir) — reads pkgver from an existing PKGBUILD (returns 0 if absent)
@@ -177,7 +178,7 @@ src/
   worker/
     mod.rs                  — WorkerContext, worker_loop_main/blocking, execute_step, do_dispatch
     run_state.rs            — RunState / RunRomEntry, save/load/collect/apply_run_state/restore_bar_for_resumed_rom
-    helpers.rs              — NAME_REGIONS, search_name(), media_filename(), check_media_changes()
+    helpers.rs              — NAME_REGIONS, search_name(), check_media_changes()
     handlers/
       mod.rs                — re-exports all handler functions
       discovery.rs          — handle_compute_hashes, handle_lookup_ss, handle_wait_modal
@@ -261,9 +262,12 @@ LookupSS → WaitModal* → BuildPackage → DownloadRom ────┐
 - **`ComputeHashes`** — folder sources only. Fast-skip: if the saved state has a matching
   `mtime + size`, restores `sha1` from state without hashing. Otherwise computes SHA1/MD5/CRC32.
   For multi-disc games, also computes SHA1 for each extra disc (no fast-skip for extra discs).
-  Sets `rom.rom_unchanged` by comparing disc-1 sha1 AND all extra-disc sha1s with state.
-- **`LookupSS`** — for IA sources, also sets `rom_unchanged` here (no ComputeHashes). For
-  multi-disc IA games, checks disc-1 sha1 AND all extra-disc sha1s against state. Uses cached
+  Sets `rom.rom_unchanged` through `helpers::rom_unchanged()`.
+- **`LookupSS`** — for IA sources, also sets `rom_unchanged` here (no ComputeHashes), by the
+  same call. `helpers::rom_unchanged()` is the single decision: it compares disc-1 sha1 **and**
+  every extra-disc sha1 against the state, refuses an unknown or empty sha1 on either side,
+  and returns the `--debug` line with it, the step name being all that differs between the
+  two callers. Uses cached
   `ss_game_id` from state if available (`jeuinfo_by_gameid`, fast path). Otherwise calls
   `jeuinfo()`. On miss: runs `jeu_recherche` by name (`search_name()` strips extension +
   region/revision tags), stores candidates in step data, sets `WaitModal` to Pending.
@@ -280,12 +284,24 @@ LookupSS → WaitModal* → BuildPackage → DownloadRom ────┐
   of existing file; copies/downloads only if missing or corrupt. For multi-disc games, processes
   disc 1 (from `source`) then all `extra_discs`. The destination filename for disc 1 is derived
   from `source.file_name` (the actual disc-1 basename), not from the virtual `filename`.
-- **`DownloadMedias`** — iterates 8 canonical media kinds. Reads `rom.medias` by
+  Both walk `place_discs()`, which owns that sequence; a `Disc` carries the two things the
+  sources disagree on — how a file already there is checked, and how a missing one is
+  fetched. Only disc 1 touches the bar: the grid has one `rom` cell per ROM, not per disc.
+- **`DownloadMedias`** — walks `Medias::iter()`, so the dots fill in the same order the
+  columns are drawn — see *The canonical asset order* below. Reads `rom.medias` by
   **clone**, never by `take()` — see *Never empty the Rom to work on it* below. For each: skips if sha1 already valid
   on disk (`media_skipped`), downloads otherwise (`media_done`), or marks unavailable if SS has none.
   Each asset is fetched from `package::media_url()` — the public path, not the API URL the
   response carried. A failure goes through **`media_failure()`**, never through the library
   error's `Display` — see *Credentials never reach a message* below.
+  **On a 404, and only a 404** (`helpers::is_not_found()`), the asset is fetched once more
+  through the API URL the response carried. A missing file will not appear on a retry,
+  whereas a timeout or a 5xx might — and falling back on those would push every asset of
+  every ROM through `mediaJeu.php` the day the public path has an outage, which is how an
+  account gets rate-limited. The fallback is recorded in `<system>.debug.log`, never the
+  URL. The PKGBUILD keeps the public URL, which still 404s: it cannot carry the API one
+  (credentials), so the package installs from the file rompom left beside it, but a
+  `makepkg` in a clean directory fails on that asset.
 - **`SaveState`** — writes `RomStateEntry` into shared `SystemState` (flushed to disk by
   `main.rs` every 30 s and once more after all workers join). Persists `extra_disc_sha1s` for multi-disc games.
   Emits `bar.finish()`. It does **not** touch `remaining` — see below.
@@ -499,14 +515,22 @@ ScreenScraper handed back, and `base_query()` puts `devid`, `devpassword`, `ssid
   identification path. `Io` and `ChecksumMismatch` carry only a local path and two sha1s,
   so those are quoted in full.
 - **It must never reach a PKGBUILD, nor be the URL rompom fetches.** `package::media_url()`
-  builds the public `https://screenscraper.fr/medias/{systemeid}/{jeuid}/{type}({region}).{format}`
-  path from `Media::name` and `Media::region` — nothing is parsed out of the API URL — and
-  it is used **twice**: for the PKGBUILD `sources`, and for rompom's
+  builds the public `https://screenscraper.fr/medias/{systemeid}/{jeuid}/{media}.{format}`
+  path, where `{media}` is the **`media=` parameter of that same API call** and nothing
+  else is taken from it. It is used **twice**: for the PKGBUILD `sources`, and for rompom's
   own download. A PKGBUILD is published, and pulling every asset of every ROM through
   `mediaJeu.php` is how an account gets rate-limited off ScreenScraper. The public path
   wants a `Referer`, which the `screenscraper` library sends on every media request.
   This is laundering, not duplication, and `TODO.md` carries a warning against
   "simplifying" it.
+
+  **`Media::region` does not name the file.** It says which region the asset *serves*.
+  ScreenScraper stores one file per primary region and lists it again under each secondary
+  region it covers — the "région principale et région(s) secondaire(s)" of a game's page —
+  so `manuel` with `region: eu` can carry `media=manuel(fr)`, same sha1, and the file
+  `manuel(eu).pdf` simply does not exist. Deriving the name from `region` produced a 404
+  with a correct checksum next to it. `media_url()` falls back to `{type}({region})` only
+  when the parameter is missing.
 
 ## RomSourceData / Rom structs
 
@@ -561,6 +585,35 @@ last run:
 - `description.xml` content (detected by `Package::check_description_changed()`)
 
 If nothing changed, `Package::build()` is not called at all (`package_unchanged = true`).
+
+`sources` and `sha1sums` are two parallel arrays that `makepkg` matches **by position**,
+and nothing in the file says so. The media entries are appended by a single loop over
+`Medias::iter()`, which pushes to both in the same breath — the eight hand-written blocks
+this replaced each had to remember to. `package::tests::pkgbuild_snapshot` pins the result.
+
+## The canonical asset order
+
+There is **one** list of the eight downloadable assets: `MEDIA_KINDS` in `package.rs`,
+which pairs each asset's own name (`video`, `image`, `thumbnail`, `screenshot`, `bezel`,
+`marquee`, `wheel`, `manual`) with the ScreenScraper media names to try for it. `video` is
+the only one with more than one — `video-normalized` when ScreenScraper has re-encoded it,
+the raw upload otherwise. `description` is not in the list: it comes from the synopsis,
+which is text on the game rather than a file to fetch.
+
+Two functions read it, and everything else reads them:
+- `Medias::from_jeu()` — picks the assets out of a `JeuInfo`, first name that answers wins
+- `Medias::iter()` — the one way to walk the eight fields, used by `build_pkgbuild`,
+  `DownloadMedias`, `check_media_changes()` and `SaveState`
+
+The order is `MEDIA_ICONS`', because the grid's media dots are an array indexed by
+position: a list out of step lights the bezel column for a screenshot. Two tests hold them
+together. This used to be five lists across four files in **two** different orders, with
+the `video` fallback written twice.
+
+`media_filename(kind, format)` gives the name an asset is filed under, in the PKGBUILD
+`sources` and on disk alike — `video.mp4`, `manual.pdf`, `{kind}.{media_ext(format)}` for
+the rest. One function, because if the two disagreed `makepkg` would look for a file
+nobody wrote.
 
 System-specific templates in `assets/templates/pkgbuild/`:
 - **id 20** (Sega CD): handles `.cue` + `.bin` split, installs to `segacd/data/$_romname/`

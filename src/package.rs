@@ -8,6 +8,41 @@ use super::emulationstation::Game;
 use crate::hash::sha1_file;
 use screenscraper::jeuinfo::{JeuInfo, Media};
 
+/// The eight downloadable assets, in the order the grid shows them, each with the
+/// ScreenScraper media names to try for it.
+///
+/// `ui::MEDIA_ICONS` fixes that order for the columns, and this list follows it — a
+/// test holds the two together, because the dots are indexed by position and a list out
+/// of step would attribute an asset to the wrong column.
+///
+/// `description` is not here: it comes from the synopsis, which is text on the game
+/// rather than a file to fetch. `video` is the only asset with a fallback —
+/// ScreenScraper serves a re-encoded copy when it has one, the raw upload otherwise.
+///
+/// This list used to be written out five times across four files, in two different
+/// orders, and the `video` fallback twice. Adding an asset meant five coherent edits,
+/// and one missed shifted the dots or dropped the file.
+pub(crate) const MEDIA_KINDS: [(&str, &[&str]); 8] = [
+  ("video", &["video-normalized", "video"]),
+  ("image", &["sstitle"]),
+  ("thumbnail", &["box-2D"]),
+  ("screenshot", &["ss"]),
+  ("bezel", &["bezel-16-9"]),
+  ("marquee", &["marquee"]),
+  ("wheel", &["wheel"]),
+  ("manual", &["manuel"]),
+];
+
+/// The first of these ScreenScraper media names the game actually has, if any.
+///
+/// The names come from `MEDIA_KINDS`, so the one asset with a fallback — a video, served
+/// re-encoded when ScreenScraper has done so and raw otherwise — is handled the same way
+/// wherever the question is asked: when building a package, and when telling the modal
+/// which assets a candidate would bring.
+pub(crate) fn pick_media(jeu: &JeuInfo, ss_names: &[&str]) -> Option<Media> {
+  ss_names.iter().find_map(|name| jeu.media(name))
+}
+
 #[derive(Default, Clone)]
 pub struct Medias {
   pub image: Option<Media>,
@@ -18,6 +53,44 @@ pub struct Medias {
   pub screenshot: Option<Media>,
   pub wheel: Option<Media>,
   pub manual: Option<Media>,
+}
+
+impl Medias {
+  /// Every asset paired with the name it is known by outside ScreenScraper, in the
+  /// canonical order. The one way to walk these fields.
+  pub(crate) fn iter(&self) -> impl Iterator<Item = (&'static str, Option<&Media>)> + '_ {
+    [
+      ("video", self.video.as_ref()),
+      ("image", self.image.as_ref()),
+      ("thumbnail", self.thumbnail.as_ref()),
+      ("screenshot", self.screenshot.as_ref()),
+      ("bezel", self.bezel.as_ref()),
+      ("marquee", self.marquee.as_ref()),
+      ("wheel", self.wheel.as_ref()),
+      ("manual", self.manual.as_ref()),
+    ]
+    .into_iter()
+  }
+
+  /// Picks the assets out of a ScreenScraper result.
+  fn from_jeu(jeu: &JeuInfo) -> Self {
+    let pick = |kind: &str| -> Option<Media> {
+      MEDIA_KINDS
+        .iter()
+        .find(|(k, _)| *k == kind)
+        .and_then(|(_, names)| pick_media(jeu, names))
+    };
+    Medias {
+      video: pick("video"),
+      image: pick("image"),
+      thumbnail: pick("thumbnail"),
+      screenshot: pick("screenshot"),
+      bezel: pick("bezel"),
+      marquee: pick("marquee"),
+      wheel: pick("wheel"),
+      manual: pick("manual"),
+    }
+  }
 }
 
 pub struct Package {
@@ -56,28 +129,68 @@ type Result<T, E = Error> = std::result::Result<T, E>;
 ///
 /// Built once and used twice: for the PKGBUILD `sources`, and for rompom's own download.
 ///
-/// The file name is `{type}({region}).{format}` — both parts come straight off the
-/// `Media`, so there is nothing to parse out of the credentialed URL and nothing to
-/// guess per asset kind. The region goes in **parentheses**; gluing it to the type, as
-/// four of the eight assets used to, gives a 404:
+/// The file name is the `media=` parameter of that same API call, plus the format as the
+/// extension. **`Media::region` does not name the file**: it says which region the asset
+/// serves. ScreenScraper stores one file per primary region and lists it again under
+/// every secondary region it covers — the "région principale et région(s) secondaire(s)"
+/// a game's page shows — so the two part company as soon as a secondary region is the one
+/// picked. Castlevania III (Europe), game 1278: the `manuel` entry for `eu` carries
+/// `media=manuel(fr)`, and both entries report the sha1 of the file actually served.
+/// Built from the region, the URL was a 404 with a correct checksum beside it:
 ///
 /// ```text
-/// …/medias/3/65388/sstitlejp.png    404
-/// …/medias/3/65388/sstitle(jp).png  200
+/// …/medias/3/1278/manuel(eu).pdf   404      …/3/1278/manuel(fr).pdf   200
+/// …/medias/3/1278/box-3D(fr).png   404      …/3/1278/box-3D(eu).png   200
 /// ```
 ///
-/// An asset with no region — a video, a marquee — has no parentheses at all.
+/// Reading one parameter out of the credentialed URL is not reusing it: `media=` is the
+/// only thing taken, and it is whitelisted on the way out. The whitelist keeps
+/// parentheses, which are part of every regional file name, and drops everything that
+/// could walk out of the media directory.
+///
+/// Falls back to `{type}({region})` when the parameter is missing — what rompom did
+/// before, and right whenever the asset serves the region it was stored for.
 pub(crate) fn media_url(system_id: u32, jeu_id: &str, m: &Media) -> String {
-  let slug = sanitize_token(&m.name);
   let ext = media_ext(&m.format);
-  let file = match m.region.as_deref().map(sanitize_token) {
-    Some(region) if !region.is_empty() => format!("{}({}).{}", slug, region, ext),
-    _ => format!("{}.{}", slug, ext),
-  };
+  let slug = media_param(&m.url)
+    .map(sanitize_media_name)
+    .unwrap_or_else(|| {
+      let name = sanitize_token(&m.name);
+      match m.region.as_deref().map(sanitize_token) {
+        Some(region) if !region.is_empty() => format!("{}({})", name, region),
+        _ => name,
+      }
+    });
   format!(
-    "https://screenscraper.fr/medias/{}/{}/{}",
-    system_id, jeu_id, file
+    "https://screenscraper.fr/medias/{}/{}/{}.{}",
+    system_id, jeu_id, slug, ext
   )
+}
+
+/// The `media=` parameter of a `mediaJeu.php` URL, and nothing else from it.
+///
+/// The value arrives literally — `media=manuel(fr)`, parentheses and all, not
+/// percent-encoded — so there is no decoding step to get wrong. Matching the key exactly
+/// matters: `mediaformat=` sits right next to it in every one of these URLs.
+fn media_param(url: &str) -> Option<&str> {
+  url
+    .split_once('?')?
+    .1
+    .split('&')
+    .find_map(|pair| pair.strip_prefix("media="))
+    .filter(|value| !value.is_empty())
+}
+
+/// Keeps only what may appear in a ScreenScraper media file name.
+///
+/// `sanitize_token` is too strict here — it eats the parentheses that every regional
+/// asset is named with — and a bare whitelist is still what stands between this value and
+/// a `Path::join`: the name is composed by ScreenScraper, and it lands in a filename.
+fn sanitize_media_name(value: &str) -> String {
+  value
+    .chars()
+    .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '(' | ')'))
+    .collect()
 }
 
 fn render_template(src: &str, ctx: &minijinja::Value) -> String {
@@ -163,6 +276,23 @@ pub(crate) fn media_ext(format: &str) -> String {
     "bin".to_string()
   } else {
     clean
+  }
+}
+
+/// The name a media asset is filed under, both in the PKGBUILD `sources` and on disk.
+///
+/// The two must agree or `makepkg` looks for a file nobody wrote, which is why there is
+/// one function rather than a rule remembered in two places.
+///
+/// The result is joined onto the ROM's output directory, and `Path::join` happily walks
+/// out of it: a ScreenScraper format of `png/../../x` would have written outside the
+/// tree. `media_ext` whitelists the extension, so what comes back is always a single
+/// path component.
+pub(crate) fn media_filename(kind: &str, format: &str) -> String {
+  match kind {
+    "video" => "video.mp4".to_string(),
+    "manual" => "manual.pdf".to_string(),
+    _ => format!("{}.{}", kind, media_ext(format)),
   }
 }
 
@@ -264,7 +394,7 @@ impl Package {
   }
 
   pub fn new(
-    mut jeu: Option<JeuInfo>,
+    jeu: Option<JeuInfo>,
     file: &str,
     disc1_filename: &str,
     url: &str,
@@ -272,16 +402,7 @@ impl Package {
     extra_discs: Vec<(String, String, String)>,
   ) -> Result<Package> {
     let medias = match jeu {
-      Some(ref mut x) => Medias {
-        image: x.media("sstitle"),
-        thumbnail: x.media("box-2D"),
-        bezel: x.media("bezel-16-9"),
-        video: x.media("video-normalized").or_else(|| x.media("video")),
-        marquee: x.media("marquee"),
-        screenshot: x.media("ss"),
-        wheel: x.media("wheel"),
-        manual: x.media("manuel"),
-      },
+      Some(ref x) => Medias::from_jeu(x),
       None => Medias::default(),
     };
     Ok(Package {
@@ -374,69 +495,19 @@ impl Package {
       sha1_file(&directory.join("description.xml")).unwrap_or_else(|_| String::new());
     sha1sums.push(shell_quote(&sanitize_sha1(&description_sha1)));
 
-    // Media sources. `format` and `region` come straight from ScreenScraper and end up
-    // in filenames, so they go through the token whitelist before anything else.
-    if let Some(ref x) = self.medias.video {
-      sources.push(shell_quote(&format!(
-        "video.mp4::{}",
-        media_url(system.id, &jeu_id, x)
-      )));
-      sha1sums.push(shell_quote(&sanitize_sha1(&x.sha1)));
-    }
-    if let Some(ref x) = self.medias.bezel {
-      sources.push(shell_quote(&format!(
-        "bezel.{}::{}",
-        media_ext(&x.format),
-        media_url(system.id, &jeu_id, x)
-      )));
-      sha1sums.push(shell_quote(&sanitize_sha1(&x.sha1)));
-    }
-    if let Some(ref x) = self.medias.image {
-      sources.push(shell_quote(&format!(
-        "image.{}::{}",
-        media_ext(&x.format),
-        media_url(system.id, &jeu_id, x)
-      )));
-      sha1sums.push(shell_quote(&sanitize_sha1(&x.sha1)));
-    }
-    if let Some(ref x) = self.medias.thumbnail {
-      sources.push(shell_quote(&format!(
-        "thumbnail.{}::{}",
-        media_ext(&x.format),
-        media_url(system.id, &jeu_id, x)
-      )));
-      sha1sums.push(shell_quote(&sanitize_sha1(&x.sha1)));
-    }
-    if let Some(ref x) = self.medias.marquee {
-      sources.push(shell_quote(&format!(
-        "marquee.{}::{}",
-        media_ext(&x.format),
-        media_url(system.id, &jeu_id, x)
-      )));
-      sha1sums.push(shell_quote(&sanitize_sha1(&x.sha1)));
-    }
-    if let Some(ref x) = self.medias.screenshot {
-      sources.push(shell_quote(&format!(
-        "screenshot.{}::{}",
-        media_ext(&x.format),
-        media_url(system.id, &jeu_id, x)
-      )));
-      sha1sums.push(shell_quote(&sanitize_sha1(&x.sha1)));
-    }
-    if let Some(ref x) = self.medias.wheel {
-      sources.push(shell_quote(&format!(
-        "wheel.{}::{}",
-        media_ext(&x.format),
-        media_url(system.id, &jeu_id, x)
-      )));
-      sha1sums.push(shell_quote(&sanitize_sha1(&x.sha1)));
-    }
-    if let Some(ref x) = self.medias.manual {
-      sources.push(shell_quote(&format!(
-        "manual.pdf::{}",
-        media_url(system.id, &jeu_id, x)
-      )));
-      sha1sums.push(shell_quote(&sanitize_sha1(&x.sha1)));
+    // Media sources, in canonical order. Both arrays are appended in the same breath,
+    // which is what keeps `sha1sums[n]` the checksum of `sources[n]` — the eight blocks
+    // this replaced each had to remember to do it. `format` and `region` come straight
+    // from ScreenScraper and end up in filenames, so `media_filename` whitelists them.
+    for (kind, media) in self.medias.iter() {
+      if let Some(m) = media {
+        sources.push(shell_quote(&format!(
+          "{}::{}",
+          media_filename(kind, &m.format),
+          media_url(system.id, &jeu_id, m)
+        )));
+        sha1sums.push(shell_quote(&sanitize_sha1(&m.sha1)));
+      }
     }
 
     // Extension of the disc files (used by multi-disc templates in a `ls *.ext` glob,
@@ -515,27 +586,24 @@ impl Package {
     let romname = self.normalize_name();
     let mut game = Game::from_jeuinfo(&self.jeu, &self.rom, lang);
 
-    if let Some(x) = &self.medias.thumbnail {
-      game.image = Some(format!("./data/{}/thumbnail.{}", romname, x.format));
-    }
-    if let Some(x) = &self.medias.image {
-      game.thumbnail = Some(format!("./data/{}/image.{}", romname, x.format));
-    }
-    if self.medias.video.is_some() {
-      game.video = Some(format!("./data/{}/video.mp4", romname));
-    }
-    if let Some(x) = &self.medias.marquee {
-      game.marquee = Some(format!("./data/{}/marquee.{}", romname, x.format));
-    }
-    if let Some(x) = &self.medias.screenshot {
-      game.screenshot = Some(format!("./data/{}/screenshot.{}", romname, x.format));
-    }
-    if let Some(x) = &self.medias.wheel {
-      game.wheel = Some(format!("./data/{}/wheel.{}", romname, x.format));
-    }
-    if self.medias.manual.is_some() {
-      game.manual = Some(format!("./data/{}/manual.pdf", romname));
-    }
+    // Every path names the asset through `media_filename`, the same function that names
+    // the file on disk and the PKGBUILD source entry. Interpolating ScreenScraper's raw
+    // `format` here meant description.xml could point at a file nobody wrote.
+    let asset = |kind: &str, media: &Option<Media>| {
+      media
+        .as_ref()
+        .map(|m| format!("./data/{}/{}", romname, media_filename(kind, &m.format)))
+    };
+
+    // EmulationStation calls the box art "image" and the title screen "thumbnail", so
+    // these two are deliberately crossed over.
+    game.image = asset("thumbnail", &self.medias.thumbnail);
+    game.thumbnail = asset("image", &self.medias.image);
+    game.video = asset("video", &self.medias.video);
+    game.marquee = asset("marquee", &self.medias.marquee);
+    game.screenshot = asset("screenshot", &self.medias.screenshot);
+    game.wheel = asset("wheel", &self.medias.wheel);
+    game.manual = asset("manual", &self.medias.manual);
 
     apply_game_path(system, &mut game, &romname, self.is_multi_disc());
     (game, romname)
@@ -574,16 +642,23 @@ mod tests {
 
   // ── media_url ────────────────────────────────────────────────────────────
 
-  /// A `Media` as ScreenScraper returns it. `url` is the `mediaJeu.php` call, with the
-  /// credentials this function exists to keep out of everything downstream — and which
-  /// it no longer even reads.
+  /// A `Media` as ScreenScraper returns it, in the ordinary case: the asset serves the
+  /// region it was stored for, so `media=` and `region` agree. `url` is the
+  /// `mediaJeu.php` call, with the credentials this function exists to keep out of
+  /// everything downstream — only the `media=` parameter is ever taken from it.
   fn api_media(name: &str, format: &str, region: Option<&str>) -> Media {
+    let file = match region {
+      Some(region) if !region.is_empty() => format!("{}({})", name, region),
+      _ => name.to_string(),
+    };
     Media {
       name: name.to_string(),
       parent: "jeu".to_string(),
-      url: "https://api.screenscraper.fr/api2/mediaJeu.php?devid=x&devpassword=y&ssid=z\
-            &sspassword=w&systemeid=3&jeuid=65388&media=whatever"
-        .to_string(),
+      url: format!(
+        "https://api.screenscraper.fr/api2/mediaJeu.php?devid=x&devpassword=y&ssid=z\
+         &sspassword=w&systemeid=3&jeuid=65388&media={}&mediaformat={}",
+        file, format
+      ),
       region: region.map(str::to_string),
       crc: String::new(),
       md5: String::new(),
@@ -667,8 +742,8 @@ mod tests {
     );
   }
 
-  /// The URL goes into a published PKGBUILD, so nothing of `Media::url` may survive
-  /// into it — and nothing does: it is not read at all any more.
+  /// The URL goes into a published PKGBUILD, so nothing of `Media::url` may survive into
+  /// it beyond the one parameter naming the file.
   #[test]
   fn the_media_url_never_carries_the_credentials() {
     let url = media_url(3, "65388", &api_media("sstitle", "png", Some("jp")));
@@ -677,7 +752,183 @@ mod tests {
     }
   }
 
+  /// A `Media` as the API really returns it: `region` says which region the asset serves,
+  /// and the `media=` parameter names the file that serves it. The two differ whenever
+  /// one file covers several regions.
+  fn api_media_serving(name: &str, format: &str, region: &str, file: &str) -> Media {
+    Media {
+      url: format!(
+        "https://api.screenscraper.fr/api2/mediaJeu.php?devid=x&devpassword=y&ssid=z\
+         &sspassword=w&systemeid=3&jeuid=1278&media={}&mediaformat={}",
+        file, format
+      ),
+      region: Some(region.to_string()),
+      ..api_media(name, format, Some(region))
+    }
+  }
+
+  /// ScreenScraper stores one file per *primary* region and lists it again under every
+  /// secondary region it serves — the "région principale et région(s) secondaire(s)" of
+  /// a game's page. `region` therefore names the region asked for, not the file.
+  ///
+  /// Castlevania III (Europe), system 3, game 1278: the `manuel` entry for `eu` carries
+  /// `media=manuel(fr)`, and both entries report the same sha1 as the file served. Built
+  /// from `region`, the URL was `manuel(eu).pdf`, which does not exist — checked against
+  /// the server, along with a second case where the direction is reversed:
+  ///
+  /// ```text
+  /// …/medias/3/1278/manuel(eu).pdf   404      …/3/1278/manuel(fr).pdf   200
+  /// …/medias/3/1278/box-3D(fr).png   404      …/3/1278/box-3D(eu).png   200
+  /// ```
+  #[test]
+  fn the_file_named_by_the_api_wins_over_the_region_asked_for() {
+    let base = "https://screenscraper.fr/medias/3/1278";
+
+    assert_eq!(
+      media_url(
+        3,
+        "1278",
+        &api_media_serving("manuel", "pdf", "eu", "manuel(fr)")
+      ),
+      format!("{}/manuel(fr).pdf", base)
+    );
+    assert_eq!(
+      media_url(
+        3,
+        "1278",
+        &api_media_serving("box-3D", "png", "fr", "box-3D(eu)")
+      ),
+      format!("{}/box-3D(eu).png", base)
+    );
+    // The ordinary case, where the two agree, is unchanged.
+    assert_eq!(
+      media_url(
+        3,
+        "1278",
+        &api_media_serving("manuel", "pdf", "us", "manuel(us)")
+      ),
+      format!("{}/manuel(us).pdf", base)
+    );
+  }
+
+  /// The parameter is read out of a URL ScreenScraper composed, so it is sanitised like
+  /// anything else that reaches a filename — while keeping the parentheses, which are
+  /// part of every regional file name and which `sanitize_token` would eat.
+  #[test]
+  fn a_hostile_file_name_cannot_leave_the_media_directory() {
+    let hostile = media_url(
+      3,
+      "1278",
+      &api_media_serving("manuel", "pdf", "eu", "../../etc/passwd"),
+    );
+
+    assert_eq!(
+      hostile,
+      "https://screenscraper.fr/medias/3/1278/etcpasswd.pdf"
+    );
+  }
+
+  /// Nothing says the parameter is always there. Falling back to the region keeps the
+  /// behaviour rompom had before, which is right far more often than not.
+  #[test]
+  fn a_url_without_the_parameter_falls_back_to_the_region() {
+    let mut media = api_media("sstitle", "png", Some("jp"));
+    media.url = "https://api.screenscraper.fr/api2/mediaJeu.php?devid=x&jeuid=1278".to_string();
+
+    assert_eq!(
+      media_url(3, "1278", &media),
+      "https://screenscraper.fr/medias/3/1278/sstitle(jp).png"
+    );
+  }
+
   use super::*;
+
+  // ── the canonical order ──────────────────────────────────────────────────
+
+  /// `MEDIA_KINDS` and `Medias::iter()` are two lists of the same eight assets, and the
+  /// second one is what every consumer walks. They have to agree, name for name and
+  /// position for position, or an asset gets fetched under one name and filed under
+  /// another.
+  #[test]
+  fn the_table_and_the_struct_walk_the_same_assets_in_the_same_order() {
+    let table: Vec<&str> = MEDIA_KINDS.iter().map(|(kind, _)| *kind).collect();
+    let walked: Vec<&str> = Medias::default().iter().map(|(kind, _)| kind).collect();
+
+    assert_eq!(table, walked);
+  }
+
+  /// And both follow the columns on screen. The media dots are an array indexed by
+  /// position, so a list out of step with `MEDIA_ICONS` would light the bezel column
+  /// for a screenshot — which is exactly what the two competing orders used to risk.
+  #[test]
+  fn the_canonical_order_is_the_one_the_grid_shows() {
+    let columns: Vec<&str> = crate::ui::media_icons()
+      .iter()
+      .map(|(kind, _)| *kind)
+      .skip(1) // description is text on the game, not a file to fetch
+      .collect();
+    let table: Vec<&str> = MEDIA_KINDS.iter().map(|(kind, _)| *kind).collect();
+
+    assert_eq!(table, columns);
+  }
+
+  /// ScreenScraper serves a re-encoded video when it has one and the raw upload
+  /// otherwise, so `video` is the single asset with more than one name to try. The
+  /// fallback used to be written out twice, here and in the modal projection.
+  #[test]
+  fn only_the_video_has_a_fallback_name() {
+    for (kind, names) in MEDIA_KINDS {
+      let expected = if kind == "video" { 2 } else { 1 };
+      assert_eq!(names.len(), expected, "{}", kind);
+    }
+  }
+
+  // ── media_filename ───────────────────────────────────────────────────────
+
+  /// The destination is built as `directory.join(media_filename(...))`, and Path::join
+  /// resolves `..` against the directory rather than rejecting it. Before the fix,
+  /// a format of `png/../../x` produced `image.png/../../x`, which lands two levels
+  /// above the ROM's output directory.
+  #[test]
+  fn media_filename_stays_inside_the_output_directory() {
+    let directory = std::path::PathBuf::from("/out/roms/sonic");
+
+    for hostile in [
+      "png/../../x",
+      "../../etc/passwd",
+      "png/../..",
+      "/etc/passwd",
+      "png\\..\\..",
+    ] {
+      let name = media_filename("image", hostile);
+      assert!(
+        !name.contains('/') && !name.contains('\\') && !name.contains(".."),
+        "format {hostile:?} produced {name:?}"
+      );
+
+      // One path component, and the join cannot leave the directory.
+      let dest = directory.join(&name);
+      assert_eq!(dest.parent(), Some(directory.as_path()));
+      assert!(dest.starts_with(&directory));
+    }
+  }
+
+  /// The fixed kinds keep their own extension, whatever ScreenScraper claims.
+  #[test]
+  fn media_filename_keeps_the_canonical_names() {
+    assert_eq!(media_filename("video", "../../x"), "video.mp4");
+    assert_eq!(media_filename("manual", "../../x"), "manual.pdf");
+    assert_eq!(media_filename("image", "png"), "image.png");
+    assert_eq!(media_filename("thumbnail", "jpg"), "thumbnail.jpg");
+  }
+
+  /// A format that whitelists down to nothing must still yield a usable name, and the
+  /// same one the PKGBUILD source entry uses.
+  #[test]
+  fn media_filename_falls_back_when_the_format_is_unusable() {
+    assert_eq!(media_filename("image", "../.."), "image.bin");
+    assert_eq!(media_filename("image", ""), "image.bin");
+  }
 
   /// A game exercising every branch of the serialization: populated and skipped
   /// `Option` fields, and characters XML must escape (`&`, `<`, `>`, `"`).
@@ -868,6 +1119,172 @@ mod tests {
     assert!(!rendered.contains("pkgdesc=\""));
     assert!(!rendered.contains("_romname=\""));
     assert!(!rendered.contains("''''"));
+  }
+
+  /// A fully scraped game: every one of the eight assets present, each with a sha1 of
+  /// its own so the snapshot pins `sha1sums` against the `sources` it lines up with.
+  ///
+  /// `rom` carries the scratch path because it is what the output directory is derived
+  /// from, while `disc1_filename` stays a bare basename — in a real run both are the
+  /// same relative name, and putting a temp path in the snapshot would make it depend on
+  /// the machine.
+  fn fully_scraped_package(directory: &Path) -> Package {
+    let asset = |name: &str, format: &str, region: Option<&str>, digit: char| Media {
+      sha1: std::iter::repeat_n(digit, 40).collect(),
+      ..api_media(name, format, region)
+    };
+    Package {
+      rom: directory
+        .join("Sonic the Hedgehog.zip")
+        .display()
+        .to_string(),
+      disc1_filename: "Sonic the Hedgehog.zip".to_string(),
+      rom_url: "https://archive.invalid/megadrive/Sonic the Hedgehog.zip".to_string(),
+      hash: SHA.to_string(),
+      jeu: Some(
+        serde_json::from_str(
+          r#"{"id":"65388","noms":[{"region":"wor","text":"Sonic"}],
+              "topstaff":"0","rotation":"0","medias":[]}"#,
+        )
+        .expect("fixture should deserialise as a JeuInfo"),
+      ),
+      medias: Medias {
+        video: Some(asset("video-normalized", "mp4", None, '1')),
+        image: Some(asset("sstitle", "png", Some("wor"), '2')),
+        thumbnail: Some(asset("box-2D", "png", Some("wor"), '3')),
+        screenshot: Some(asset("ss", "png", Some("wor"), '4')),
+        bezel: Some(asset("bezel-16-9", "png", Some("wor"), '5')),
+        marquee: Some(asset("marquee", "png", None, '6')),
+        wheel: Some(asset("wheel", "png", Some("wor"), '7')),
+        manual: Some(asset("manuel", "pdf", Some("eu"), '8')),
+      },
+      extra_discs: Vec::new(),
+    }
+  }
+
+  /// Pins the exact bytes rompom writes to a PKGBUILD.
+  ///
+  /// `sources` and `sha1sums` are two parallel arrays that `makepkg` matches by
+  /// position: entry *n* of one is the checksum of entry *n* of the other, and nothing
+  /// in the file says so. Every asset is emitted by its own block today, so the pairing
+  /// holds only for as long as each block remembers to push to both. This is what makes
+  /// that pairing something a test can see.
+  #[test]
+  fn pkgbuild_snapshot() {
+    let scratch = scratch_dir("pkgbuild-snapshot");
+    let mut package = fully_scraped_package(scratch.path());
+    let directory = scratch.path().join("Sonic the Hedgehog");
+    std::fs::create_dir_all(&directory).unwrap();
+    // build_pkgbuild reads this back to checksum it, so its content decides one line of
+    // the snapshot. `sha1sum` of the single byte "x".
+    std::fs::write(directory.join("description.xml"), "x").unwrap();
+
+    package
+      .build_pkgbuild(&system(1), &sample_game(), 3)
+      .unwrap();
+
+    let expected = [
+      "pkgname=('test-rom-sonicthehedgehog')",
+      "_romname='sonicthehedgehog'",
+      "pkgver=3",
+      "pkgrel=1",
+      "pkgdesc='Sonic & Knuckles <Special>'",
+      "arch=('any')",
+      "url='https://screenscraper.fr/gameinfos.php?gameid=65388'",
+      "license=('All rights reserved')",
+      "source=(",
+      "  'Sonic the Hedgehog.zip::https://archive.invalid/megadrive/Sonic the Hedgehog.zip'",
+      "  'description.xml'",
+      "  'video.mp4::https://screenscraper.fr/medias/1/65388/video-normalized.mp4'",
+      "  'image.png::https://screenscraper.fr/medias/1/65388/sstitle(wor).png'",
+      "  'thumbnail.png::https://screenscraper.fr/medias/1/65388/box-2D(wor).png'",
+      "  'screenshot.png::https://screenscraper.fr/medias/1/65388/ss(wor).png'",
+      "  'bezel.png::https://screenscraper.fr/medias/1/65388/bezel-16-9(wor).png'",
+      "  'marquee.png::https://screenscraper.fr/medias/1/65388/marquee.png'",
+      "  'wheel.png::https://screenscraper.fr/medias/1/65388/wheel(wor).png'",
+      "  'manual.pdf::https://screenscraper.fr/medias/1/65388/manuel(eu).pdf'",
+      ")",
+      // The assets were given ascending sha1s in canonical order, so this array reading
+      // 1 to 8 in order is the pairing with `sources` holding.
+      "sha1sums=(",
+      &format!("  '{}'", SHA),
+      "  '11f6ad8ec52a2984abaafd7c3b516503785c2072'",
+      "  '1111111111111111111111111111111111111111'",
+      "  '2222222222222222222222222222222222222222'",
+      "  '3333333333333333333333333333333333333333'",
+      "  '4444444444444444444444444444444444444444'",
+      "  '5555555555555555555555555555555555555555'",
+      "  '6666666666666666666666666666666666666666'",
+      "  '7777777777777777777777777777777777777777'",
+      "  '8888888888888888888888888888888888888888'",
+      ")",
+      "",
+      "build()",
+      "{",
+      "  true",
+      "}",
+      "",
+      "",
+    ]
+    .join("\n");
+
+    // Everything up to `package()`. The install section interpolates the ROM's own path,
+    // which here is a scratch directory named after the process — a real run passes a
+    // bare basename. What this snapshot is for stops at `sha1sums`.
+    let written = std::fs::read_to_string(directory.join("PKGBUILD")).unwrap();
+    let (head, _install) = written
+      .split_once("package()")
+      .expect("a PKGBUILD always has a package() section");
+    assert_eq!(head, expected);
+  }
+
+  /// description.xml must name the files that are actually written next to it.
+  ///
+  /// `DownloadMedias` and the PKGBUILD `sources` both name an asset through
+  /// `media_filename()`, which whitelists the extension — that is what P0.2 introduced,
+  /// because ScreenScraper's `format` is not a value to be trusted with a path.
+  /// `make_game` interpolated the raw field instead, so the two disagreed on any format
+  /// the whitelist touches. On `png/../../x` the asset is written as `thumbnail.pngx`
+  /// while EmulationStation is pointed at `thumbnail.png/../../x` — a file that does not
+  /// exist, by a path that leaves the game's own directory.
+  #[test]
+  fn description_xml_names_the_files_that_are_written() {
+    let scratch = scratch_dir("xml-media-paths");
+    let mut package = fully_scraped_package(scratch.path());
+    let hostile = "png/../../x";
+    for media in [
+      &mut package.medias.thumbnail,
+      &mut package.medias.image,
+      &mut package.medias.screenshot,
+      &mut package.medias.marquee,
+      &mut package.medias.wheel,
+    ]
+    .into_iter()
+    .flatten()
+    {
+      media.format = hostile.to_string();
+    }
+
+    let (game, romname) = package.make_game(&system(1), &["fr"]);
+
+    let path = |kind: &str| {
+      Some(format!(
+        "./data/{}/{}",
+        romname,
+        media_filename(kind, hostile)
+      ))
+    };
+    // ES calls the box art "image" and the title screen "thumbnail", which is why these
+    // two read crossed over.
+    assert_eq!(game.image, path("thumbnail"));
+    assert_eq!(game.thumbnail, path("image"));
+    assert_eq!(game.screenshot, path("screenshot"));
+    assert_eq!(game.marquee, path("marquee"));
+    assert_eq!(game.wheel, path("wheel"));
+    // Neither of these two reads the format at all — the test says so out loud, since
+    // that is the property `media_filename` guarantees for them.
+    assert_eq!(game.video, path("video"));
+    assert_eq!(game.manual, path("manual"));
   }
 
   /// `skip_serializing_if` must drop absent media rather than emit empty tags:

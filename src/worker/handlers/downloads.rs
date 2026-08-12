@@ -10,12 +10,12 @@ use screenscraper::jeuinfo::Media;
 
 use crate::{
   hash::sha1_file,
-  package::media_url,
+  package::{media_filename, media_url},
   rom::{Rom, RomSource, StepError, StepStatus},
 };
 
 use super::super::{
-  helpers::{media_failure, media_filename},
+  helpers::{is_not_found, media_failure},
   WorkerContext,
 };
 
@@ -47,7 +47,90 @@ fn written(path: &Path) -> u64 {
   fs::metadata(path).map(|m| m.len()).unwrap_or(0)
 }
 
+// ── Putting the discs in place ────────────────────────────────────────────
+
+/// One disc to put in the ROM's output directory, and what that means for this source.
+///
+/// The two handlers differ in exactly these two respects: a folder source compares the
+/// file's sha1 with the one `ComputeHashes` produced and copies it, an Internet Archive
+/// source lets the library verify and transfers it. Everything around them — the skip
+/// when nothing has changed, disc 1 driving the row while the extra discs go quietly,
+/// the check before re-fetching — was written out twice.
+struct Disc<'a> {
+  /// File name inside the output directory.
+  name: String,
+  /// Whether what is already there is the file we want.
+  is_valid: Box<dyn Fn(&Path) -> bool + 'a>,
+  /// Put it there, and make sure of what landed.
+  fetch: Fetch<'a>,
+}
+
+/// Writes one disc to `dest`, and answers for what ended up there.
+type Fetch<'a> = Box<dyn Fn(&Path) -> Result<(), StepError> + 'a>;
+
+/// Puts each disc in place, fetching only what is missing or wrong.
+///
+/// Only disc 1 touches the bar: the grid has one `rom` cell per ROM, not one per disc.
+/// `placed` is called for it alone, and only when something was actually written — the
+/// two handlers count a transfer differently, one by the bytes that arrived and the
+/// other by the size of the file `fs::copy` left behind.
+fn place_discs(
+  rom_arc: &Arc<Mutex<Rom>>,
+  directory: &Path,
+  discs: &[Disc<'_>],
+  placed: impl Fn(&Path),
+) -> Result<(), StepError> {
+  for (index, disc) in discs.iter().enumerate() {
+    let dest = directory.join(&disc.name);
+    let present = dest.exists();
+    let leads = index == 0;
+    // A cheap second handle, so the row can be updated without holding the `Rom`.
+    let bar = || rom_arc.lock().unwrap().bar.handle();
+
+    if leads {
+      if present {
+        bar().rom_checking();
+      } else {
+        bar().rom_downloading();
+      }
+    }
+
+    if present && (disc.is_valid)(&dest) {
+      if leads {
+        bar().rom_skipped();
+      }
+      continue;
+    }
+
+    if leads && present {
+      bar().rom_redownloading();
+    }
+    (disc.fetch)(&dest)?;
+    if leads {
+      placed(&dest);
+    }
+  }
+  Ok(())
+}
+
 // ── CopyRom ───────────────────────────────────────────────────────────────
+
+/// A disc that is already on this machine, checked against the sha1 `ComputeHashes`
+/// produced for it.
+///
+/// An unreadable destination is not a reason to fail: it reads as invalid, and gets
+/// rewritten.
+fn local_disc<'a>(local: &'a Path, name: String, sha1: &'a str) -> Disc<'a> {
+  Disc {
+    name,
+    is_valid: Box::new(move |dest: &Path| sha1_file(dest).is_ok_and(|actual| actual == sha1)),
+    fetch: Box::new(move |dest: &Path| {
+      fs::copy(local, dest)
+        .map(|_| ())
+        .map_err(StepError::transient)
+    }),
+  }
+}
 
 /// Copy a local folder-source ROM to its output directory.
 ///
@@ -96,43 +179,21 @@ pub(crate) fn handle_copy_rom(
     return Ok(StepStatus::Done);
   }
 
-  // Helper: copy one disc file unless it already matches the expected sha1.
-  let copy_disc = |local: &Path, dest: &Path, sha1_exp: &str| -> Result<bool, StepError> {
-    if dest.exists() {
-      // An unreadable destination is not a reason to fail: fall through and rewrite it.
-      if sha1_file(dest).is_ok_and(|actual| actual == sha1_exp) {
-        return Ok(false); // already good
-      }
-    }
-    fs::copy(local, dest).map_err(StepError::transient)?;
-    Ok(true) // copied
-  };
-
-  // ── Disc 1 ────────────────────────────────────────────────────────────
-  // Use the actual disc-1 filename (may differ from virtual filename for multi-disc).
+  // Disc 1 keeps its own basename, which for a multi-disc game is not the virtual one.
   let disc1_local_name = local_path
     .file_name()
     .map(|n| n.to_string_lossy().into_owned())
     .unwrap_or_else(|| filename.clone());
-  let dest1 = directory.join(&disc1_local_name);
 
-  if dest1.exists() {
-    rom_arc.lock().unwrap().bar.rom_checking();
-  } else {
-    rom_arc.lock().unwrap().bar.rom_downloading();
-  }
-  let updated = copy_disc(&local_path, &dest1, &sha1_expected)?;
-  if updated {
-    rom_arc.lock().unwrap().bar.rom_copied(written(&dest1));
-  } else {
-    rom_arc.lock().unwrap().bar.rom_skipped();
-  }
-
-  // ── Extra discs (disc 2, 3, …) ────────────────────────────────────────
+  let mut discs = vec![local_disc(&local_path, disc1_local_name, &sha1_expected)];
   for (extra_local, extra_filename, extra_sha1) in &extra_discs {
-    let dest = directory.join(extra_filename);
-    copy_disc(extra_local, &dest, extra_sha1)?;
+    discs.push(local_disc(extra_local, extra_filename.clone(), extra_sha1));
   }
+
+  place_discs(rom_arc, &directory, &discs, |dest| {
+    // `fs::copy` never calls back, so the file it left behind is the only measure.
+    rom_arc.lock().unwrap().bar.rom_copied(written(dest));
+  })?;
 
   Ok(StepStatus::Done)
 }
@@ -178,46 +239,41 @@ pub(crate) fn handle_download_rom(
     return Ok(StepStatus::Done);
   }
 
-  // ── Disc 1 ────────────────────────────────────────────────────────────
-  // Derive the actual local filename from the IA path (handles multi-disc
-  // where the virtual `filename` differs from the disc-1 basename).
+  // Disc 1's own basename comes from its IA path: for a multi-disc game the virtual
+  // `filename` has had the disc indicator taken out of it.
   let disc1_local_name = Path::new(&file_name_in_item)
     .file_name()
     .map(|n| n.to_string_lossy().into_owned())
     .unwrap_or_else(|| filename.clone());
-  let dest1 = directory.join(&disc1_local_name);
 
-  let dl1 = Download::new(&metadata, &file_name_in_item).map_err(StepError::transient)?;
-  if dest1.exists() {
-    rom_arc.lock().unwrap().bar.rom_checking();
-    match dl1.verify_sha1(&dest1) {
-      Ok(()) => {
-        rom_arc.lock().unwrap().bar.rom_skipped();
-      }
-      Err(_) => {
-        rom_arc.lock().unwrap().bar.rom_redownloading();
-        fetch_with_progress(&dl1, &dest1, rom_arc)?;
-        dl1.verify_sha1(&dest1).map_err(StepError::transient)?;
-        rom_arc.lock().unwrap().bar.rom_done();
-      }
-    }
-  } else {
-    rom_arc.lock().unwrap().bar.rom_downloading();
-    fetch_with_progress(&dl1, &dest1, rom_arc)?;
-    dl1.verify_sha1(&dest1).map_err(StepError::transient)?;
+  // Every `Download` is built up front: they borrow the item metadata, and the closures
+  // below borrow them in turn.
+  let downloads: Vec<Download<'_>> = std::iter::once(&file_name_in_item)
+    .chain(extra_discs.iter().map(|(ia_path, _)| ia_path))
+    .map(|path| Download::new(&metadata, path))
+    .collect::<Result<_, _>>()
+    .map_err(StepError::transient)?;
+
+  let names = std::iter::once(disc1_local_name)
+    .chain(extra_discs.iter().map(|(_, local_name)| local_name.clone()));
+  let discs: Vec<Disc<'_>> = names
+    .zip(&downloads)
+    .map(|(name, dl)| Disc {
+      name,
+      is_valid: Box::new(move |dest: &Path| dl.verify_sha1(dest).is_ok()),
+      // Verified again after the transfer: what arrived is not necessarily what the
+      // item metadata promised, and a truncated ROM must fail the step, not be kept.
+      fetch: Box::new(move |dest: &Path| {
+        fetch_with_progress(dl, dest, rom_arc)?;
+        dl.verify_sha1(dest).map_err(StepError::transient)
+      }),
+    })
+    .collect();
+
+  place_discs(rom_arc, &directory, &discs, |_| {
+    // The bytes were counted by the progress callback as they arrived.
     rom_arc.lock().unwrap().bar.rom_done();
-  }
-
-  // ── Extra discs (disc 2, 3, …) ────────────────────────────────────────
-  for (ia_path, local_name) in &extra_discs {
-    let dest = directory.join(local_name);
-    let dl = Download::new(&metadata, ia_path).map_err(StepError::transient)?;
-    if dest.exists() && dl.verify_sha1(&dest).is_ok() {
-      continue; // already valid
-    }
-    fetch_with_progress(&dl, &dest, rom_arc)?;
-    dl.verify_sha1(&dest).map_err(StepError::transient)?;
-  }
+  })?;
 
   Ok(StepStatus::Done)
 }
@@ -253,16 +309,7 @@ pub(crate) fn handle_download_medias(
   let directory = Path::new(&filename).with_extension("");
 
   if let Some(ref medias) = medias {
-    for (kind, maybe_media) in [
-      ("video", medias.video.as_ref()),
-      ("image", medias.image.as_ref()),
-      ("thumbnail", medias.thumbnail.as_ref()),
-      ("bezel", medias.bezel.as_ref()),
-      ("marquee", medias.marquee.as_ref()),
-      ("screenshot", medias.screenshot.as_ref()),
-      ("wheel", medias.wheel.as_ref()),
-      ("manual", medias.manual.as_ref()),
-    ] {
+    for (kind, maybe_media) in medias.iter() {
       match maybe_media {
         Some(m) => {
           rom_arc.lock().unwrap().bar.start_media(kind);
@@ -278,12 +325,33 @@ pub(crate) fn handle_download_medias(
           let needs_download =
             !dest.exists() || ctx.ss.media_download(&direct).verify_sha1(&dest).is_err();
           if needs_download {
-            let bar = rom_arc.lock().unwrap().bar.handle();
-            ctx
-              .ss
-              .media_download(&direct)
-              .fetch_with_progress(&dest, |read, total| bar.media_progress(read, total))
-              .map_err(|e| media_failure(kind, &e))?;
+            let fetch = |media: &Media| {
+              let bar = rom_arc.lock().unwrap().bar.handle();
+              ctx
+                .ss
+                .media_download(media)
+                .fetch_with_progress(&dest, |read, total| bar.media_progress(read, total))
+            };
+            // A 404 means the public path has no such file, and no retry will change
+            // that. `m` still holds the `mediaJeu.php` call ScreenScraper handed back,
+            // which always works — at the price of a request against the account, hence
+            // only here and only on a 404. Nothing was written yet: the library checks
+            // the status before it creates the file.
+            //
+            // The PKGBUILD keeps the public URL. It cannot carry this one, which has the
+            // credentials in it, and the asset is installed from the file sitting next to
+            // the PKGBUILD anyway — but a `makepkg` in a clean directory will fail on it.
+            let outcome = match fetch(&direct) {
+              Err(ref e) if is_not_found(e) => {
+                rom_arc.lock().unwrap().debug_log.push(format!(
+                  "[DownloadMedias] media {:<12}: public path 404 → fetched through the API",
+                  kind
+                ));
+                fetch(m)
+              }
+              first => first,
+            };
+            outcome.map_err(|e| media_failure(kind, &e))?;
             rom_arc.lock().unwrap().bar.media_done(kind);
           } else {
             rom_arc.lock().unwrap().bar.media_skipped(kind);

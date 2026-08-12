@@ -246,12 +246,15 @@ fn execute_step(rom_arc: Arc<Mutex<Rom>>, step_idx: usize, ctx: &WorkerContext) 
             rom.pipeline[step_idx].retry_count += 1;
             rom.pipeline[step_idx].status = StepStatus::Pending;
             let attempt = rom.pipeline[step_idx].retry_count;
-            // Said before the sleep, not after: the whole point is that the bar has
-            // something to show *while* the worker waits out the backoff.
+            // Said before handing the step back, not after: the whole point is that the
+            // bar has something to show *while* the backoff runs down.
             rom.bar.retrying(attempt, max_retries);
           }
-          std::thread::sleep(delay);
-          ctx.queue.push(Arc::clone(&rom_arc), step_idx);
+          // The queue waits the backoff out, not this thread. `thread::sleep` held a
+          // worker for up to sixteen seconds doing nothing while ROMs queued up behind
+          // it, and Ctrl-C could not shorten it: neither `shutdown()` nor `cancel()`
+          // reaches a thread that is asleep rather than waiting on something.
+          ctx.queue.push_after(Arc::clone(&rom_arc), step_idx, delay);
           return;
         }
         Disposition::Fail => {

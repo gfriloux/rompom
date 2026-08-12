@@ -3,8 +3,9 @@ use std::{collections::HashMap, path::Path};
 use screenscraper::{download::Error as MediaError, jeuinfo::JeuInfo, ApiFailure};
 
 use crate::{
-  package::{media_ext, Medias},
+  package::{pick_media, Medias, MEDIA_KINDS},
   rom::StepError,
+  state::RomStateEntry,
   ui::{Dot, ModalCandidate, MEDIA_COUNT},
 };
 
@@ -71,20 +72,6 @@ pub(crate) fn search_name(filename: &str) -> String {
     .to_string()
 }
 
-/// Returns the output filename for a downloaded media asset.
-///
-/// The result is joined onto the ROM's output directory, and `Path::join` happily
-/// walks out of it: a ScreenScraper format of `png/../../x` would have written
-/// outside the tree. `media_ext` whitelists the extension, so the value returned here
-/// is always a single path component.
-pub(crate) fn media_filename(kind: &str, format: &str) -> String {
-  match kind {
-    "video" => "video.mp4".to_string(),
-    "manual" => "manual.pdf".to_string(),
-    _ => format!("{}.{}", kind, media_ext(format)),
-  }
-}
-
 /// Compares current media sha1s (from SS) against the saved state.
 ///
 /// Returns `(changed, log_lines)` where `changed` is true if at least one
@@ -97,16 +84,7 @@ pub(crate) fn check_media_changes(
   let mut changed = false;
   let mut lines = Vec::new();
 
-  for (kind, media) in [
-    ("video", medias.video.as_ref()),
-    ("image", medias.image.as_ref()),
-    ("thumbnail", medias.thumbnail.as_ref()),
-    ("bezel", medias.bezel.as_ref()),
-    ("marquee", medias.marquee.as_ref()),
-    ("screenshot", medias.screenshot.as_ref()),
-    ("wheel", medias.wheel.as_ref()),
-    ("manual", medias.manual.as_ref()),
-  ] {
+  for (kind, media) in medias.iter() {
     let new_sha1 = media.map(|m| m.sha1.as_str());
     let prev_sha1 = prev.get(kind).and_then(|v| v.as_deref());
     if new_sha1 != prev_sha1 {
@@ -129,6 +107,84 @@ pub(crate) fn check_media_changes(
   (changed, lines)
 }
 
+// ── Is this ROM what the last run saved? ───────────────────────────────────
+
+/// Whether every disc of this ROM is byte for byte what the last run recorded, and the
+/// line saying why.
+///
+/// Two steps ask this, about the same thing: `ComputeHashes` for a folder source, having
+/// just hashed the file, and `LookupSS` for an Internet Archive one, whose sha1s come
+/// from the item metadata. They were two copies of the same comparison and the same four
+/// messages, differing only in the step name they printed — so a fix to one was a fix to
+/// neither.
+///
+/// A current sha1 that is empty never matches. It means nothing was computed, and
+/// reading "we do not know" as "unchanged" would skip the download *and* let `SaveState`
+/// persist an entry that makes every later run skip it too.
+pub(crate) fn rom_unchanged(
+  step: &str,
+  saved: Option<&RomStateEntry>,
+  sha1: Option<&str>,
+  extra_disc_sha1s: &[String],
+) -> (bool, String) {
+  let current = sha1.unwrap_or("");
+  let shown = if current.is_empty() { "?" } else { current };
+
+  let Some(entry) = saved else {
+    return (
+      false,
+      format!(
+        "[{}] rom_unchanged: false — no state entry (current sha1={})",
+        step, shown
+      ),
+    );
+  };
+
+  if entry.rom_sha1.is_empty() {
+    return (
+      false,
+      format!(
+        "[{}] rom_unchanged: false — state sha1 empty (current={})",
+        step, shown
+      ),
+    );
+  }
+
+  if current.is_empty() || entry.rom_sha1 != current {
+    return (
+      false,
+      format!(
+        "[{}] rom_unchanged: false — sha1 mismatch (state={}, current={})",
+        step, entry.rom_sha1, shown
+      ),
+    );
+  }
+
+  // Disc 1 is not the ROM when there are several: a changed disc 2 has to re-download
+  // the lot. Reported apart from the disc-1 case, which used to print two identical
+  // sha1s and leave the reader to guess.
+  let extras_match = entry.extra_disc_sha1s.len() == extra_disc_sha1s.len()
+    && (entry.extra_disc_sha1s.iter())
+      .zip(extra_disc_sha1s)
+      .all(|(saved, current)| !current.is_empty() && saved == current);
+  if !extras_match {
+    return (
+      false,
+      format!(
+        "[{}] rom_unchanged: false — extra discs differ (state={}, current={})",
+        step,
+        entry.extra_disc_sha1s.len(),
+        extra_disc_sha1s.len()
+      ),
+    );
+  }
+
+  (
+    true,
+    format!("[{}] rom_unchanged: true  (sha1={})", step, shown),
+  )
+}
+
 // ── Media download failures ────────────────────────────────────────────────
 
 /// What a failed media download means for the step, said in rompom's own words.
@@ -147,6 +203,25 @@ pub(crate) fn check_media_changes(
 /// secret — so those are quoted in full. They are also the only two a test can build:
 /// `reqwest::Error` has no public constructor. The guarantee on the other two is
 /// structural, and visible on the next line: `err` is matched, never interpolated.
+/// Whether the public media path answered "there is no such file".
+///
+/// Only a 404 justifies falling back to the API. A timeout, a reset or a 5xx says the
+/// asset may well be there and the network is not — retrying the public path is right,
+/// and it is what the step already does. If a stumble were enough to reach for the
+/// fallback, an outage on `screenscraper.fr/medias/` would put every asset of every ROM
+/// through `mediaJeu.php` at once, which is the way to get an account rate-limited off
+/// ScreenScraper.
+///
+/// The status is read off the error, never its `Display`: that one interpolates the URL,
+/// credentials included — see `media_failure` below.
+pub(crate) fn is_not_found(err: &MediaError) -> bool {
+  matches!(
+    err,
+    MediaError::Download { source, .. }
+      if source.status() == Some(reqwest::StatusCode::NOT_FOUND)
+  )
+}
+
 pub(crate) fn media_failure(kind: &str, err: &MediaError) -> StepError {
   let reason = match err {
     MediaError::Download { .. } => "download failed".to_string(),
@@ -160,23 +235,6 @@ pub(crate) fn media_failure(kind: &str, err: &MediaError) -> StepError {
 }
 
 // ── Modal candidates ───────────────────────────────────────────────────────
-
-/// The nine tracked assets, in `MEDIA_ICONS` order, and the ScreenScraper media name
-/// each one is fetched under.
-///
-/// `description` has no media name: it comes from the synopsis, which is text on the
-/// game rather than a file to download. `video` is the one asset with a fallback —
-/// `video-normalized` when ScreenScraper has re-encoded it, the raw upload otherwise.
-const CANDIDATE_MEDIA: [&str; MEDIA_COUNT - 1] = [
-  "video",
-  "sstitle",
-  "box-2D",
-  "ss",
-  "bezel-16-9",
-  "marquee",
-  "wheel",
-  "manuel",
-];
 
 /// Projects a search result into what the modal shows.
 ///
@@ -192,13 +250,11 @@ pub(crate) fn candidate_from(jeu: &JeuInfo, lang: &[&str]) -> ModalCandidate {
   if jeu.find_desc(lang) != "Unknown" {
     media[0] = Dot::Fresh;
   }
-  for (i, name) in CANDIDATE_MEDIA.iter().enumerate() {
-    let found = if *name == "video" {
-      jeu.media("video-normalized").or_else(|| jeu.media("video"))
-    } else {
-      jeu.media(name)
-    };
-    if found.is_some() {
+  // Offset by one: the description dot above owns column 0, and `MEDIA_KINDS` covers
+  // the eight that follow it — in that same order, which is what makes this indexing
+  // legitimate rather than a coincidence.
+  for (i, (_, ss_names)) in MEDIA_KINDS.iter().enumerate() {
+    if pick_media(jeu, ss_names).is_some() {
       media[i + 1] = Dot::Fresh;
     }
   }
@@ -267,6 +323,37 @@ mod tests {
           secret
         );
       }
+    }
+  }
+
+  /// Only a missing file sends an asset to the API. A disk that filled up, a body that
+  /// stopped mid-transfer or a checksum that did not match are all things the public path
+  /// can be asked again about — and reaching for `mediaJeu.php` on any of them would mean
+  /// that a bad afternoon on `screenscraper.fr/medias/` puts every asset of every ROM
+  /// through the account's request budget.
+  ///
+  /// The 404 itself is not testable here: `reqwest::Error` has no public constructor, the
+  /// same limit `a_media_failure_never_quotes_the_url` runs into. What is testable is
+  /// that nothing else qualifies.
+  #[test]
+  fn only_a_missing_file_is_worth_going_through_the_api_for() {
+    let cases = [
+      MediaError::Io {
+        path: PathBuf::from("snes/Some Game/manual.pdf"),
+        source: std::io::Error::other("disk full"),
+      },
+      MediaError::ChecksumMismatch {
+        expected: "3f9a1c77e04b2d8815ce6f0aa19b7c4d2e5081aa".to_string(),
+        got: "0000000000000000000000000000000000000000".to_string(),
+      },
+    ];
+
+    for case in &cases {
+      assert!(
+        !is_not_found(case),
+        "{:?} must not trigger the fallback",
+        case
+      );
     }
   }
 
@@ -518,49 +605,100 @@ mod tests {
     }
   }
 
-  /// The destination is built as `directory.join(media_filename(...))`, and Path::join
-  /// resolves `..` against the directory rather than rejecting it. Before the fix,
-  /// a format of `png/../../x` produced `image.png/../../x`, which lands two levels
-  /// above the ROM's output directory.
-  #[test]
-  fn media_filename_stays_inside_the_output_directory() {
-    let directory = PathBuf::from("/out/roms/sonic");
+  // ── rom_unchanged ────────────────────────────────────────────────────────
 
-    for hostile in [
-      "png/../../x",
-      "../../etc/passwd",
-      "png/../..",
-      "/etc/passwd",
-      "png\\..\\..",
-    ] {
-      let name = media_filename("image", hostile);
-      assert!(
-        !name.contains('/') && !name.contains('\\') && !name.contains(".."),
-        "format {hostile:?} produced {name:?}"
-      );
-
-      // One path component, and the join cannot leave the directory.
-      let dest = directory.join(&name);
-      assert_eq!(dest.parent(), Some(directory.as_path()));
-      assert!(dest.starts_with(&directory));
+  fn saved(rom_sha1: &str, extras: &[&str]) -> RomStateEntry {
+    RomStateEntry {
+      ss_game_id: None,
+      rom_sha1: rom_sha1.to_string(),
+      rom_mtime: 0,
+      rom_size: 0,
+      medias: HashMap::new(),
+      extra_disc_sha1s: extras.iter().map(|s| s.to_string()).collect(),
     }
   }
 
-  /// The fixed kinds keep their own extension, whatever ScreenScraper claims.
+  /// The first run: nothing saved, so nothing can be skipped.
   #[test]
-  fn media_filename_keeps_the_canonical_names() {
-    assert_eq!(media_filename("video", "../../x"), "video.mp4");
-    assert_eq!(media_filename("manual", "../../x"), "manual.pdf");
-    assert_eq!(media_filename("image", "png"), "image.png");
-    assert_eq!(media_filename("thumbnail", "jpg"), "thumbnail.jpg");
+  fn a_rom_with_no_state_entry_has_changed() {
+    let (unchanged, line) = rom_unchanged("LookupSS", None, Some("aaa"), &[]);
+    assert!(!unchanged);
+    assert!(line.contains("no state entry"), "{}", line);
+    assert!(line.starts_with("[LookupSS]"), "{}", line);
   }
 
-  /// A format that whitelists down to nothing must still yield a usable name, and the
-  /// same one the PKGBUILD source entry uses.
+  /// The case the whole state file exists for: same bytes, nothing to do.
   #[test]
-  fn media_filename_falls_back_when_the_format_is_unusable() {
-    assert_eq!(media_filename("image", "../.."), "image.bin");
-    assert_eq!(media_filename("image", ""), "image.bin");
+  fn the_same_sha1_and_the_same_discs_are_unchanged() {
+    let entry = saved("aaa", &["bbb", "ccc"]);
+    let discs = vec!["bbb".to_string(), "ccc".to_string()];
+
+    let (unchanged, line) = rom_unchanged("ComputeHashes", Some(&entry), Some("aaa"), &discs);
+
+    assert!(unchanged);
+    assert!(line.contains("true"), "{}", line);
+  }
+
+  #[test]
+  fn a_different_sha1_has_changed() {
+    let entry = saved("aaa", &[]);
+    let (unchanged, line) = rom_unchanged("LookupSS", Some(&entry), Some("zzz"), &[]);
+
+    assert!(!unchanged);
+    assert!(line.contains("sha1 mismatch"), "{}", line);
+  }
+
+  /// Disc 1 is not the ROM when there are several. A changed disc 2 has to bring the
+  /// whole set down again, and say which of the two it was — the message used to be the
+  /// disc-1 one, printing the same sha1 twice.
+  #[test]
+  fn a_changed_extra_disc_changes_the_rom() {
+    let entry = saved("aaa", &["bbb", "ccc"]);
+
+    let (unchanged, line) = rom_unchanged(
+      "ComputeHashes",
+      Some(&entry),
+      Some("aaa"),
+      &["bbb".to_string(), "zzz".to_string()],
+    );
+
+    assert!(!unchanged);
+    assert!(line.contains("extra discs differ"), "{}", line);
+  }
+
+  /// A disc appearing or disappearing counts too: same disc 1, different release.
+  #[test]
+  fn a_different_number_of_discs_changes_the_rom() {
+    let entry = saved("aaa", &["bbb"]);
+
+    let (unchanged, _) = rom_unchanged("LookupSS", Some(&entry), Some("aaa"), &[]);
+
+    assert!(!unchanged);
+  }
+
+  /// "We did not compute a sha1" is not "the file is unchanged". Answering true here
+  /// skips the download and then persists a state entry that makes every later run skip
+  /// it as well — the ROM would never be fetched again.
+  #[test]
+  fn an_unknown_sha1_is_never_unchanged() {
+    let entry = saved("aaa", &[]);
+
+    for missing in [None, Some("")] {
+      let (unchanged, _) = rom_unchanged("ComputeHashes", Some(&entry), missing, &[]);
+      assert!(!unchanged, "{:?} must not count as unchanged", missing);
+    }
+  }
+
+  /// And neither is a saved entry that never recorded one — a state file written by a
+  /// run that failed before hashing.
+  #[test]
+  fn an_empty_saved_sha1_is_never_unchanged() {
+    let entry = saved("", &[]);
+
+    let (unchanged, line) = rom_unchanged("LookupSS", Some(&entry), Some(""), &[]);
+
+    assert!(!unchanged);
+    assert!(line.contains("state sha1 empty"), "{}", line);
   }
 
   // ── search_name ──────────────────────────────────────────────────────────
