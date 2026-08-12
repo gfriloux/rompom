@@ -14,7 +14,7 @@ screenscraper = { git = "https://github.com/gfriloux/screenscraper", tag = "v0.8
 #screenscraper = { path = "../screenscraper" }
 internet_archive = { git = "https://github.com/gfriloux/internetarchive", tag = "v0.3.0" }
 sha1 = "0.10.6"
-md-5 = "0.10.6"
+md-5 = "0.11.0"
 crc32fast = "1.5.0"
 chrono = "0.4.45"
 dirs = "6.0.0"
