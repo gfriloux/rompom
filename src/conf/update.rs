@@ -171,7 +171,7 @@ impl Conf {
           "{}{}{}",
           &data[..re_start],
           lang_block,
-          &data[re_end..].trim_start_matches('\n')
+          data[re_end..].trim_start_matches('\n')
         )
       } else {
         data.replacen("systems:", &format!("{}systems:", lang_block), 1)

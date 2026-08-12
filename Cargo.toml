@@ -2,7 +2,7 @@
 edition = "2021"
 authors = ["Guillaume Friloux <guillaume@friloux.me>"]
 name = "rompom"
-version = "0.20.0"
+version = "0.20.1"
 
 # Every version below is the one Cargo.lock already resolves. They used to be `*`,
 # which says "any version ever published": a fresh checkout without the lockfile —
@@ -13,21 +13,21 @@ version = "0.20.0"
 screenscraper = { git = "https://github.com/gfriloux/screenscraper", tag = "v0.8.0" }
 #screenscraper = { path = "../screenscraper" }
 internet_archive = { git = "https://github.com/gfriloux/internetarchive", tag = "v0.3.0" }
-sha1 = "0.10.6"
-md-5 = "0.10.6"
+sha1 = "0.11.0"
+md-5 = "0.11.0"
 crc32fast = "1.5.0"
 chrono = "0.4.45"
 dirs = "6.0.0"
 getopts = "0.2.24"
-ratatui = "0.29"
-crossterm = "0.28"
+ratatui = "0.30"
+crossterm = "0.29"
 serde = { version = "1.0", features = ["derive"] }
 quick-xml = { version = "0.41.0", features = ["serialize"] }
 serde_json = "1.0.149"
 # 0.9.34+deprecated is the last release: the crate is archived. Pinned so the dead end
 # is visible here rather than discovered at the next `cargo update`.
 serde_yaml = "0.9.34"
-snafu = "0.7.5"
+snafu = "0.9.0"
 reqwest = { version = "0.11.27", features = ["blocking"] }
 openssl = { version = "0.10.80", features = ["vendored"] }
 glob = "0.3.1"

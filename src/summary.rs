@@ -57,7 +57,7 @@ impl Summary {
 }
 
 fn progress_bar(done: usize, total: usize, width: usize) -> String {
-  let filled = if total > 0 { done * width / total } else { 0 };
+  let filled = (done * width).checked_div(total).unwrap_or(0);
   let empty = width - filled;
   format!("{}{}", "█".repeat(filled), "░".repeat(empty))
 }

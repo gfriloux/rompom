@@ -15,5 +15,26 @@
   "lockFileMaintenance": {
     "enabled": true,
     "schedule": ["before 6am on monday"]
-  }
+  },
+  "packageRules": [
+    {
+      "description": "sha1 and md-5 share the digest traits: hash.rs applies sha1::Digest to Md5, so whichever arrives first does not compile against the other. They move together or not at all.",
+      "matchManagers": ["cargo"],
+      "matchPackageNames": ["sha1", "md-5", "digest"],
+      "groupName": "RustCrypto digest crates"
+    },
+    {
+      "description": "ratatui pins the crossterm its backend speaks. Separate updates leave two crossterm versions in the tree, one for our own raw mode and key events and one behind the backend.",
+      "matchManagers": ["cargo"],
+      "matchPackageNames": ["ratatui", "crossterm"],
+      "groupName": "ratatui and crossterm"
+    },
+    {
+      "description": "reqwest is not used by rompom: it is declared to pin the version screenscraper and internetarchive resolve. Moving it alone adds a second HTTP and TLS stack to the binary instead of upgrading anything, so it follows the two libs. Patch updates within the line they use are still welcome.",
+      "matchManagers": ["cargo"],
+      "matchPackageNames": ["reqwest"],
+      "matchUpdateTypes": ["major", "minor"],
+      "enabled": false
+    }
+  ]
 }
