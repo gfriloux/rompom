@@ -5,6 +5,7 @@ use screenscraper::{download::Error as MediaError, jeuinfo::JeuInfo, ApiFailure}
 use crate::{
   package::{pick_media, Medias, MEDIA_KINDS},
   rom::StepError,
+  state::RomStateEntry,
   ui::{Dot, ModalCandidate, MEDIA_COUNT},
 };
 
@@ -104,6 +105,84 @@ pub(crate) fn check_media_changes(
   }
 
   (changed, lines)
+}
+
+// ── Is this ROM what the last run saved? ───────────────────────────────────
+
+/// Whether every disc of this ROM is byte for byte what the last run recorded, and the
+/// line saying why.
+///
+/// Two steps ask this, about the same thing: `ComputeHashes` for a folder source, having
+/// just hashed the file, and `LookupSS` for an Internet Archive one, whose sha1s come
+/// from the item metadata. They were two copies of the same comparison and the same four
+/// messages, differing only in the step name they printed — so a fix to one was a fix to
+/// neither.
+///
+/// A current sha1 that is empty never matches. It means nothing was computed, and
+/// reading "we do not know" as "unchanged" would skip the download *and* let `SaveState`
+/// persist an entry that makes every later run skip it too.
+pub(crate) fn rom_unchanged(
+  step: &str,
+  saved: Option<&RomStateEntry>,
+  sha1: Option<&str>,
+  extra_disc_sha1s: &[String],
+) -> (bool, String) {
+  let current = sha1.unwrap_or("");
+  let shown = if current.is_empty() { "?" } else { current };
+
+  let Some(entry) = saved else {
+    return (
+      false,
+      format!(
+        "[{}] rom_unchanged: false — no state entry (current sha1={})",
+        step, shown
+      ),
+    );
+  };
+
+  if entry.rom_sha1.is_empty() {
+    return (
+      false,
+      format!(
+        "[{}] rom_unchanged: false — state sha1 empty (current={})",
+        step, shown
+      ),
+    );
+  }
+
+  if current.is_empty() || entry.rom_sha1 != current {
+    return (
+      false,
+      format!(
+        "[{}] rom_unchanged: false — sha1 mismatch (state={}, current={})",
+        step, entry.rom_sha1, shown
+      ),
+    );
+  }
+
+  // Disc 1 is not the ROM when there are several: a changed disc 2 has to re-download
+  // the lot. Reported apart from the disc-1 case, which used to print two identical
+  // sha1s and leave the reader to guess.
+  let extras_match = entry.extra_disc_sha1s.len() == extra_disc_sha1s.len()
+    && (entry.extra_disc_sha1s.iter())
+      .zip(extra_disc_sha1s)
+      .all(|(saved, current)| !current.is_empty() && saved == current);
+  if !extras_match {
+    return (
+      false,
+      format!(
+        "[{}] rom_unchanged: false — extra discs differ (state={}, current={})",
+        step,
+        entry.extra_disc_sha1s.len(),
+        extra_disc_sha1s.len()
+      ),
+    );
+  }
+
+  (
+    true,
+    format!("[{}] rom_unchanged: true  (sha1={})", step, shown),
+  )
 }
 
 // ── Media download failures ────────────────────────────────────────────────
@@ -474,6 +553,102 @@ mod tests {
         message
       );
     }
+  }
+
+  // ── rom_unchanged ────────────────────────────────────────────────────────
+
+  fn saved(rom_sha1: &str, extras: &[&str]) -> RomStateEntry {
+    RomStateEntry {
+      ss_game_id: None,
+      rom_sha1: rom_sha1.to_string(),
+      rom_mtime: 0,
+      rom_size: 0,
+      medias: HashMap::new(),
+      extra_disc_sha1s: extras.iter().map(|s| s.to_string()).collect(),
+    }
+  }
+
+  /// The first run: nothing saved, so nothing can be skipped.
+  #[test]
+  fn a_rom_with_no_state_entry_has_changed() {
+    let (unchanged, line) = rom_unchanged("LookupSS", None, Some("aaa"), &[]);
+    assert!(!unchanged);
+    assert!(line.contains("no state entry"), "{}", line);
+    assert!(line.starts_with("[LookupSS]"), "{}", line);
+  }
+
+  /// The case the whole state file exists for: same bytes, nothing to do.
+  #[test]
+  fn the_same_sha1_and_the_same_discs_are_unchanged() {
+    let entry = saved("aaa", &["bbb", "ccc"]);
+    let discs = vec!["bbb".to_string(), "ccc".to_string()];
+
+    let (unchanged, line) = rom_unchanged("ComputeHashes", Some(&entry), Some("aaa"), &discs);
+
+    assert!(unchanged);
+    assert!(line.contains("true"), "{}", line);
+  }
+
+  #[test]
+  fn a_different_sha1_has_changed() {
+    let entry = saved("aaa", &[]);
+    let (unchanged, line) = rom_unchanged("LookupSS", Some(&entry), Some("zzz"), &[]);
+
+    assert!(!unchanged);
+    assert!(line.contains("sha1 mismatch"), "{}", line);
+  }
+
+  /// Disc 1 is not the ROM when there are several. A changed disc 2 has to bring the
+  /// whole set down again, and say which of the two it was — the message used to be the
+  /// disc-1 one, printing the same sha1 twice.
+  #[test]
+  fn a_changed_extra_disc_changes_the_rom() {
+    let entry = saved("aaa", &["bbb", "ccc"]);
+
+    let (unchanged, line) = rom_unchanged(
+      "ComputeHashes",
+      Some(&entry),
+      Some("aaa"),
+      &["bbb".to_string(), "zzz".to_string()],
+    );
+
+    assert!(!unchanged);
+    assert!(line.contains("extra discs differ"), "{}", line);
+  }
+
+  /// A disc appearing or disappearing counts too: same disc 1, different release.
+  #[test]
+  fn a_different_number_of_discs_changes_the_rom() {
+    let entry = saved("aaa", &["bbb"]);
+
+    let (unchanged, _) = rom_unchanged("LookupSS", Some(&entry), Some("aaa"), &[]);
+
+    assert!(!unchanged);
+  }
+
+  /// "We did not compute a sha1" is not "the file is unchanged". Answering true here
+  /// skips the download and then persists a state entry that makes every later run skip
+  /// it as well — the ROM would never be fetched again.
+  #[test]
+  fn an_unknown_sha1_is_never_unchanged() {
+    let entry = saved("aaa", &[]);
+
+    for missing in [None, Some("")] {
+      let (unchanged, _) = rom_unchanged("ComputeHashes", Some(&entry), missing, &[]);
+      assert!(!unchanged, "{:?} must not count as unchanged", missing);
+    }
+  }
+
+  /// And neither is a saved entry that never recorded one — a state file written by a
+  /// run that failed before hashing.
+  #[test]
+  fn an_empty_saved_sha1_is_never_unchanged() {
+    let entry = saved("", &[]);
+
+    let (unchanged, line) = rom_unchanged("LookupSS", Some(&entry), Some(""), &[]);
+
+    assert!(!unchanged);
+    assert!(line.contains("state sha1 empty"), "{}", line);
   }
 
   // ── search_name ──────────────────────────────────────────────────────────

@@ -262,9 +262,12 @@ LookupSS → WaitModal* → BuildPackage → DownloadRom ────┐
 - **`ComputeHashes`** — folder sources only. Fast-skip: if the saved state has a matching
   `mtime + size`, restores `sha1` from state without hashing. Otherwise computes SHA1/MD5/CRC32.
   For multi-disc games, also computes SHA1 for each extra disc (no fast-skip for extra discs).
-  Sets `rom.rom_unchanged` by comparing disc-1 sha1 AND all extra-disc sha1s with state.
-- **`LookupSS`** — for IA sources, also sets `rom_unchanged` here (no ComputeHashes). For
-  multi-disc IA games, checks disc-1 sha1 AND all extra-disc sha1s against state. Uses cached
+  Sets `rom.rom_unchanged` through `helpers::rom_unchanged()`.
+- **`LookupSS`** — for IA sources, also sets `rom_unchanged` here (no ComputeHashes), by the
+  same call. `helpers::rom_unchanged()` is the single decision: it compares disc-1 sha1 **and**
+  every extra-disc sha1 against the state, refuses an unknown or empty sha1 on either side,
+  and returns the `--debug` line with it, the step name being all that differs between the
+  two callers. Uses cached
   `ss_game_id` from state if available (`jeuinfo_by_gameid`, fast path). Otherwise calls
   `jeuinfo()`. On miss: runs `jeu_recherche` by name (`search_name()` strips extension +
   region/revision tags), stores candidates in step data, sets `WaitModal` to Pending.
