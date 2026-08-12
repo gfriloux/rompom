@@ -44,7 +44,17 @@
 | 4.2 | Un jeu avec un manuel | `manual.pdf` est **installé** — avant, `ls` cherchait un fichier nommé `*.pdf,` et le manuel était silencieusement perdu. |
 | 4.3 | `ls` dans le log de build | Plus de `ls: cannot access '*.pdf,'`. |
 
-## 5. `m.url`
+## 5. Le lien média — le plus important de cette liste
+
+| # | Test | Attendu |
+|---|---|---|
+| 5.0 | Un run complet sur un système entier | **Aucun blocage ScreenScraper**, et les neuf pastilles renseignées sur chaque ROM. Avant, chaque média passait par `mediaJeu.php` et quatre types sur huit tombaient en 404. |
+| 5.0b | Une URL du PKGBUILD vs ce que rompom télécharge | Le **même** lien : `media_url()` est la seule définition des deux côtés. |
+| 5.0c | La région dans les URLs | Entre parenthèses : `sstitle(jp).png`, `manuel(us).pdf`. Jamais collée. |
+| 5.0d | Un média qui échoue puis réussit au retry | Les autres médias sont **quand même** téléchargés — avant, la reprise trouvait `medias` vide et sautait toute la boucle en annonçant `done`. |
+| 5.0e | `Mike Tyson's Punch-Out!!` sur NES | Le manuel est récupéré (il existe sur la fiche SS). |
+
+## 5bis. `m.url`
 
 | # | Test | Attendu |
 |---|---|---|

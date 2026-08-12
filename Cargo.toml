@@ -2,7 +2,7 @@
 edition = "2021"
 authors = ["Guillaume Friloux <guillaume@friloux.me>"]
 name = "rompom"
-version = "0.19.0"
+version = "0.20.0"
 
 # Every version below is the one Cargo.lock already resolves. They used to be `*`,
 # which says "any version ever published": a fresh checkout without the lockfile —
