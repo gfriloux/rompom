@@ -321,11 +321,7 @@ fn render_report(frame: &mut Frame, area: Rect, state: &AppState) {
     Span::styled(
       format!(
         " {:>3}% ",
-        if state.total == 0 {
-          0
-        } else {
-          done * 100 / state.total
-        }
+        (done * 100).checked_div(state.total).unwrap_or(0)
       ),
       dim(),
     ),
@@ -403,11 +399,7 @@ fn coverage_cell(
 ) -> Vec<Span<'static>> {
   const METER: usize = 20;
   let (kind, icon, found) = *entry;
-  let pct = if success == 0 {
-    0
-  } else {
-    found * 100 / success
-  };
+  let pct = (found * 100).checked_div(success).unwrap_or(0);
   let filled = pct * METER / 100;
   // Green above half, yellow below: the threshold is where a library stops being
   // usefully illustrated and starts being mostly blanks.

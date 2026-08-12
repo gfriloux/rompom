@@ -76,7 +76,7 @@ pub(crate) fn tally(causes: &[String]) -> String {
   .collect();
   // Commonest first: the biggest bucket is the one worth acting on. Ties keep the
   // declaration order, so the line does not reshuffle itself as counts move.
-  parts.sort_by(|a, b| b.0.cmp(&a.0));
+  parts.sort_by_key(|&(count, _)| std::cmp::Reverse(count));
 
   parts
     .iter()
