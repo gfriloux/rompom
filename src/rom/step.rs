@@ -224,7 +224,13 @@ mod tests {
   /// A decrement too many is a DAG bug, and an unsigned counter hides it perfectly: it
   /// wraps to `usize::MAX`, so the caller's `remaining == 0` never matches and the run
   /// hangs on a step nobody will ever push. Loud in debug beats silent in production.
+  ///
+  /// Compiled only where the assertion it checks exists. `just test` builds in debug, but
+  /// the Nix package runs its test phase in **release**, where `debug_assert!` is gone —
+  /// so an ungated `should_panic` fails the packaging build while every local gate stays
+  /// green. That is exactly how this was found: `just build-static`, after `just ci`.
   #[test]
+  #[cfg(debug_assertions)]
   #[should_panic(expected = "wait_for underflow")]
   fn decrementing_past_zero_is_caught_rather_than_wrapped() {
     step(0).dec_wait_for();
