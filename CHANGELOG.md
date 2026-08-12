@@ -12,6 +12,46 @@ git-cliff; they are preserved verbatim, with far more detail, in
 [SemVer]: https://semver.org/
 [Conventional Commits]: https://www.conventionalcommits.org/
 
+## [0.21.0] — 2026-08-12
+
+### Features
+
+- **pipeline**: Fall back to the API when the public media path is gone ([`802f47a`](https://github.com/gfriloux/rompom/commit/802f47ad6ae3325d5691a9c028665f7c9cba6426))
+
+### Bug fixes
+
+- **package**: Take the media file name from the URL ScreenScraper hands back ([`a0f66cd`](https://github.com/gfriloux/rompom/commit/a0f66cdfa072a916ff2ab3da5df5a4b28cb2098d))
+- **package**: Name the description.xml assets like the files on disk ([`5fbf2a8`](https://github.com/gfriloux/rompom/commit/5fbf2a8917002babeb385e80845e277f7176e7ee))
+- **pipeline**: Catch a wait_for underflow before it hangs the run ([`614a383`](https://github.com/gfriloux/rompom/commit/614a383fb9105ae1f0ac778ec2daa5f06441f742))
+
+### Performance
+
+- **pipeline**: Schedule retries in the queue instead of parking a worker ([`43faf95`](https://github.com/gfriloux/rompom/commit/43faf95abf9026f30c153c16185e0cb9f8693587))
+- **pipeline**: Let the semaphore sleep until it is released or cancelled ([`0251b94`](https://github.com/gfriloux/rompom/commit/0251b94365ed5945fedffc04b1e0f4d9c89cf321))
+
+### Refactoring
+
+- **pipeline**: Share the disc loop between the copy and download handlers ([`cfeae9d`](https://github.com/gfriloux/rompom/commit/cfeae9d48b02b18953dadf5152c7d81aa30d4c47))
+- **pipeline**: Decide rom_unchanged in one place ([`46475bb`](https://github.com/gfriloux/rompom/commit/46475bb4286c9e8af333787b25f1ae14a054effb))
+- **pipeline**: Read the media list from the shared table ([`b7e3c5a`](https://github.com/gfriloux/rompom/commit/b7e3c5a0e114f8dc3411f5d64730207e2104c55b))
+- **package**: List the eight media assets once, in the on-screen order ([`f27da65`](https://github.com/gfriloux/rompom/commit/f27da65404882095dd7e64b610cdc6e612d5e61c))
+
+### Documentation
+
+- Record the media file name fix and the API fallback ([`d0d68ea`](https://github.com/gfriloux/rompom/commit/d0d68ea51617fbc4666bf9f3f10d60cec8f552d2))
+- Record the dedup and concurrency batch in the roadmap ([`196394b`](https://github.com/gfriloux/rompom/commit/196394b9b9f206e103e9d0857627e85a4d9ea095))
+
+### Tests
+
+- **pipeline**: Keep the wait_for underflow test out of release builds ([`89eac94`](https://github.com/gfriloux/rompom/commit/89eac94452cdaaa131f7d196f3e4201ab523d3d1))
+- **package**: Snapshot the generated PKGBUILD ([`34b019e`](https://github.com/gfriloux/rompom/commit/34b019e2b8529b9c78a008cfd2ac9e21baee9360))
+
+### Miscellaneous
+
+- **plans**: Record the v0.21.0 checks that were actually run ([`1c3855a`](https://github.com/gfriloux/rompom/commit/1c3855adde1758a69f46e3029c9d5533de64090b))
+- **plans**: Record M9 — the Castlevania III manual comes through ([`bfe6a92`](https://github.com/gfriloux/rompom/commit/bfe6a92ca275899ba13acc88a979bebb434be421))
+- **plans**: Plan v0.21.0 — one media table, and a backoff that stops parking a worker ([`5744cd9`](https://github.com/gfriloux/rompom/commit/5744cd9b4832f281b929e319f67f44ca86742aed))
+
 ## [0.20.1] — 2026-08-12
 
 ### Refactoring
