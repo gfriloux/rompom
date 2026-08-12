@@ -5,7 +5,7 @@
 }:
 pkgs.pkgsStatic.rustPlatform.buildRustPackage {
   pname = "rompom";
-  version = "0.20.0";
+  version = "0.20.1";
 
   src = builtins.path {
     path = ../..;

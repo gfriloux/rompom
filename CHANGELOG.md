@@ -12,6 +12,25 @@ git-cliff; they are preserved verbatim, with far more detail, in
 [SemVer]: https://semver.org/
 [Conventional Commits]: https://www.conventionalcommits.org/
 
+## [0.20.1] — 2026-08-12
+
+### Refactoring
+
+- **conf**: Drop a redundant reference in the lang block rewrite ([`9163c97`](https://github.com/gfriloux/rompom/commit/9163c97bbace4ab4bcbbaf701ae3cf827b4dad79))
+- **ui**: Let std express the guarded divisions and the tally sort ([`f06ee0b`](https://github.com/gfriloux/rompom/commit/f06ee0b3e799418d500b796948a5fb24b3930b2d))
+
+### Continuous integration
+
+- Group the updates that only compile together and hold reqwest to the libs ([`466f889`](https://github.com/gfriloux/rompom/commit/466f8890c0437527b19f51506de664850e263656))
+
+### Dependencies
+
+- **deps**: Refresh Cargo.lock and flake.lock ([`a7fe4fc`](https://github.com/gfriloux/rompom/commit/a7fe4fce7940126611a2b2cc697437cfe352d850))
+- **deps**: Update snafu to 0.9 ([`4c93121`](https://github.com/gfriloux/rompom/commit/4c931211f2cdc94ce9a5f610499ffc6b5815cef7))
+- **deps**: Update ratatui to 0.30 and crossterm to 0.29 in one tree ([`c7e8821`](https://github.com/gfriloux/rompom/commit/c7e8821b7053c13e7f2c431084118246edd63bc4))
+- **deps**: Move sha1 and md-5 to 0.11 together, digest 0.11 needs both ([`1f5dbe3`](https://github.com/gfriloux/rompom/commit/1f5dbe365f40ad44ea9378d2614ec000d24ed1c6))
+- **deps**: Update crossbeam-channel, glob, minijinja, openssl, serde and serde_json ([`5998717`](https://github.com/gfriloux/rompom/commit/5998717950498acc94c942f3ca0864b2a1ba673d))
+
 ## [0.20.0] — 2026-08-12
 
 ### Features
