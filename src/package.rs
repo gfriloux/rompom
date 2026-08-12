@@ -546,27 +546,24 @@ impl Package {
     let romname = self.normalize_name();
     let mut game = Game::from_jeuinfo(&self.jeu, &self.rom, lang);
 
-    if let Some(x) = &self.medias.thumbnail {
-      game.image = Some(format!("./data/{}/thumbnail.{}", romname, x.format));
-    }
-    if let Some(x) = &self.medias.image {
-      game.thumbnail = Some(format!("./data/{}/image.{}", romname, x.format));
-    }
-    if self.medias.video.is_some() {
-      game.video = Some(format!("./data/{}/video.mp4", romname));
-    }
-    if let Some(x) = &self.medias.marquee {
-      game.marquee = Some(format!("./data/{}/marquee.{}", romname, x.format));
-    }
-    if let Some(x) = &self.medias.screenshot {
-      game.screenshot = Some(format!("./data/{}/screenshot.{}", romname, x.format));
-    }
-    if let Some(x) = &self.medias.wheel {
-      game.wheel = Some(format!("./data/{}/wheel.{}", romname, x.format));
-    }
-    if self.medias.manual.is_some() {
-      game.manual = Some(format!("./data/{}/manual.pdf", romname));
-    }
+    // Every path names the asset through `media_filename`, the same function that names
+    // the file on disk and the PKGBUILD source entry. Interpolating ScreenScraper's raw
+    // `format` here meant description.xml could point at a file nobody wrote.
+    let asset = |kind: &str, media: &Option<Media>| {
+      media
+        .as_ref()
+        .map(|m| format!("./data/{}/{}", romname, media_filename(kind, &m.format)))
+    };
+
+    // EmulationStation calls the box art "image" and the title screen "thumbnail", so
+    // these two are deliberately crossed over.
+    game.image = asset("thumbnail", &self.medias.thumbnail);
+    game.thumbnail = asset("image", &self.medias.image);
+    game.video = asset("video", &self.medias.video);
+    game.marquee = asset("marquee", &self.medias.marquee);
+    game.screenshot = asset("screenshot", &self.medias.screenshot);
+    game.wheel = asset("wheel", &self.medias.wheel);
+    game.manual = asset("manual", &self.medias.manual);
 
     apply_game_path(system, &mut game, &romname, self.is_multi_disc());
     (game, romname)
@@ -1103,6 +1100,55 @@ mod tests {
       .split_once("package()")
       .expect("a PKGBUILD always has a package() section");
     assert_eq!(head, expected);
+  }
+
+  /// description.xml must name the files that are actually written next to it.
+  ///
+  /// `DownloadMedias` and the PKGBUILD `sources` both name an asset through
+  /// `media_filename()`, which whitelists the extension — that is what P0.2 introduced,
+  /// because ScreenScraper's `format` is not a value to be trusted with a path.
+  /// `make_game` interpolated the raw field instead, so the two disagreed on any format
+  /// the whitelist touches. On `png/../../x` the asset is written as `thumbnail.pngx`
+  /// while EmulationStation is pointed at `thumbnail.png/../../x` — a file that does not
+  /// exist, by a path that leaves the game's own directory.
+  #[test]
+  fn description_xml_names_the_files_that_are_written() {
+    let scratch = scratch_dir("xml-media-paths");
+    let mut package = fully_scraped_package(scratch.path());
+    let hostile = "png/../../x";
+    for media in [
+      &mut package.medias.thumbnail,
+      &mut package.medias.image,
+      &mut package.medias.screenshot,
+      &mut package.medias.marquee,
+      &mut package.medias.wheel,
+    ]
+    .into_iter()
+    .flatten()
+    {
+      media.format = hostile.to_string();
+    }
+
+    let (game, romname) = package.make_game(&system(1), &["fr"]);
+
+    let path = |kind: &str| {
+      Some(format!(
+        "./data/{}/{}",
+        romname,
+        media_filename(kind, hostile)
+      ))
+    };
+    // ES calls the box art "image" and the title screen "thumbnail", which is why these
+    // two read crossed over.
+    assert_eq!(game.image, path("thumbnail"));
+    assert_eq!(game.thumbnail, path("image"));
+    assert_eq!(game.screenshot, path("screenshot"));
+    assert_eq!(game.marquee, path("marquee"));
+    assert_eq!(game.wheel, path("wheel"));
+    // Neither of these two reads the format at all — the test says so out loud, since
+    // that is the property `media_filename` guarantees for them.
+    assert_eq!(game.video, path("video"));
+    assert_eq!(game.manual, path("manual"));
   }
 
   /// `skip_serializing_if` must drop absent media rather than emit empty tags:
