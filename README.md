@@ -276,7 +276,7 @@ nothing has finished recently, rather than showing a number that is no longer tr
 ```
 
 - **`id` / `pkg` / `rom`** — identification, PKGBUILD, ROM transfer. `·` not reached,
-  spinner running, `✓` done, `=` nothing to do, `✗` failed.
+  spinner running, `62%` transferring, `✓` done, `=` nothing to do, `✗` failed.
 - **The nine dots** — one per tracked asset, in the order of the header icons
   (description, video, image, thumbnail, screenshot, bezel, marquee, wheel, manual).
   `●` green fetched now, `●` gray already up to date, `○` red not on ScreenScraper,

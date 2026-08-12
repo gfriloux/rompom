@@ -8,7 +8,7 @@ use super::emulationstation::Game;
 use crate::hash::sha1_file;
 use screenscraper::jeuinfo::{JeuInfo, Media};
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct Medias {
   pub image: Option<Media>,
   pub thumbnail: Option<Media>,
@@ -28,7 +28,6 @@ pub struct Package {
   pub rom_url: String,
   pub hash: String,
   pub jeu: Option<JeuInfo>,
-  pub name: String,
   pub medias: Medias,
   /// (filename, rom_url, sha1) for disc 2, 3, …  Empty for single-disc.
   pub extra_discs: Vec<(String, String, String)>,
@@ -45,8 +44,40 @@ pub enum Error {
 
 type Result<T, E = Error> = std::result::Result<T, E>;
 
-fn media_region(url: &str) -> &str {
-  url.find("media=").map(|i| &url[i + 6..]).unwrap_or("")
+/// The public media URL — the only one that may leave this process.
+///
+/// ScreenScraper hands back a `mediaJeu.php` API call in `Media::url`, with `devid`,
+/// `devpassword`, `ssid` and `sspassword` in the query string. That URL is unusable on
+/// two counts: it cannot go into a PKGBUILD, which is published, and it must not be what
+/// rompom fetches either — pulling every asset of every ROM through the API is how an
+/// account gets rate-limited off ScreenScraper. The direct path under
+/// `screenscraper.fr/medias/` bypasses the API; it wants a `Referer`, which the
+/// `screenscraper` library sends on every media request.
+///
+/// Built once and used twice: for the PKGBUILD `sources`, and for rompom's own download.
+///
+/// The file name is `{type}({region}).{format}` — both parts come straight off the
+/// `Media`, so there is nothing to parse out of the credentialed URL and nothing to
+/// guess per asset kind. The region goes in **parentheses**; gluing it to the type, as
+/// four of the eight assets used to, gives a 404:
+///
+/// ```text
+/// …/medias/3/65388/sstitlejp.png    404
+/// …/medias/3/65388/sstitle(jp).png  200
+/// ```
+///
+/// An asset with no region — a video, a marquee — has no parentheses at all.
+pub(crate) fn media_url(system_id: u32, jeu_id: &str, m: &Media) -> String {
+  let slug = sanitize_token(&m.name);
+  let ext = media_ext(&m.format);
+  let file = match m.region.as_deref().map(sanitize_token) {
+    Some(region) if !region.is_empty() => format!("{}({}).{}", slug, region, ext),
+    _ => format!("{}.{}", slug, ext),
+  };
+  format!(
+    "https://screenscraper.fr/medias/{}/{}/{}",
+    system_id, jeu_id, file
+  )
 }
 
 fn render_template(src: &str, ctx: &minijinja::Value) -> String {
@@ -204,10 +235,10 @@ impl Package {
   /// to nothing and collide with every other such title, so they fall back to the ROM
   /// hash, which is stable across runs.
   pub fn normalize_name(&self) -> String {
-    let stem = Path::new(&self.name)
+    let stem = Path::new(&self.rom)
       .file_stem()
       .and_then(|s| s.to_str())
-      .unwrap_or(&self.name);
+      .unwrap_or(&self.rom);
 
     let mut out = String::with_capacity(stem.len());
     for c in stem.chars() {
@@ -259,7 +290,6 @@ impl Package {
       rom_url: url.to_string(),
       hash: hash.to_string(),
       jeu,
-      name: file.to_string(),
       medias,
       extra_discs,
     })
@@ -348,69 +378,63 @@ impl Package {
     // in filenames, so they go through the token whitelist before anything else.
     if let Some(ref x) = self.medias.video {
       sources.push(shell_quote(&format!(
-        "video.mp4::https://screenscraper.fr/medias/{}/{}/video.mp4",
-        system.id, jeu_id
+        "video.mp4::{}",
+        media_url(system.id, &jeu_id, x)
       )));
       sha1sums.push(shell_quote(&sanitize_sha1(&x.sha1)));
     }
     if let Some(ref x) = self.medias.bezel {
-      let fmt = media_ext(&x.format);
-      let region = sanitize_token(x.region.as_deref().unwrap_or("wor"));
       sources.push(shell_quote(&format!(
-        "bezel.{}::https://screenscraper.fr/medias/{}/{}/bezel-16-9({}).{}",
-        fmt, system.id, jeu_id, region, fmt
+        "bezel.{}::{}",
+        media_ext(&x.format),
+        media_url(system.id, &jeu_id, x)
       )));
       sha1sums.push(shell_quote(&sanitize_sha1(&x.sha1)));
     }
     if let Some(ref x) = self.medias.image {
-      let fmt = media_ext(&x.format);
-      let region = sanitize_token(media_region(&x.url));
       sources.push(shell_quote(&format!(
-        "image.{}::https://screenscraper.fr/medias/{}/{}/{}.{}",
-        fmt, system.id, jeu_id, region, fmt
+        "image.{}::{}",
+        media_ext(&x.format),
+        media_url(system.id, &jeu_id, x)
       )));
       sha1sums.push(shell_quote(&sanitize_sha1(&x.sha1)));
     }
     if let Some(ref x) = self.medias.thumbnail {
-      let fmt = media_ext(&x.format);
-      let region = sanitize_token(media_region(&x.url));
       sources.push(shell_quote(&format!(
-        "thumbnail.{}::https://screenscraper.fr/medias/{}/{}/{}.{}",
-        fmt, system.id, jeu_id, region, fmt
+        "thumbnail.{}::{}",
+        media_ext(&x.format),
+        media_url(system.id, &jeu_id, x)
       )));
       sha1sums.push(shell_quote(&sanitize_sha1(&x.sha1)));
     }
     if let Some(ref x) = self.medias.marquee {
-      let fmt = media_ext(&x.format);
       sources.push(shell_quote(&format!(
-        "marquee.{}::https://screenscraper.fr/medias/{}/{}/marquee.{}",
-        fmt, system.id, jeu_id, fmt
+        "marquee.{}::{}",
+        media_ext(&x.format),
+        media_url(system.id, &jeu_id, x)
       )));
       sha1sums.push(shell_quote(&sanitize_sha1(&x.sha1)));
     }
     if let Some(ref x) = self.medias.screenshot {
-      let fmt = media_ext(&x.format);
-      let region = sanitize_token(x.region.as_deref().unwrap_or("wor"));
       sources.push(shell_quote(&format!(
-        "screenshot.{}::https://screenscraper.fr/medias/{}/{}/ss({}).{}",
-        fmt, system.id, jeu_id, region, fmt
+        "screenshot.{}::{}",
+        media_ext(&x.format),
+        media_url(system.id, &jeu_id, x)
       )));
       sha1sums.push(shell_quote(&sanitize_sha1(&x.sha1)));
     }
     if let Some(ref x) = self.medias.wheel {
-      let fmt = media_ext(&x.format);
-      let region = sanitize_token(media_region(&x.url));
       sources.push(shell_quote(&format!(
-        "wheel.{}::https://screenscraper.fr/medias/{}/{}/{}.{}",
-        fmt, system.id, jeu_id, region, fmt
+        "wheel.{}::{}",
+        media_ext(&x.format),
+        media_url(system.id, &jeu_id, x)
       )));
       sha1sums.push(shell_quote(&sanitize_sha1(&x.sha1)));
     }
     if let Some(ref x) = self.medias.manual {
-      let region = sanitize_token(media_region(&x.url));
       sources.push(shell_quote(&format!(
-        "manual.pdf::https://screenscraper.fr/medias/{}/{}/{}.pdf",
-        system.id, jeu_id, region
+        "manual.pdf::{}",
+        media_url(system.id, &jeu_id, x)
       )));
       sha1sums.push(shell_quote(&sanitize_sha1(&x.sha1)));
     }
@@ -547,6 +571,112 @@ impl Package {
 
 #[cfg(test)]
 mod tests {
+
+  // ── media_url ────────────────────────────────────────────────────────────
+
+  /// A `Media` as ScreenScraper returns it. `url` is the `mediaJeu.php` call, with the
+  /// credentials this function exists to keep out of everything downstream — and which
+  /// it no longer even reads.
+  fn api_media(name: &str, format: &str, region: Option<&str>) -> Media {
+    Media {
+      name: name.to_string(),
+      parent: "jeu".to_string(),
+      url: "https://api.screenscraper.fr/api2/mediaJeu.php?devid=x&devpassword=y&ssid=z\
+            &sspassword=w&systemeid=3&jeuid=65388&media=whatever"
+        .to_string(),
+      region: region.map(str::to_string),
+      crc: String::new(),
+      md5: String::new(),
+      sha1: String::new(),
+      size: None,
+      format: format.to_string(),
+    }
+  }
+
+  /// Every one of these was checked against the server. The region goes in parentheses;
+  /// gluing it to the type — which is what four of the eight assets used to do — is a
+  /// 404, and the download then failed on every ROM that had one.
+  ///
+  /// ```text
+  /// …/medias/3/65388/sstitlejp.png    404      …/3/65388/sstitle(jp).png   200
+  /// …/medias/3/65388/wheeljp.png      404      …/3/65388/wheel(jp).png     200
+  /// …/medias/3/134960/manueleu.pdf    404      …/3/134960/manuel(us).pdf   200
+  /// ```
+  #[test]
+  fn the_media_url_puts_the_region_in_parentheses() {
+    let base = "https://screenscraper.fr/medias/3/65388";
+    for (name, format, region, expected) in [
+      (
+        "sstitle",
+        "png",
+        Some("jp"),
+        format!("{}/sstitle(jp).png", base),
+      ),
+      (
+        "box-2D",
+        "png",
+        Some("jp"),
+        format!("{}/box-2D(jp).png", base),
+      ),
+      (
+        "wheel",
+        "png",
+        Some("jp"),
+        format!("{}/wheel(jp).png", base),
+      ),
+      (
+        "manuel",
+        "pdf",
+        Some("jp"),
+        format!("{}/manuel(jp).pdf", base),
+      ),
+      ("ss", "png", Some("jp"), format!("{}/ss(jp).png", base)),
+      (
+        "bezel-16-9",
+        "png",
+        Some("wor"),
+        format!("{}/bezel-16-9(wor).png", base),
+      ),
+    ] {
+      assert_eq!(
+        media_url(3, "65388", &api_media(name, format, region)),
+        expected,
+        "{}",
+        name
+      );
+    }
+  }
+
+  /// An asset with no region has no parentheses either — a bare `video.mp4`. Checked:
+  /// both `video.mp4` and `video-normalized.mp4` answer 200.
+  #[test]
+  fn an_asset_without_a_region_has_no_parentheses() {
+    let base = "https://screenscraper.fr/medias/3/65388";
+    assert_eq!(
+      media_url(3, "65388", &api_media("video", "mp4", None)),
+      format!("{}/video.mp4", base)
+    );
+    assert_eq!(
+      media_url(3, "65388", &api_media("video-normalized", "mp4", None)),
+      format!("{}/video-normalized.mp4", base)
+    );
+    // An empty region is the same as none, not `sstitle().png`.
+    assert_eq!(
+      media_url(3, "65388", &api_media("marquee", "png", Some(""))),
+      format!("{}/marquee.png", base)
+    );
+  }
+
+  /// The URL goes into a published PKGBUILD, so nothing of `Media::url` may survive
+  /// into it — and nothing does: it is not read at all any more.
+  #[test]
+  fn the_media_url_never_carries_the_credentials() {
+    let url = media_url(3, "65388", &api_media("sstitle", "png", Some("jp")));
+    for secret in ["devid", "devpassword", "ssid", "sspassword", "mediaJeu"] {
+      assert!(!url.contains(secret), "leaks {}", secret);
+    }
+  }
+
   use super::*;
 
   /// A game exercising every branch of the serialization: populated and skipped
@@ -610,7 +740,6 @@ mod tests {
       rom_url: "https://example.invalid/rom.zip".to_string(),
       hash: hash.to_string(),
       jeu: None,
-      name: rom_name.to_string(),
       medias: Medias::default(),
       extra_discs: Vec::new(),
     }

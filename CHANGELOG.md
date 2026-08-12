@@ -12,6 +12,40 @@ git-cliff; they are preserved verbatim, with far more detail, in
 [SemVer]: https://semver.org/
 [Conventional Commits]: https://www.conventionalcommits.org/
 
+## [0.20.0] — 2026-08-12
+
+### Features
+
+- **ui**: Show how far a download has got ([`26b9f22`](https://github.com/gfriloux/rompom/commit/26b9f229b985d27d8baa5cf0074305dbe6589555))
+
+### Bug fixes
+
+- **pipeline**: Stop emptying the Rom to work on it ([`020b53b`](https://github.com/gfriloux/rompom/commit/020b53bab28938ea7bede7f6809789044104ec1b))
+- **package**: Put the media region in parentheses, where the server wants it ([`ecab2aa`](https://github.com/gfriloux/rompom/commit/ecab2aa178b47094672f5db933a3cf5d0c22d034))
+- **pipeline**: Download media from the public path, not through the API ([`28ef93c`](https://github.com/gfriloux/rompom/commit/28ef93cd971214274057fdb2ff61abb0bd4110ae))
+- **ui**: Keep the ROM cell showing the ROM, not the last media ([`8e8d682`](https://github.com/gfriloux/rompom/commit/8e8d6826fd0e640b4713ad3377c9cda588c40942))
+- **package**: Stop looking for a file named "*.pdf," ([`be16a78`](https://github.com/gfriloux/rompom/commit/be16a7869b26c08bd97e7ab44e4cb8342292ea1e))
+- **package**: Create the ROM data directory with the mode it asks for ([`433455f`](https://github.com/gfriloux/rompom/commit/433455f34fd5264e0c9090ea4911fcd67b873db6))
+- **package**: Read the media slug without swallowing what follows it ([`44d5ad0`](https://github.com/gfriloux/rompom/commit/44d5ad00bd6cdfe354ffc4cdece452fea0cf7126))
+- **pipeline**: Stop printing the ScreenScraper media URL, credentials and all ([`f31727a`](https://github.com/gfriloux/rompom/commit/f31727a3d7a3172d7d40cd5d0f5d0edc090ceb62))
+
+### Refactoring
+
+- **package**: Drop Package.name, a second copy of Package.rom ([`5e1bad7`](https://github.com/gfriloux/rompom/commit/5e1bad79f2e6ab68101e2940b38ab948dbbaf70a))
+- **pipeline**: Drop the step payloads nothing reads ([`07e0793`](https://github.com/gfriloux/rompom/commit/07e07937cb48323cc67309115ab58025f27ac975))
+
+### Documentation
+
+- Record what v0.20.0 closed, and warn against the m.url "cleanup" ([`d56cada`](https://github.com/gfriloux/rompom/commit/d56cadab735ae979c2c4b3e973adc512a993f607))
+
+### Miscellaneous
+
+- **plans**: Plan v0.20.0 — download progress, and a credential leak found on the way ([`6f133e8`](https://github.com/gfriloux/rompom/commit/6f133e89281dca85721db70dce70ed7ba4163889))
+
+### Dependencies
+
+- **deps**: Bump internetarchive to v0.3.0 and screenscraper to v0.8.0 ([`f792fe3`](https://github.com/gfriloux/rompom/commit/f792fe3d6615777111841881a15163340ea9fbfd))
+
 ## [0.19.0] — 2026-08-11
 
 ### Features
@@ -38,6 +72,7 @@ git-cliff; they are preserved verbatim, with far more detail, in
 
 ### Miscellaneous
 
+- **plans**: Record the v0.19.0 checks that were actually run ([`7b3c7ea`](https://github.com/gfriloux/rompom/commit/7b3c7eae3f1710f0a144af40d85a73b8b93e0f93))
 - **plans**: Plan v0.19.0 — the "turn 4" TUI rewrite ([`2aa4c0c`](https://github.com/gfriloux/rompom/commit/2aa4c0cc52f02b57b60eb28d7d5846f01ba5f6cb))
 
 ## [0.18.0] — 2026-08-10

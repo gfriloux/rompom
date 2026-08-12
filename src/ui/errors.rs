@@ -39,6 +39,8 @@ pub(crate) fn classify(cause: &str) -> ErrorKind {
   } else if c.contains("screenscraper") || c.contains("not identified") {
     ErrorKind::ScreenScraper
   } else if c.contains("servers failed")
+    || c.contains("transfer interrupted")
+    || c.contains("download failed")
     || c.contains("io error")
     || c.contains("http")
     || c.starts_with("media ")
@@ -137,6 +139,20 @@ mod tests {
     // handle_download_medias
     assert_eq!(
       classify("media wheel: connection reset"),
+      ErrorKind::Download
+    );
+    // internetarchive v0.3.0, the streaming read
+    assert_eq!(
+      classify("Transfer interrupted on https://ia1.example: connection reset"),
+      ErrorKind::Download
+    );
+    // media_failure, the two variants that must not quote their URL
+    assert_eq!(
+      classify("media video: download failed"),
+      ErrorKind::Download
+    );
+    assert_eq!(
+      classify("media video: transfer interrupted"),
       ErrorKind::Download
     );
     // a caught panic

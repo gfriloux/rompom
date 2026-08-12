@@ -156,7 +156,7 @@ src/
   queue.rs                  — TaskQueue (LIFO, two priority lanes: main + blocking) + Semaphore (interruptible)
   rom/
     mod.rs                  — Rom struct + new_folder() / new_ia() pipeline constructors
-    step.rs                 — Step, StepKind, StepStatus, StepError, StepData, Phase
+    step.rs                 — Step, StepKind, StepStatus, StepError, StepData
     source.rs               — RomSourceData / RomSource / IaSource / FolderSource
   state.rs                  — SystemState + RomStateEntry (serde YAML): per-run state persisted to
                               <system>.state.yml in the working directory. Tracks ss_game_id, rom_sha1,
@@ -280,8 +280,12 @@ LookupSS → WaitModal* → BuildPackage → DownloadRom ────┐
   of existing file; copies/downloads only if missing or corrupt. For multi-disc games, processes
   disc 1 (from `source`) then all `extra_discs`. The destination filename for disc 1 is derived
   from `source.file_name` (the actual disc-1 basename), not from the virtual `filename`.
-- **`DownloadMedias`** — iterates 8 canonical media kinds. For each: skips if sha1 already valid
+- **`DownloadMedias`** — iterates 8 canonical media kinds. Reads `rom.medias` by
+  **clone**, never by `take()` — see *Never empty the Rom to work on it* below. For each: skips if sha1 already valid
   on disk (`media_skipped`), downloads otherwise (`media_done`), or marks unavailable if SS has none.
+  Each asset is fetched from `package::media_url()` — the public path, not the API URL the
+  response carried. A failure goes through **`media_failure()`**, never through the library
+  error's `Display` — see *Credentials never reach a message* below.
 - **`SaveState`** — writes `RomStateEntry` into shared `SystemState` (flushed to disk by
   `main.rs` every 30 s and once more after all workers join). Persists `extra_disc_sha1s` for multi-disc games.
   Emits `bar.finish()`. It does **not** touch `remaining` — see below.
@@ -462,6 +466,47 @@ the "queued" state `new_rom_bar()` set.
 
 On "no", the file is deleted and a fresh run starts.
 Second Ctrl-C triggers `std::process::exit(1)` immediately.
+
+### Never empty the Rom to work on it
+
+`BuildPackage` and `DownloadMedias` used to `take()` the field they needed out of the
+`Rom` and put it back at the end. Both have a `?` in between, and a `StepError::Transient`
+**re-runs the same step** — so the retry ran against a `Rom` the first attempt had
+emptied, and neither handler noticed:
+
+- `DownloadMedias` found `medias == None`, skipped its whole loop and returned `Done`. The
+  ROM was reported finished with no media fetched and its dots frozen wherever the first
+  attempt stopped.
+- `BuildPackage` found `jeu == None` and built the package without metadata: an empty
+  `description.xml` over a good one, a `pkgver` bumped for it, and `ss_game_id: None`
+  persisted — the damage P0.5 and P1.1 closed on other paths.
+
+Both now **clone**. One clone per ROM per step is nothing next to a download, and it
+removes the failure mode by construction rather than by remembering to restore on every
+exit path. There is no test: both handlers need a ScreenScraper client and a network.
+
+### Credentials never reach a message
+
+The ScreenScraper media URL is not a public CDN link: it is the `mediaJeu.php` API call
+ScreenScraper handed back, and `base_query()` puts `devid`, `devpassword`, `ssid` and
+`sspassword` in every request. Two consequences, and they pull in opposite directions:
+
+- **It must never be quoted.** `screenscraper::download::Error` interpolates it in its
+  `Download` and `Body` variants, so `format!("media {}: {}", kind, e)` wrote both
+  passwords into the grid, the errors view, `<system>.errors.log`, the end-of-run summary
+  and `<system>.debug.log`. `worker::helpers::media_failure()` composes the sentence from
+  the error **variant** instead — the same rule `lookup_failure()` follows on the
+  identification path. `Io` and `ChecksumMismatch` carry only a local path and two sha1s,
+  so those are quoted in full.
+- **It must never reach a PKGBUILD, nor be the URL rompom fetches.** `package::media_url()`
+  builds the public `https://screenscraper.fr/medias/{systemeid}/{jeuid}/{type}({region}).{format}`
+  path from `Media::name` and `Media::region` — nothing is parsed out of the API URL — and
+  it is used **twice**: for the PKGBUILD `sources`, and for rompom's
+  own download. A PKGBUILD is published, and pulling every asset of every ROM through
+  `mediaJeu.php` is how an account gets rate-limited off ScreenScraper. The public path
+  wants a `Referer`, which the `screenscraper` library sends on every media request.
+  This is laundering, not duplication, and `TODO.md` carries a warning against
+  "simplifying" it.
 
 ## RomSourceData / Rom structs
 
@@ -683,11 +728,21 @@ Everything is keyed on **elapsed `Duration`**, never on `Instant::now()`: an `In
 cannot be built at an arbitrary point, so a window driven by one is a window no test can
 walk through.
 
-Byte volume is counted **per finished file** (`bar.rom_done(bytes)`,
-`bar.media_done(kind, bytes)`, sized with a `stat` on what was just written). Neither
-`internetarchive` nor `screenscraper` reports anything while a transfer is in flight —
-see the handoffs in `.claude/plans/v0.19.0/` — so the figure advances in steps, and there
-is no per-download percentage in the `rom` cell.
+Byte volume is counted **as it arrives**, from the progress callbacks of
+`internetarchive` v0.3.0 and `screenscraper` v0.8.0 (`bar.rom_progress(read, total)`, once
+per 64 KiB). `rom_done()` and `media_done()` add nothing — doing both counted every file
+twice. A local copy has no callback to hook (`fs::copy` never comes back), so `CopyRom`
+alone still counts the file size, through `bar.rom_copied()`.
+
+**`read` goes backwards**, twice over: `internetarchive` truncates the file and restarts
+from zero on a mirror fallback, and the next file of the same ROM starts its own count at
+zero. `transfer_delta()` reads any drop as "a transfer began" and counts everything
+written since, so the run's counter is monotone — which is what `Rate` needs, and
+`Rate::tick` saturates as a second line of defence. A mirror fallback therefore counts the
+re-fetched prefix twice, which is honest: those bytes did cross the wire twice.
+
+The callbacks run through `RomBar::handle()`, a cheap second handle on the row, so the
+`Rom` lock is not held for the length of a transfer.
 
 **Colour.** Every colour in `render.rs` goes through `palette::color(Token)` — nine
 roles, resolved once from `COLORTERM`. Without an explicit `truecolor`/`24bit` we assume
@@ -707,6 +762,7 @@ truecolor and visibly different with it.
 |---|---|---|
 | `·` | not reached | dark gray |
 | spinner | running | cyan (yellow when blocked on the user) |
+| `62%` | transferring, share known | green |
 | `✓` | done | green |
 | `=` | nothing to do, identical to the last run | dark gray |
 | `✗` | failed | red |
@@ -856,7 +912,14 @@ stage is:
 3. A column in `grid::columns()` and its span in `render::row_line()`
 
 `PANELS`, `PanelDef`, `RomPhase` and `render_active()` are gone: they existed to decide
-which of two panels a ROM belonged to, and there is only one list now.
+which of two panels a ROM belonged to, and there is only one list now. `Phase` and
+`StepKind::phase()` went the same way in v0.20 — they mapped a step onto the panel it
+belonged to.
+
+`StepData` carries exactly one thing, `LookupSS { candidates }`, because `LookupSS` and
+`WaitModal` run on different pools and cannot hand them over directly. Every other step
+passes its results through the `Rom`; the per-kind payloads that used to sit here were
+only ever written, and being a second, staler copy of the truth is not a use.
 
 ## Nix stack
 

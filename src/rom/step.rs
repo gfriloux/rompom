@@ -3,24 +3,14 @@ use std::{
   time::Instant,
 };
 
-use screenscraper::jeuinfo::JeuInfo;
-
-use crate::{package::Medias, ui::ModalCandidate};
+use crate::ui::ModalCandidate;
 
 // ── Phase ──────────────────────────────────────────────────────────────────
 
 /// Logical pipeline phase for a step.
 /// Does not depend on `ui::RomPhase` (which is private to `ui`).
 #[allow(dead_code)]
-pub enum Phase {
-  Discovery,
-  Packaging,
-  Downloads,
-  Completed,
-}
-
 // ── StepKind ───────────────────────────────────────────────────────────────
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum StepKind {
   ComputeHashes,
@@ -39,15 +29,6 @@ pub enum StepKind {
 impl StepKind {
   /// Returns the logical pipeline phase this step belongs to.
   #[allow(dead_code)]
-  pub fn phase(&self) -> Phase {
-    match self {
-      StepKind::ComputeHashes | StepKind::LookupSS | StepKind::WaitModal => Phase::Discovery,
-      StepKind::BuildPackage => Phase::Packaging,
-      StepKind::CopyRom | StepKind::DownloadRom | StepKind::DownloadMedias => Phase::Downloads,
-      StepKind::SaveState => Phase::Completed,
-    }
-  }
-
   /// Returns true for steps that must run on `pool_blocking` (i.e. they can
   /// block indefinitely on user input). Only `WaitModal` qualifies.
   pub fn is_blocking(&self) -> bool {
@@ -128,30 +109,20 @@ impl std::fmt::Display for StepError {
 
 /// Per-step input/output data.
 #[allow(dead_code)]
+/// What a step leaves behind for a later one, in the pipeline rather than in the `Rom`.
+///
+/// There is exactly one such thing. Every other step passes its results through the
+/// `Rom` — `sha1`, `jeu`, `medias`, `romname` all live there — and the per-kind variants
+/// that used to be here only ever got written: `ComputeHashes` and `BuildPackage` copied
+/// values the `Rom` already held, and `WaitModal` stored a `JeuInfo` "for telemetry" that
+/// nothing ever read back. Being a second, staler copy of the truth is not a use.
 pub enum StepData {
-  ComputeHashes {
-    sha1: Option<String>,
-    md5: Option<String>,
-    crc32: Option<String>,
-    size: u64,
-    mtime: u64,
-  },
-  LookupSS {
-    jeu: Box<Option<JeuInfo>>,
-    candidates: Vec<ModalCandidate>,
-  },
-  WaitModal {
-    jeu: Box<Option<JeuInfo>>,
-  },
-  BuildPackage {
-    medias: Box<Option<Medias>>,
-    romname: Option<String>,
-    pkgver: u32,
-  },
-  CopyRom,
-  DownloadRom,
-  DownloadMedias,
-  SaveState,
+  /// The name-search results, waiting for `WaitModal` to put them in front of the user.
+  /// This one is real: `LookupSS` and `WaitModal` run on different pools, so the
+  /// candidates cannot simply be handed over.
+  LookupSS { candidates: Vec<ModalCandidate> },
+  /// Nothing to carry.
+  None,
 }
 
 // ── Step ──────────────────────────────────────────────────────────────────

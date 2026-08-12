@@ -1,6 +1,6 @@
 use std::{collections::HashMap, path::Path};
 
-use screenscraper::{jeuinfo::JeuInfo, ApiFailure};
+use screenscraper::{download::Error as MediaError, jeuinfo::JeuInfo, ApiFailure};
 
 use crate::{
   package::{media_ext, Medias},
@@ -129,6 +129,36 @@ pub(crate) fn check_media_changes(
   (changed, lines)
 }
 
+// ── Media download failures ────────────────────────────────────────────────
+
+/// What a failed media download means for the step, said in rompom's own words.
+///
+/// The library error is **never** quoted. Its `Download` and `Body` variants interpolate
+/// `media.url`, and that URL is the `mediaJeu.php` API call ScreenScraper handed back —
+/// `devid`, `devpassword`, `ssid` and `sspassword` included, since `base_query()` puts
+/// them in every request. Formatting the error into the cause wrote both passwords into
+/// the grid, the errors view, `<system>.errors.log`, the end-of-run summary and
+/// `<system>.debug.log`.
+///
+/// This is the remedy P1.1 applied to the identification path, on the path P1.1 never
+/// looked at. Same rule: compose the sentence from the *variant*, not from the `Display`.
+///
+/// `Io` and `ChecksumMismatch` carry a local path and two sha1s — useful, and carrying no
+/// secret — so those are quoted in full. They are also the only two a test can build:
+/// `reqwest::Error` has no public constructor. The guarantee on the other two is
+/// structural, and visible on the next line: `err` is matched, never interpolated.
+pub(crate) fn media_failure(kind: &str, err: &MediaError) -> StepError {
+  let reason = match err {
+    MediaError::Download { .. } => "download failed".to_string(),
+    MediaError::Body { .. } => "transfer interrupted".to_string(),
+    MediaError::Io { path, source } => format!("could not write {}: {}", path.display(), source),
+    MediaError::ChecksumMismatch { expected, got } => {
+      format!("sha1 mismatch: expected {}, got {}", expected, got)
+    }
+  };
+  StepError::Transient(format!("media {}: {}", kind, reason))
+}
+
 // ── Modal candidates ───────────────────────────────────────────────────────
 
 /// The nine tracked assets, in `MEDIA_ICONS` order, and the ScreenScraper media name
@@ -193,6 +223,95 @@ mod tests {
   use super::*;
   use screenscraper::jeuinfo::Media;
   use std::path::PathBuf;
+
+  // ── media_failure ────────────────────────────────────────────────────────
+
+  /// The URL ScreenScraper hands back for a media is its own `mediaJeu.php` call, with
+  /// `devpassword` and `sspassword` in the query string. It must not reach a cause,
+  /// which is displayed in the grid, written to `<system>.errors.log` and to the debug
+  /// log, and printed in the end-of-run summary.
+  ///
+  /// Before the fix, `format!("media {}: {}", kind, e)` put the whole thing there.
+  #[test]
+  fn a_media_failure_never_quotes_the_url() {
+    let cases = [
+      media_failure(
+        "video",
+        &MediaError::Io {
+          path: PathBuf::from("snes/Some Game/video.mp4"),
+          source: std::io::Error::other("disk full"),
+        },
+      ),
+      media_failure(
+        "wheel",
+        &MediaError::ChecksumMismatch {
+          expected: "3f9a1c77e04b2d8815ce6f0aa19b7c4d2e5081aa".to_string(),
+          got: "0000000000000000000000000000000000000000".to_string(),
+        },
+      ),
+    ];
+    for case in &cases {
+      let text = case.to_string().to_ascii_lowercase();
+      for secret in [
+        "devpassword",
+        "sspassword",
+        "devid",
+        "ssid",
+        "http",
+        "mediajeu",
+      ] {
+        assert!(
+          !text.contains(secret),
+          "{:?} leaks {:?}",
+          case.to_string(),
+          secret
+        );
+      }
+    }
+  }
+
+  /// What is safe *is* said: an unwritable file names the file, and a bad checksum names
+  /// both sums. A cause nobody can act on is only marginally better than a leaked one.
+  #[test]
+  fn a_media_failure_keeps_what_is_safe_to_show() {
+    let io = media_failure(
+      "manual",
+      &MediaError::Io {
+        path: PathBuf::from("snes/Some Game/manual.pdf"),
+        source: std::io::Error::other("disk full"),
+      },
+    );
+    assert!(io.to_string().contains("snes/Some Game/manual.pdf"));
+    assert!(io.to_string().contains("disk full"));
+
+    let sha = media_failure(
+      "image",
+      &MediaError::ChecksumMismatch {
+        expected: "aaaa".to_string(),
+        got: "bbbb".to_string(),
+      },
+    );
+    assert!(sha.to_string().contains("aaaa"));
+    assert!(sha.to_string().contains("bbbb"));
+  }
+
+  /// The `media <kind>: ` prefix is what the errors view keys on to bucket a failure,
+  /// and a checksum failure has to outrank the transfer that carried it.
+  #[test]
+  fn a_media_failure_still_says_which_asset_it_was() {
+    let f = media_failure(
+      "bezel",
+      &MediaError::ChecksumMismatch {
+        expected: "a".to_string(),
+        got: "b".to_string(),
+      },
+    );
+    assert!(f.to_string().starts_with("media bezel: "));
+    assert_eq!(
+      crate::ui::errors::classify(&f.to_string()),
+      crate::ui::errors::ErrorKind::Checksum
+    );
+  }
 
   // ── candidate_from ───────────────────────────────────────────────────────
 

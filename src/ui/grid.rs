@@ -96,7 +96,7 @@ pub(crate) fn short_status(entry: &RomEntry) -> String {
     let done = entry.media.iter().filter(|d| **d != Dot::Todo).count();
     return format!("{}/{}", done, MEDIA_COUNT);
   }
-  if entry.rom == Cell::Running {
+  if matches!(entry.rom, Cell::Running | Cell::Progress(_)) {
     return "rom".to_string();
   }
   if entry.pkg == Cell::Running {
