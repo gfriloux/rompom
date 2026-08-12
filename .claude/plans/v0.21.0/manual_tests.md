@@ -127,5 +127,5 @@ et les lignes `rom_unchanged` toujours présentes pour les deux origines (folder
 | M6 | | |
 | M7 | | |
 | M8 | | |
-| M9 | | |
+| M9 | 2026-08-12 | **OK** — Castlevania III (Europe), le manuel arrive |
 | M10 | | |
