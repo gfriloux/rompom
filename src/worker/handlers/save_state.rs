@@ -17,20 +17,10 @@ use super::super::WorkerContext;
 
 /// Build a `HashMap<kind, Option<sha1>>` from a `Medias` struct.
 fn medias_to_sha1_map(medias: &Medias) -> HashMap<String, Option<String>> {
-  let mut map = HashMap::new();
-  for (kind, media) in [
-    ("video", medias.video.as_ref()),
-    ("image", medias.image.as_ref()),
-    ("thumbnail", medias.thumbnail.as_ref()),
-    ("bezel", medias.bezel.as_ref()),
-    ("marquee", medias.marquee.as_ref()),
-    ("screenshot", medias.screenshot.as_ref()),
-    ("wheel", medias.wheel.as_ref()),
-    ("manual", medias.manual.as_ref()),
-  ] {
-    map.insert(kind.to_string(), media.map(|m| m.sha1.clone()));
-  }
-  map
+  medias
+    .iter()
+    .map(|(kind, media)| (kind.to_string(), media.map(|m| m.sha1.clone())))
+    .collect()
 }
 
 // ── SaveState ─────────────────────────────────────────────────────────────

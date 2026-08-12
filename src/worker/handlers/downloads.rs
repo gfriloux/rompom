@@ -250,16 +250,7 @@ pub(crate) fn handle_download_medias(
   let directory = Path::new(&filename).with_extension("");
 
   if let Some(ref medias) = medias {
-    for (kind, maybe_media) in [
-      ("video", medias.video.as_ref()),
-      ("image", medias.image.as_ref()),
-      ("thumbnail", medias.thumbnail.as_ref()),
-      ("bezel", medias.bezel.as_ref()),
-      ("marquee", medias.marquee.as_ref()),
-      ("screenshot", medias.screenshot.as_ref()),
-      ("wheel", medias.wheel.as_ref()),
-      ("manual", medias.manual.as_ref()),
-    ] {
+    for (kind, maybe_media) in medias.iter() {
       match maybe_media {
         Some(m) => {
           rom_arc.lock().unwrap().bar.start_media(kind);

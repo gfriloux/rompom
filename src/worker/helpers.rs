@@ -3,7 +3,7 @@ use std::{collections::HashMap, path::Path};
 use screenscraper::{download::Error as MediaError, jeuinfo::JeuInfo, ApiFailure};
 
 use crate::{
-  package::Medias,
+  package::{pick_media, Medias, MEDIA_KINDS},
   rom::StepError,
   ui::{Dot, ModalCandidate, MEDIA_COUNT},
 };
@@ -83,16 +83,7 @@ pub(crate) fn check_media_changes(
   let mut changed = false;
   let mut lines = Vec::new();
 
-  for (kind, media) in [
-    ("video", medias.video.as_ref()),
-    ("image", medias.image.as_ref()),
-    ("thumbnail", medias.thumbnail.as_ref()),
-    ("bezel", medias.bezel.as_ref()),
-    ("marquee", medias.marquee.as_ref()),
-    ("screenshot", medias.screenshot.as_ref()),
-    ("wheel", medias.wheel.as_ref()),
-    ("manual", medias.manual.as_ref()),
-  ] {
+  for (kind, media) in medias.iter() {
     let new_sha1 = media.map(|m| m.sha1.as_str());
     let prev_sha1 = prev.get(kind).and_then(|v| v.as_deref());
     if new_sha1 != prev_sha1 {
@@ -147,23 +138,6 @@ pub(crate) fn media_failure(kind: &str, err: &MediaError) -> StepError {
 
 // ── Modal candidates ───────────────────────────────────────────────────────
 
-/// The nine tracked assets, in `MEDIA_ICONS` order, and the ScreenScraper media name
-/// each one is fetched under.
-///
-/// `description` has no media name: it comes from the synopsis, which is text on the
-/// game rather than a file to download. `video` is the one asset with a fallback —
-/// `video-normalized` when ScreenScraper has re-encoded it, the raw upload otherwise.
-const CANDIDATE_MEDIA: [&str; MEDIA_COUNT - 1] = [
-  "video",
-  "sstitle",
-  "box-2D",
-  "ss",
-  "bezel-16-9",
-  "marquee",
-  "wheel",
-  "manuel",
-];
-
 /// Projects a search result into what the modal shows.
 ///
 /// Nothing here calls ScreenScraper: `jeuRecherche` is documented as "identical to the
@@ -178,13 +152,11 @@ pub(crate) fn candidate_from(jeu: &JeuInfo, lang: &[&str]) -> ModalCandidate {
   if jeu.find_desc(lang) != "Unknown" {
     media[0] = Dot::Fresh;
   }
-  for (i, name) in CANDIDATE_MEDIA.iter().enumerate() {
-    let found = if *name == "video" {
-      jeu.media("video-normalized").or_else(|| jeu.media("video"))
-    } else {
-      jeu.media(name)
-    };
-    if found.is_some() {
+  // Offset by one: the description dot above owns column 0, and `MEDIA_KINDS` covers
+  // the eight that follow it — in that same order, which is what makes this indexing
+  // legitimate rather than a coincidence.
+  for (i, (_, ss_names)) in MEDIA_KINDS.iter().enumerate() {
+    if pick_media(jeu, ss_names).is_some() {
       media[i + 1] = Dot::Fresh;
     }
   }

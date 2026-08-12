@@ -33,6 +33,16 @@ pub(crate) const MEDIA_KINDS: [(&str, &[&str]); 8] = [
   ("manual", &["manuel"]),
 ];
 
+/// The first of these ScreenScraper media names the game actually has, if any.
+///
+/// The names come from `MEDIA_KINDS`, so the one asset with a fallback — a video, served
+/// re-encoded when ScreenScraper has done so and raw otherwise — is handled the same way
+/// wherever the question is asked: when building a package, and when telling the modal
+/// which assets a candidate would bring.
+pub(crate) fn pick_media(jeu: &JeuInfo, ss_names: &[&str]) -> Option<Media> {
+  ss_names.iter().find_map(|name| jeu.media(name))
+}
+
 #[derive(Default, Clone)]
 pub struct Medias {
   pub image: Option<Media>,
@@ -62,13 +72,13 @@ impl Medias {
     .into_iter()
   }
 
-  /// Picks the assets out of a ScreenScraper result — first name that answers wins.
-  fn from_jeu(jeu: &mut JeuInfo) -> Self {
+  /// Picks the assets out of a ScreenScraper result.
+  fn from_jeu(jeu: &JeuInfo) -> Self {
     let pick = |kind: &str| -> Option<Media> {
       MEDIA_KINDS
         .iter()
         .find(|(k, _)| *k == kind)
-        .and_then(|(_, names)| names.iter().find_map(|name| jeu.media(name)))
+        .and_then(|(_, names)| pick_media(jeu, names))
     };
     Medias {
       video: pick("video"),
@@ -344,7 +354,7 @@ impl Package {
   }
 
   pub fn new(
-    mut jeu: Option<JeuInfo>,
+    jeu: Option<JeuInfo>,
     file: &str,
     disc1_filename: &str,
     url: &str,
@@ -352,7 +362,7 @@ impl Package {
     extra_discs: Vec<(String, String, String)>,
   ) -> Result<Package> {
     let medias = match jeu {
-      Some(ref mut x) => Medias::from_jeu(x),
+      Some(ref x) => Medias::from_jeu(x),
       None => Medias::default(),
     };
     Ok(Package {

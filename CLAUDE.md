@@ -281,7 +281,8 @@ LookupSS → WaitModal* → BuildPackage → DownloadRom ────┐
   of existing file; copies/downloads only if missing or corrupt. For multi-disc games, processes
   disc 1 (from `source`) then all `extra_discs`. The destination filename for disc 1 is derived
   from `source.file_name` (the actual disc-1 basename), not from the virtual `filename`.
-- **`DownloadMedias`** — iterates 8 canonical media kinds. Reads `rom.medias` by
+- **`DownloadMedias`** — walks `Medias::iter()`, so the dots fill in the same order the
+  columns are drawn — see *The canonical asset order* below. Reads `rom.medias` by
   **clone**, never by `take()` — see *Never empty the Rom to work on it* below. For each: skips if sha1 already valid
   on disk (`media_skipped`), downloads otherwise (`media_done`), or marks unavailable if SS has none.
   Each asset is fetched from `package::media_url()` — the public path, not the API URL the
