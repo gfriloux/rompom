@@ -507,14 +507,22 @@ ScreenScraper handed back, and `base_query()` puts `devid`, `devpassword`, `ssid
   identification path. `Io` and `ChecksumMismatch` carry only a local path and two sha1s,
   so those are quoted in full.
 - **It must never reach a PKGBUILD, nor be the URL rompom fetches.** `package::media_url()`
-  builds the public `https://screenscraper.fr/medias/{systemeid}/{jeuid}/{type}({region}).{format}`
-  path from `Media::name` and `Media::region` — nothing is parsed out of the API URL — and
-  it is used **twice**: for the PKGBUILD `sources`, and for rompom's
+  builds the public `https://screenscraper.fr/medias/{systemeid}/{jeuid}/{media}.{format}`
+  path, where `{media}` is the **`media=` parameter of that same API call** and nothing
+  else is taken from it. It is used **twice**: for the PKGBUILD `sources`, and for rompom's
   own download. A PKGBUILD is published, and pulling every asset of every ROM through
   `mediaJeu.php` is how an account gets rate-limited off ScreenScraper. The public path
   wants a `Referer`, which the `screenscraper` library sends on every media request.
   This is laundering, not duplication, and `TODO.md` carries a warning against
   "simplifying" it.
+
+  **`Media::region` does not name the file.** It says which region the asset *serves*.
+  ScreenScraper stores one file per primary region and lists it again under each secondary
+  region it covers — the "région principale et région(s) secondaire(s)" of a game's page —
+  so `manuel` with `region: eu` can carry `media=manuel(fr)`, same sha1, and the file
+  `manuel(eu).pdf` simply does not exist. Deriving the name from `region` produced a 404
+  with a correct checksum next to it. `media_url()` falls back to `{type}({region})` only
+  when the parameter is missing.
 
 ## RomSourceData / Rom structs
 

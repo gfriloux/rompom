@@ -226,6 +226,64 @@ sha1 local contre l'attendu, ou déléguer à `Download::verify_sha1` — passe 
 Vérification : `just ci`
 Commit : `refactor(pipeline): share the disc loop between the copy and download handlers`
 
+#### Phase D — Le nom de fichier d'un média *(ajoutée le 2026-08-12)*
+
+**Contexte.** Bug signalé sur *Castlevania III — Dracula's Curse (Europe)* : rompom
+demande `manuel(eu).pdf`, qui rend 404, alors que le fichier servi est `manuel(fr).pdf`.
+
+**Ce que l'API dit vraiment** (sondée sur `systemeid=3&gameid=1278`) :
+
+```
+type    region  →  paramètre media=
+manuel  fr      →  manuel(fr)
+manuel  eu      →  manuel(fr)      ← même fichier, même sha1
+box-3D  fr      →  box-3D(eu)
+box-3D  uk      →  box-3D(eu)
+```
+
+`Media.region` ne nomme pas le fichier : il dit **quelle région cet asset dessert**. Un
+seul fichier en dessert plusieurs — la « région principale et région(s) secondaire(s) » de
+la fiche — et ScreenScraper le déclare une fois par région. Le vrai nom est le paramètre
+`media=` de l'URL d'API. Vérifié : `manuel(eu).pdf` 404 / `manuel(fr).pdf` 200,
+`box-3D(fr).png` 404 / `box-3D(eu).png` 200.
+
+Le sha1 des deux entrées est identique et correspond au fichier servi
+(`a9a9c42c590c7401c99d4a28e11125b16e24ac4b`), donc **seule l'URL est fausse** : le PKGBUILD
+publié porte aujourd'hui un `sha1sums` juste en face d'une source qui 404.
+
+`TODO.md:219` décrivait la bonne méthode (« `slug` sort du paramètre `media=` de cette même
+URL ») ; l'implémentation a dérivé vers `name` + `region` et le commentaire de `media_url()`
+affirme maintenant le contraire. Les six exemples qu'il cite sont tous des cas où région
+desservie = région du fichier.
+
+**D1 — Le slug vient de `media=`**
+Description : `media_url()` lit le paramètre `media=` de `m.url` et l'emploie tel quel,
+assaini par une liste blanche qui **garde les parenthèses** (`sanitize_token` les mange).
+Repli sur `name` + `region` si le paramètre est absent. La valeur n'est pas
+percent-encodée — vérifié sur la réponse brute. Rien d'autre de cette URL ne survit :
+c'est un paramètre extrait, pas l'URL réutilisée.
+Tests : le cas région secondaire (`manuel`/`eu` → `manuel(fr).pdf`), le cas nominal
+inchangé, un slug hostile, un `media=` absent.
+Vérification : `just ci` — le snapshot PKGBUILD bouge (les fixtures portent maintenant un
+`media=` réaliste).
+Commit : `fix(package): take the media file name from the URL ScreenScraper hands back`
+
+#### Phase E — Repli sur l'API *(ajoutée le 2026-08-12, décision utilisateur)*
+
+**E1 — Repli sur 404**
+Description : si le chemin public rend **404**, `DownloadMedias` retente une fois via
+`m.url` (l'appel `mediaJeu.php`). Seulement 404, discerné par
+`reqwest::Error::status()` : une coupure réseau ou un 5xx reste transitoire et repasse par
+le retry normal, sinon une panne du chemin public ferait passer tous les assets de toutes
+les ROMs par l'API — le scénario de bannissement décrit dans `CLAUDE.md`.
+**Réserve posée et arbitrée par l'utilisateur** : le PKGBUILD garde l'URL publique, qui
+404. Le paquet s'installe ici parce que les médias sont posés à côté du PKGBUILD, mais un
+`makepkg` en répertoire vierge échouera sur cet asset. L'URL d'API ne peut pas l'y
+remplacer : elle porte les deux mots de passe et le PKGBUILD est publié.
+La ligne de repli va dans `<system>.debug.log`, jamais l'URL.
+Vérification : `just ci`
+Commit : `feat(pipeline): fall back to the API when the public media path is gone`
+
 #### Phase C — Clôture
 
 **C1 — Roadmap**

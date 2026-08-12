@@ -129,28 +129,68 @@ type Result<T, E = Error> = std::result::Result<T, E>;
 ///
 /// Built once and used twice: for the PKGBUILD `sources`, and for rompom's own download.
 ///
-/// The file name is `{type}({region}).{format}` — both parts come straight off the
-/// `Media`, so there is nothing to parse out of the credentialed URL and nothing to
-/// guess per asset kind. The region goes in **parentheses**; gluing it to the type, as
-/// four of the eight assets used to, gives a 404:
+/// The file name is the `media=` parameter of that same API call, plus the format as the
+/// extension. **`Media::region` does not name the file**: it says which region the asset
+/// serves. ScreenScraper stores one file per primary region and lists it again under
+/// every secondary region it covers — the "région principale et région(s) secondaire(s)"
+/// a game's page shows — so the two part company as soon as a secondary region is the one
+/// picked. Castlevania III (Europe), game 1278: the `manuel` entry for `eu` carries
+/// `media=manuel(fr)`, and both entries report the sha1 of the file actually served.
+/// Built from the region, the URL was a 404 with a correct checksum beside it:
 ///
 /// ```text
-/// …/medias/3/65388/sstitlejp.png    404
-/// …/medias/3/65388/sstitle(jp).png  200
+/// …/medias/3/1278/manuel(eu).pdf   404      …/3/1278/manuel(fr).pdf   200
+/// …/medias/3/1278/box-3D(fr).png   404      …/3/1278/box-3D(eu).png   200
 /// ```
 ///
-/// An asset with no region — a video, a marquee — has no parentheses at all.
+/// Reading one parameter out of the credentialed URL is not reusing it: `media=` is the
+/// only thing taken, and it is whitelisted on the way out. The whitelist keeps
+/// parentheses, which are part of every regional file name, and drops everything that
+/// could walk out of the media directory.
+///
+/// Falls back to `{type}({region})` when the parameter is missing — what rompom did
+/// before, and right whenever the asset serves the region it was stored for.
 pub(crate) fn media_url(system_id: u32, jeu_id: &str, m: &Media) -> String {
-  let slug = sanitize_token(&m.name);
   let ext = media_ext(&m.format);
-  let file = match m.region.as_deref().map(sanitize_token) {
-    Some(region) if !region.is_empty() => format!("{}({}).{}", slug, region, ext),
-    _ => format!("{}.{}", slug, ext),
-  };
+  let slug = media_param(&m.url)
+    .map(sanitize_media_name)
+    .unwrap_or_else(|| {
+      let name = sanitize_token(&m.name);
+      match m.region.as_deref().map(sanitize_token) {
+        Some(region) if !region.is_empty() => format!("{}({})", name, region),
+        _ => name,
+      }
+    });
   format!(
-    "https://screenscraper.fr/medias/{}/{}/{}",
-    system_id, jeu_id, file
+    "https://screenscraper.fr/medias/{}/{}/{}.{}",
+    system_id, jeu_id, slug, ext
   )
+}
+
+/// The `media=` parameter of a `mediaJeu.php` URL, and nothing else from it.
+///
+/// The value arrives literally — `media=manuel(fr)`, parentheses and all, not
+/// percent-encoded — so there is no decoding step to get wrong. Matching the key exactly
+/// matters: `mediaformat=` sits right next to it in every one of these URLs.
+fn media_param(url: &str) -> Option<&str> {
+  url
+    .split_once('?')?
+    .1
+    .split('&')
+    .find_map(|pair| pair.strip_prefix("media="))
+    .filter(|value| !value.is_empty())
+}
+
+/// Keeps only what may appear in a ScreenScraper media file name.
+///
+/// `sanitize_token` is too strict here — it eats the parentheses that every regional
+/// asset is named with — and a bare whitelist is still what stands between this value and
+/// a `Path::join`: the name is composed by ScreenScraper, and it lands in a filename.
+fn sanitize_media_name(value: &str) -> String {
+  value
+    .chars()
+    .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '(' | ')'))
+    .collect()
 }
 
 fn render_template(src: &str, ctx: &minijinja::Value) -> String {
@@ -602,16 +642,23 @@ mod tests {
 
   // ── media_url ────────────────────────────────────────────────────────────
 
-  /// A `Media` as ScreenScraper returns it. `url` is the `mediaJeu.php` call, with the
-  /// credentials this function exists to keep out of everything downstream — and which
-  /// it no longer even reads.
+  /// A `Media` as ScreenScraper returns it, in the ordinary case: the asset serves the
+  /// region it was stored for, so `media=` and `region` agree. `url` is the
+  /// `mediaJeu.php` call, with the credentials this function exists to keep out of
+  /// everything downstream — only the `media=` parameter is ever taken from it.
   fn api_media(name: &str, format: &str, region: Option<&str>) -> Media {
+    let file = match region {
+      Some(region) if !region.is_empty() => format!("{}({})", name, region),
+      _ => name.to_string(),
+    };
     Media {
       name: name.to_string(),
       parent: "jeu".to_string(),
-      url: "https://api.screenscraper.fr/api2/mediaJeu.php?devid=x&devpassword=y&ssid=z\
-            &sspassword=w&systemeid=3&jeuid=65388&media=whatever"
-        .to_string(),
+      url: format!(
+        "https://api.screenscraper.fr/api2/mediaJeu.php?devid=x&devpassword=y&ssid=z\
+         &sspassword=w&systemeid=3&jeuid=65388&media={}&mediaformat={}",
+        file, format
+      ),
       region: region.map(str::to_string),
       crc: String::new(),
       md5: String::new(),
@@ -695,14 +742,103 @@ mod tests {
     );
   }
 
-  /// The URL goes into a published PKGBUILD, so nothing of `Media::url` may survive
-  /// into it — and nothing does: it is not read at all any more.
+  /// The URL goes into a published PKGBUILD, so nothing of `Media::url` may survive into
+  /// it beyond the one parameter naming the file.
   #[test]
   fn the_media_url_never_carries_the_credentials() {
     let url = media_url(3, "65388", &api_media("sstitle", "png", Some("jp")));
     for secret in ["devid", "devpassword", "ssid", "sspassword", "mediaJeu"] {
       assert!(!url.contains(secret), "leaks {}", secret);
     }
+  }
+
+  /// A `Media` as the API really returns it: `region` says which region the asset serves,
+  /// and the `media=` parameter names the file that serves it. The two differ whenever
+  /// one file covers several regions.
+  fn api_media_serving(name: &str, format: &str, region: &str, file: &str) -> Media {
+    Media {
+      url: format!(
+        "https://api.screenscraper.fr/api2/mediaJeu.php?devid=x&devpassword=y&ssid=z\
+         &sspassword=w&systemeid=3&jeuid=1278&media={}&mediaformat={}",
+        file, format
+      ),
+      region: Some(region.to_string()),
+      ..api_media(name, format, Some(region))
+    }
+  }
+
+  /// ScreenScraper stores one file per *primary* region and lists it again under every
+  /// secondary region it serves — the "région principale et région(s) secondaire(s)" of
+  /// a game's page. `region` therefore names the region asked for, not the file.
+  ///
+  /// Castlevania III (Europe), system 3, game 1278: the `manuel` entry for `eu` carries
+  /// `media=manuel(fr)`, and both entries report the same sha1 as the file served. Built
+  /// from `region`, the URL was `manuel(eu).pdf`, which does not exist — checked against
+  /// the server, along with a second case where the direction is reversed:
+  ///
+  /// ```text
+  /// …/medias/3/1278/manuel(eu).pdf   404      …/3/1278/manuel(fr).pdf   200
+  /// …/medias/3/1278/box-3D(fr).png   404      …/3/1278/box-3D(eu).png   200
+  /// ```
+  #[test]
+  fn the_file_named_by_the_api_wins_over_the_region_asked_for() {
+    let base = "https://screenscraper.fr/medias/3/1278";
+
+    assert_eq!(
+      media_url(
+        3,
+        "1278",
+        &api_media_serving("manuel", "pdf", "eu", "manuel(fr)")
+      ),
+      format!("{}/manuel(fr).pdf", base)
+    );
+    assert_eq!(
+      media_url(
+        3,
+        "1278",
+        &api_media_serving("box-3D", "png", "fr", "box-3D(eu)")
+      ),
+      format!("{}/box-3D(eu).png", base)
+    );
+    // The ordinary case, where the two agree, is unchanged.
+    assert_eq!(
+      media_url(
+        3,
+        "1278",
+        &api_media_serving("manuel", "pdf", "us", "manuel(us)")
+      ),
+      format!("{}/manuel(us).pdf", base)
+    );
+  }
+
+  /// The parameter is read out of a URL ScreenScraper composed, so it is sanitised like
+  /// anything else that reaches a filename — while keeping the parentheses, which are
+  /// part of every regional file name and which `sanitize_token` would eat.
+  #[test]
+  fn a_hostile_file_name_cannot_leave_the_media_directory() {
+    let hostile = media_url(
+      3,
+      "1278",
+      &api_media_serving("manuel", "pdf", "eu", "../../etc/passwd"),
+    );
+
+    assert_eq!(
+      hostile,
+      "https://screenscraper.fr/medias/3/1278/etcpasswd.pdf"
+    );
+  }
+
+  /// Nothing says the parameter is always there. Falling back to the region keeps the
+  /// behaviour rompom had before, which is right far more often than not.
+  #[test]
+  fn a_url_without_the_parameter_falls_back_to_the_region() {
+    let mut media = api_media("sstitle", "png", Some("jp"));
+    media.url = "https://api.screenscraper.fr/api2/mediaJeu.php?devid=x&jeuid=1278".to_string();
+
+    assert_eq!(
+      media_url(3, "1278", &media),
+      "https://screenscraper.fr/medias/3/1278/sstitle(jp).png"
+    );
   }
 
   use super::*;
