@@ -553,3 +553,15 @@ GitHub release whose body is the `CHANGELOG.md` entry for that exact version, wi
 static musl binary attached.
 
 Dependencies (Cargo, flake inputs, GitHub Actions) are kept up to date by **Renovate**.
+[`renovate.json`](renovate.json) carries three rules that one-crate-per-pull-request cannot
+express on its own:
+
+- **`sha1` + `md-5` are one update.** `hash.rs` applies `sha1::Digest` to `Md5`, so the two
+  crates must sit on the same `digest` major or the build fails on whichever arrives first.
+- **`ratatui` + `crossterm` are one update.** rompom drives raw mode and key events through
+  its own `crossterm`, ratatui drives the screen through the one its backend pins; updating
+  them apart leaves two versions of it in the tree.
+- **`reqwest` follows the internal libs.** Nothing in `src/` calls it — it is declared to pin
+  the version `screenscraper` and `internetarchive` resolve. Moving it alone would add a
+  second HTTP and TLS stack to the binary, so major and minor updates are held until those
+  two libs move.
