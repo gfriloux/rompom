@@ -8,6 +8,31 @@ use super::emulationstation::Game;
 use crate::hash::sha1_file;
 use screenscraper::jeuinfo::{JeuInfo, Media};
 
+/// The eight downloadable assets, in the order the grid shows them, each with the
+/// ScreenScraper media names to try for it.
+///
+/// `ui::MEDIA_ICONS` fixes that order for the columns, and this list follows it — a
+/// test holds the two together, because the dots are indexed by position and a list out
+/// of step would attribute an asset to the wrong column.
+///
+/// `description` is not here: it comes from the synopsis, which is text on the game
+/// rather than a file to fetch. `video` is the only asset with a fallback —
+/// ScreenScraper serves a re-encoded copy when it has one, the raw upload otherwise.
+///
+/// This list used to be written out five times across four files, in two different
+/// orders, and the `video` fallback twice. Adding an asset meant five coherent edits,
+/// and one missed shifted the dots or dropped the file.
+pub(crate) const MEDIA_KINDS: [(&str, &[&str]); 8] = [
+  ("video", &["video-normalized", "video"]),
+  ("image", &["sstitle"]),
+  ("thumbnail", &["box-2D"]),
+  ("screenshot", &["ss"]),
+  ("bezel", &["bezel-16-9"]),
+  ("marquee", &["marquee"]),
+  ("wheel", &["wheel"]),
+  ("manual", &["manuel"]),
+];
+
 #[derive(Default, Clone)]
 pub struct Medias {
   pub image: Option<Media>,
@@ -18,6 +43,44 @@ pub struct Medias {
   pub screenshot: Option<Media>,
   pub wheel: Option<Media>,
   pub manual: Option<Media>,
+}
+
+impl Medias {
+  /// Every asset paired with the name it is known by outside ScreenScraper, in the
+  /// canonical order. The one way to walk these fields.
+  pub(crate) fn iter(&self) -> impl Iterator<Item = (&'static str, Option<&Media>)> + '_ {
+    [
+      ("video", self.video.as_ref()),
+      ("image", self.image.as_ref()),
+      ("thumbnail", self.thumbnail.as_ref()),
+      ("screenshot", self.screenshot.as_ref()),
+      ("bezel", self.bezel.as_ref()),
+      ("marquee", self.marquee.as_ref()),
+      ("wheel", self.wheel.as_ref()),
+      ("manual", self.manual.as_ref()),
+    ]
+    .into_iter()
+  }
+
+  /// Picks the assets out of a ScreenScraper result — first name that answers wins.
+  fn from_jeu(jeu: &mut JeuInfo) -> Self {
+    let pick = |kind: &str| -> Option<Media> {
+      MEDIA_KINDS
+        .iter()
+        .find(|(k, _)| *k == kind)
+        .and_then(|(_, names)| names.iter().find_map(|name| jeu.media(name)))
+    };
+    Medias {
+      video: pick("video"),
+      image: pick("image"),
+      thumbnail: pick("thumbnail"),
+      screenshot: pick("screenshot"),
+      bezel: pick("bezel"),
+      marquee: pick("marquee"),
+      wheel: pick("wheel"),
+      manual: pick("manual"),
+    }
+  }
 }
 
 pub struct Package {
@@ -166,6 +229,23 @@ pub(crate) fn media_ext(format: &str) -> String {
   }
 }
 
+/// The name a media asset is filed under, both in the PKGBUILD `sources` and on disk.
+///
+/// The two must agree or `makepkg` looks for a file nobody wrote, which is why there is
+/// one function rather than a rule remembered in two places.
+///
+/// The result is joined onto the ROM's output directory, and `Path::join` happily walks
+/// out of it: a ScreenScraper format of `png/../../x` would have written outside the
+/// tree. `media_ext` whitelists the extension, so what comes back is always a single
+/// path component.
+pub(crate) fn media_filename(kind: &str, format: &str) -> String {
+  match kind {
+    "video" => "video.mp4".to_string(),
+    "manual" => "manual.pdf".to_string(),
+    _ => format!("{}.{}", kind, media_ext(format)),
+  }
+}
+
 /// A `sha1sums` entry is 40 hex characters or it is corrupt.
 ///
 /// Fails closed: anything else becomes an all-zero hash, so `makepkg` refuses the
@@ -272,16 +352,7 @@ impl Package {
     extra_discs: Vec<(String, String, String)>,
   ) -> Result<Package> {
     let medias = match jeu {
-      Some(ref mut x) => Medias {
-        image: x.media("sstitle"),
-        thumbnail: x.media("box-2D"),
-        bezel: x.media("bezel-16-9"),
-        video: x.media("video-normalized").or_else(|| x.media("video")),
-        marquee: x.media("marquee"),
-        screenshot: x.media("ss"),
-        wheel: x.media("wheel"),
-        manual: x.media("manuel"),
-      },
+      Some(ref mut x) => Medias::from_jeu(x),
       None => Medias::default(),
     };
     Ok(Package {
@@ -374,69 +445,19 @@ impl Package {
       sha1_file(&directory.join("description.xml")).unwrap_or_else(|_| String::new());
     sha1sums.push(shell_quote(&sanitize_sha1(&description_sha1)));
 
-    // Media sources. `format` and `region` come straight from ScreenScraper and end up
-    // in filenames, so they go through the token whitelist before anything else.
-    if let Some(ref x) = self.medias.video {
-      sources.push(shell_quote(&format!(
-        "video.mp4::{}",
-        media_url(system.id, &jeu_id, x)
-      )));
-      sha1sums.push(shell_quote(&sanitize_sha1(&x.sha1)));
-    }
-    if let Some(ref x) = self.medias.bezel {
-      sources.push(shell_quote(&format!(
-        "bezel.{}::{}",
-        media_ext(&x.format),
-        media_url(system.id, &jeu_id, x)
-      )));
-      sha1sums.push(shell_quote(&sanitize_sha1(&x.sha1)));
-    }
-    if let Some(ref x) = self.medias.image {
-      sources.push(shell_quote(&format!(
-        "image.{}::{}",
-        media_ext(&x.format),
-        media_url(system.id, &jeu_id, x)
-      )));
-      sha1sums.push(shell_quote(&sanitize_sha1(&x.sha1)));
-    }
-    if let Some(ref x) = self.medias.thumbnail {
-      sources.push(shell_quote(&format!(
-        "thumbnail.{}::{}",
-        media_ext(&x.format),
-        media_url(system.id, &jeu_id, x)
-      )));
-      sha1sums.push(shell_quote(&sanitize_sha1(&x.sha1)));
-    }
-    if let Some(ref x) = self.medias.marquee {
-      sources.push(shell_quote(&format!(
-        "marquee.{}::{}",
-        media_ext(&x.format),
-        media_url(system.id, &jeu_id, x)
-      )));
-      sha1sums.push(shell_quote(&sanitize_sha1(&x.sha1)));
-    }
-    if let Some(ref x) = self.medias.screenshot {
-      sources.push(shell_quote(&format!(
-        "screenshot.{}::{}",
-        media_ext(&x.format),
-        media_url(system.id, &jeu_id, x)
-      )));
-      sha1sums.push(shell_quote(&sanitize_sha1(&x.sha1)));
-    }
-    if let Some(ref x) = self.medias.wheel {
-      sources.push(shell_quote(&format!(
-        "wheel.{}::{}",
-        media_ext(&x.format),
-        media_url(system.id, &jeu_id, x)
-      )));
-      sha1sums.push(shell_quote(&sanitize_sha1(&x.sha1)));
-    }
-    if let Some(ref x) = self.medias.manual {
-      sources.push(shell_quote(&format!(
-        "manual.pdf::{}",
-        media_url(system.id, &jeu_id, x)
-      )));
-      sha1sums.push(shell_quote(&sanitize_sha1(&x.sha1)));
+    // Media sources, in canonical order. Both arrays are appended in the same breath,
+    // which is what keeps `sha1sums[n]` the checksum of `sources[n]` — the eight blocks
+    // this replaced each had to remember to do it. `format` and `region` come straight
+    // from ScreenScraper and end up in filenames, so `media_filename` whitelists them.
+    for (kind, media) in self.medias.iter() {
+      if let Some(m) = media {
+        sources.push(shell_quote(&format!(
+          "{}::{}",
+          media_filename(kind, &m.format),
+          media_url(system.id, &jeu_id, m)
+        )));
+        sha1sums.push(shell_quote(&sanitize_sha1(&m.sha1)));
+      }
     }
 
     // Extension of the disc files (used by multi-disc templates in a `ls *.ext` glob,
@@ -678,6 +699,93 @@ mod tests {
   }
 
   use super::*;
+
+  // ── the canonical order ──────────────────────────────────────────────────
+
+  /// `MEDIA_KINDS` and `Medias::iter()` are two lists of the same eight assets, and the
+  /// second one is what every consumer walks. They have to agree, name for name and
+  /// position for position, or an asset gets fetched under one name and filed under
+  /// another.
+  #[test]
+  fn the_table_and_the_struct_walk_the_same_assets_in_the_same_order() {
+    let table: Vec<&str> = MEDIA_KINDS.iter().map(|(kind, _)| *kind).collect();
+    let walked: Vec<&str> = Medias::default().iter().map(|(kind, _)| kind).collect();
+
+    assert_eq!(table, walked);
+  }
+
+  /// And both follow the columns on screen. The media dots are an array indexed by
+  /// position, so a list out of step with `MEDIA_ICONS` would light the bezel column
+  /// for a screenshot — which is exactly what the two competing orders used to risk.
+  #[test]
+  fn the_canonical_order_is_the_one_the_grid_shows() {
+    let columns: Vec<&str> = crate::ui::media_icons()
+      .iter()
+      .map(|(kind, _)| *kind)
+      .skip(1) // description is text on the game, not a file to fetch
+      .collect();
+    let table: Vec<&str> = MEDIA_KINDS.iter().map(|(kind, _)| *kind).collect();
+
+    assert_eq!(table, columns);
+  }
+
+  /// ScreenScraper serves a re-encoded video when it has one and the raw upload
+  /// otherwise, so `video` is the single asset with more than one name to try. The
+  /// fallback used to be written out twice, here and in the modal projection.
+  #[test]
+  fn only_the_video_has_a_fallback_name() {
+    for (kind, names) in MEDIA_KINDS {
+      let expected = if kind == "video" { 2 } else { 1 };
+      assert_eq!(names.len(), expected, "{}", kind);
+    }
+  }
+
+  // ── media_filename ───────────────────────────────────────────────────────
+
+  /// The destination is built as `directory.join(media_filename(...))`, and Path::join
+  /// resolves `..` against the directory rather than rejecting it. Before the fix,
+  /// a format of `png/../../x` produced `image.png/../../x`, which lands two levels
+  /// above the ROM's output directory.
+  #[test]
+  fn media_filename_stays_inside_the_output_directory() {
+    let directory = std::path::PathBuf::from("/out/roms/sonic");
+
+    for hostile in [
+      "png/../../x",
+      "../../etc/passwd",
+      "png/../..",
+      "/etc/passwd",
+      "png\\..\\..",
+    ] {
+      let name = media_filename("image", hostile);
+      assert!(
+        !name.contains('/') && !name.contains('\\') && !name.contains(".."),
+        "format {hostile:?} produced {name:?}"
+      );
+
+      // One path component, and the join cannot leave the directory.
+      let dest = directory.join(&name);
+      assert_eq!(dest.parent(), Some(directory.as_path()));
+      assert!(dest.starts_with(&directory));
+    }
+  }
+
+  /// The fixed kinds keep their own extension, whatever ScreenScraper claims.
+  #[test]
+  fn media_filename_keeps_the_canonical_names() {
+    assert_eq!(media_filename("video", "../../x"), "video.mp4");
+    assert_eq!(media_filename("manual", "../../x"), "manual.pdf");
+    assert_eq!(media_filename("image", "png"), "image.png");
+    assert_eq!(media_filename("thumbnail", "jpg"), "thumbnail.jpg");
+  }
+
+  /// A format that whitelists down to nothing must still yield a usable name, and the
+  /// same one the PKGBUILD source entry uses.
+  #[test]
+  fn media_filename_falls_back_when_the_format_is_unusable() {
+    assert_eq!(media_filename("image", "../.."), "image.bin");
+    assert_eq!(media_filename("image", ""), "image.bin");
+  }
 
   /// A game exercising every branch of the serialization: populated and skipped
   /// `Option` fields, and characters XML must escape (`&`, `<`, `>`, `"`).
@@ -945,23 +1053,25 @@ mod tests {
       "  'Sonic the Hedgehog.zip::https://archive.invalid/megadrive/Sonic the Hedgehog.zip'",
       "  'description.xml'",
       "  'video.mp4::https://screenscraper.fr/medias/1/65388/video-normalized.mp4'",
-      "  'bezel.png::https://screenscraper.fr/medias/1/65388/bezel-16-9(wor).png'",
       "  'image.png::https://screenscraper.fr/medias/1/65388/sstitle(wor).png'",
       "  'thumbnail.png::https://screenscraper.fr/medias/1/65388/box-2D(wor).png'",
-      "  'marquee.png::https://screenscraper.fr/medias/1/65388/marquee.png'",
       "  'screenshot.png::https://screenscraper.fr/medias/1/65388/ss(wor).png'",
+      "  'bezel.png::https://screenscraper.fr/medias/1/65388/bezel-16-9(wor).png'",
+      "  'marquee.png::https://screenscraper.fr/medias/1/65388/marquee.png'",
       "  'wheel.png::https://screenscraper.fr/medias/1/65388/wheel(wor).png'",
       "  'manual.pdf::https://screenscraper.fr/medias/1/65388/manuel(eu).pdf'",
       ")",
+      // The assets were given ascending sha1s in canonical order, so this array reading
+      // 1 to 8 in order is the pairing with `sources` holding.
       "sha1sums=(",
       &format!("  '{}'", SHA),
       "  '11f6ad8ec52a2984abaafd7c3b516503785c2072'",
       "  '1111111111111111111111111111111111111111'",
-      "  '5555555555555555555555555555555555555555'",
       "  '2222222222222222222222222222222222222222'",
       "  '3333333333333333333333333333333333333333'",
-      "  '6666666666666666666666666666666666666666'",
       "  '4444444444444444444444444444444444444444'",
+      "  '5555555555555555555555555555555555555555'",
+      "  '6666666666666666666666666666666666666666'",
       "  '7777777777777777777777777777777777777777'",
       "  '8888888888888888888888888888888888888888'",
       ")",

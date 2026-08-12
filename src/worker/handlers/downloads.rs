@@ -10,14 +10,11 @@ use screenscraper::jeuinfo::Media;
 
 use crate::{
   hash::sha1_file,
-  package::media_url,
+  package::{media_filename, media_url},
   rom::{Rom, RomSource, StepError, StepStatus},
 };
 
-use super::super::{
-  helpers::{media_failure, media_filename},
-  WorkerContext,
-};
+use super::super::{helpers::media_failure, WorkerContext};
 
 /// Downloads one disc, reporting progress to the ROM's bar as the bytes land.
 ///

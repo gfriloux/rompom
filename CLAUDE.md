@@ -149,7 +149,8 @@ src/
   emulationstation.rs       — Game struct (serde Serialize) + Game::from_jeuinfo(); serialized via quick-xml
   hash.rs                   — sha1_file / md5_file / crc32_file: streamed, lowercase hex,
                               io::Result (the old `checksums` crate panicked instead)
-  package.rs                — Package + Medias structs
+  package.rs                — Package + Medias structs, MEDIA_KINDS (the canonical asset table)
+                              media_filename() / media_url() — what an asset is called, and where from
                               build(system, lang, pkgver) → Result<bool> / build_pkgbuild() logic
                               check_description_changed() — compares generated XML with disk, no I/O
                               read_pkgver(dir) — reads pkgver from an existing PKGBUILD (returns 0 if absent)
@@ -177,7 +178,7 @@ src/
   worker/
     mod.rs                  — WorkerContext, worker_loop_main/blocking, execute_step, do_dispatch
     run_state.rs            — RunState / RunRomEntry, save/load/collect/apply_run_state/restore_bar_for_resumed_rom
-    helpers.rs              — NAME_REGIONS, search_name(), media_filename(), check_media_changes()
+    helpers.rs              — NAME_REGIONS, search_name(), check_media_changes()
     handlers/
       mod.rs                — re-exports all handler functions
       discovery.rs          — handle_compute_hashes, handle_lookup_ss, handle_wait_modal
@@ -561,6 +562,35 @@ last run:
 - `description.xml` content (detected by `Package::check_description_changed()`)
 
 If nothing changed, `Package::build()` is not called at all (`package_unchanged = true`).
+
+`sources` and `sha1sums` are two parallel arrays that `makepkg` matches **by position**,
+and nothing in the file says so. The media entries are appended by a single loop over
+`Medias::iter()`, which pushes to both in the same breath — the eight hand-written blocks
+this replaced each had to remember to. `package::tests::pkgbuild_snapshot` pins the result.
+
+## The canonical asset order
+
+There is **one** list of the eight downloadable assets: `MEDIA_KINDS` in `package.rs`,
+which pairs each asset's own name (`video`, `image`, `thumbnail`, `screenshot`, `bezel`,
+`marquee`, `wheel`, `manual`) with the ScreenScraper media names to try for it. `video` is
+the only one with more than one — `video-normalized` when ScreenScraper has re-encoded it,
+the raw upload otherwise. `description` is not in the list: it comes from the synopsis,
+which is text on the game rather than a file to fetch.
+
+Two functions read it, and everything else reads them:
+- `Medias::from_jeu()` — picks the assets out of a `JeuInfo`, first name that answers wins
+- `Medias::iter()` — the one way to walk the eight fields, used by `build_pkgbuild`,
+  `DownloadMedias`, `check_media_changes()` and `SaveState`
+
+The order is `MEDIA_ICONS`', because the grid's media dots are an array indexed by
+position: a list out of step lights the bezel column for a screenshot. Two tests hold them
+together. This used to be five lists across four files in **two** different orders, with
+the `video` fallback written twice.
+
+`media_filename(kind, format)` gives the name an asset is filed under, in the PKGBUILD
+`sources` and on disk alike — `video.mp4`, `manual.pdf`, `{kind}.{media_ext(format)}` for
+the rest. One function, because if the two disagreed `makepkg` would look for a file
+nobody wrote.
 
 System-specific templates in `assets/templates/pkgbuild/`:
 - **id 20** (Sega CD): handles `.cue` + `.bin` split, installs to `segacd/data/$_romname/`
