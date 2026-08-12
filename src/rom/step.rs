@@ -167,8 +167,23 @@ impl Step {
   }
 
   /// Decrements `wait_for` by 1 and returns the new value.
+  ///
+  /// Each predecessor decrements this exactly once, so a counter already at zero means
+  /// the DAG was built with an edge too many. Left to `fetch_sub` alone that mistake is
+  /// both silent and fatal: the counter wraps to `usize::MAX`, the `remaining == 0` test
+  /// at the call site is never true, the successor is never pushed, and the run waits
+  /// forever on a ROM that cannot finish — with nothing on screen to say why.
+  ///
+  /// The assertion cannot fire in the shipped binary, which is the point: it costs
+  /// nothing there, and it turns the hang into a named panic wherever tests run.
   pub fn dec_wait_for(&self) -> usize {
-    self.wait_for.fetch_sub(1, Ordering::SeqCst) - 1
+    let previous = self.wait_for.fetch_sub(1, Ordering::SeqCst);
+    debug_assert!(
+      previous > 0,
+      "wait_for underflow: this step has more predecessors decrementing it than the DAG \
+       declared"
+    );
+    previous - 1
   }
 
   /// Returns the current `wait_for` value.
@@ -179,5 +194,39 @@ impl Step {
   /// Returns the configured `max_retries` for this step's kind.
   pub fn max_retries(&self) -> u8 {
     self.kind.max_retries()
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  fn step(wait_for: usize) -> Step {
+    Step::new(
+      StepKind::SaveState,
+      StepStatus::Pending,
+      StepData::None,
+      Vec::new(),
+      wait_for,
+    )
+  }
+
+  /// The ordinary case, and the one the queue reads: reaching zero is what pushes the
+  /// successor.
+  #[test]
+  fn a_step_becomes_ready_when_its_last_predecessor_reports_in() {
+    let s = step(2);
+    assert_eq!(s.dec_wait_for(), 1);
+    assert_eq!(s.dec_wait_for(), 0);
+    assert_eq!(s.wait_for_count(), 0);
+  }
+
+  /// A decrement too many is a DAG bug, and an unsigned counter hides it perfectly: it
+  /// wraps to `usize::MAX`, so the caller's `remaining == 0` never matches and the run
+  /// hangs on a step nobody will ever push. Loud in debug beats silent in production.
+  #[test]
+  #[should_panic(expected = "wait_for underflow")]
+  fn decrementing_past_zero_is_caught_rather_than_wrapped() {
+    step(0).dec_wait_for();
   }
 }
