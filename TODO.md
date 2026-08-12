@@ -207,9 +207,23 @@ correction est arrivée avec ses tests : le dépôt est passé de 0 à 34 tests.
 
 ## P3 — Dette et long terme
 
-- [ ] Dédupliquer : calcul `rom_unchanged` (×2 dans discovery.rs), liste des 8 médias
-  (×4 → un `Medias::iter()`), `copy_rom`/`download_rom` (closure fetch),
-  les 8 blocs de `build_pkgbuild` (table-driven).
+- [x] **Dédupliquer** — *fait le 2026-08-12 (v0.21.0)*. Les quatre points sont soldés :
+  `rom_unchanged` devient une fonction pure unique (sept tests), les huit blocs de
+  `build_pkgbuild` une boucle, `copy_rom`/`download_rom` un `place_discs()` commun, et la
+  liste des médias **une** table. Trois écarts entre le diagnostic et le code réel :
+  - la liste des 8 médias était écrite **cinq** fois, pas quatre, et selon **deux ordres
+    différents** — `build_pkgbuild` mettait bezel en 2ᵉ, les trois sites du worker en 4ᵉ,
+    l'écran en 6ᵉ. `MEDIA_KINDS` unifie sur l'ordre de l'écran, donc les pastilles se
+    remplissent maintenant de gauche à droite, et **l'ordre des `sources` du PKGBUILD
+    change** (sans risque : `makepkg` apparie par position, la boucle pousse dans les deux
+    tableaux d'un coup, et le PKGBUILD n'entre pas dans la décision de bump).
+  - la bascule `video-normalized` → `video` était écrite deux fois ; elle vit dans
+    `pick_media()`.
+  - **bug trouvé en chemin, corrigé** : `make_game()` nommait les chemins de
+    `description.xml` avec le `format` **brut** de ScreenScraper, alors que le fichier
+    écrit passe par `media_filename()` (liste blanche de P0.2). Sur `png/../../x` le
+    fichier s'appelle `thumbnail.pngx` et EmulationStation était envoyé sur
+    `thumbnail.png/../../x` — inexistant, et hors du répertoire du jeu.
 - [x] ~~Utiliser `m.url` au lieu de reconstruire les URLs SS à la main dans
   `build_pkgbuild`~~ — **À NE PAS FAIRE.** *Constaté le 2026-08-11 en préparant v0.20.0.*
   `m.url` n'est pas un lien CDN public : c'est l'appel `mediaJeu.php` que ScreenScraper
@@ -230,8 +244,18 @@ correction est arrivée avec ses tests : le dépôt est passé de 0 à 34 tests.
   entier » était le mot juste, cette variante-là est réellement lue — `LookupSS` et
   `WaitModal` tournent sur des pools différents et ne peuvent pas se passer les
   candidats directement.
-- [ ] `debug_assert!` anti-wrap dans `dec_wait_for` ; `cancelled` sous le mutex du
-  Semaphore (supprime le polling 50 ms) ; retry sans `thread::sleep` bloquant.
+- [x] **Concurrence** — *fait le 2026-08-12 (v0.21.0)*. Les trois points :
+  - `debug_assert!` anti-wrap dans `dec_wait_for`. Le prix du bug était pire que « wrap » :
+    à `usize::MAX` le test `remaining == 0` de l'appelant ne matche jamais, le successeur
+    n'est pas poussé et le run **attend indéfiniment**, sans rien afficher.
+  - `cancelled` sous le mutex du sémaphore : l'attente perd son timeout, donc plus de
+    réveil 20 fois par seconde par worker en attente. Un permit libre continue de primer
+    sur le drapeau — un worker qui peut avancer finit son step.
+  - retry sans `thread::sleep` : `TaskQueue::push_after()` porte l'échéance, `pop_main()`
+    attend jusqu'à la plus proche. Le worker retourne au pool immédiatement, et surtout
+    **Ctrl-C n'attend plus la fin du backoff** (jusqu'à 16 s) : `shutdown()` réveille ce
+    qui attend sur quelque chose, et un thread endormi n'attend sur rien. À l'arrêt les
+    tâches datées sont abandonnées — elles sont `Pending`, `run.yml` les porte.
   *(la fuite de permit `modal_sem` est close en v0.19 — le sémaphore a été supprimé, pas
   emballé dans un guard : il sérialisait ce que le thread de rendu sérialise déjà, et sa
   capacité de 1 était ce qui empêchait la vue « à identifier » d'avoir quoi que ce soit
@@ -309,6 +333,14 @@ correction est arrivée avec ses tests : le dépôt est passé de 0 à 34 tests.
    de la lib, qui contient l'URL `mediaJeu.php` avec les deux mots de passe. Même classe
    de bug que P1.1, sur le chemin que P1.1 n'avait pas audité. Corrigée en tête de lot,
    et l'item « utiliser `m.url` » est passé d'une tâche à un avertissement.
-7. **Ensuite** — reste de la dette P3 (déduplications, `r`/`R`, packaging OpenBOR, et la
-   migration reqwest 0.12 / rustls qui demande de bouger les trois dépôts ensemble), puis
+7. **v0.21.0 — le lot dédup + concurrence.** Les deux premiers points ouverts de P3, dans
+   cet ordre : concurrence d'abord (trois commits autonomes), puis déduplication, avec un
+   snapshot du PKGBUILD posé **avant** de toucher `build_pkgbuild` — c'est ce qui rend le
+   changement d'ordre des `sources` lisible dans le diff du commit qui le porte plutôt que
+   découvert après coup. Deux bugs corrigés en chemin, tous deux trouvés en lisant le code
+   avant d'écrire le plan : le décalage `format` de `description.xml`, et le message
+   « sha1 mismatch » qui s'affichait avec deux sha1 identiques quand c'était un disque 2
+   qui avait bougé. 160 → 181 tests.
+8. **Ensuite** — reste de la dette P3 (`r`/`R`, packaging OpenBOR, et la migration
+   reqwest 0.12 / rustls qui demande de bouger les trois dépôts ensemble), puis
    contribution SS sur base saine.
