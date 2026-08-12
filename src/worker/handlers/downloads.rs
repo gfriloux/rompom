@@ -237,11 +237,15 @@ pub(crate) fn handle_download_medias(
   ctx: &WorkerContext,
 ) -> Result<StepStatus, StepError> {
   let (filename, medias, jeu_id) = {
-    let mut rom = rom_arc.lock().unwrap();
+    let rom = rom_arc.lock().unwrap();
     let filename = rom.source.filename.clone();
-    let medias = rom.medias.take(); // temporarily take ownership
-                                    // The game ID the public media path is built from. Absent only when the user skipped
-                                    // identification — in which case there are no medias to fetch either.
+    // Cloned, not taken. A `?` further down returns without restoring, and because a
+    // Transient error re-runs *this same step*, the retry then found `rom.medias` empty,
+    // skipped the whole loop and reported success — a ROM marked done with no media and
+    // its dots frozen wherever the first attempt stopped.
+    let medias = rom.medias.clone();
+    // The game ID the public media path is built from. Absent only when the user skipped
+    // identification — in which case there are no medias to fetch either.
     let jeu_id = rom.jeu.as_ref().map(|j| j.id.clone()).unwrap_or_default();
     (filename, medias, jeu_id)
   };
@@ -268,7 +272,7 @@ pub(crate) fn handle_download_medias(
           // account gets rate-limited off ScreenScraper. Same link the PKGBUILD carries,
           // built by the same function.
           let direct = Media {
-            url: media_url(ctx.system.id, &jeu_id, kind, m),
+            url: media_url(ctx.system.id, &jeu_id, m),
             ..m.clone()
           };
           let needs_download =
@@ -291,9 +295,6 @@ pub(crate) fn handle_download_medias(
       }
     }
   }
-
-  // Restore medias so SaveState can record their sha1s.
-  rom_arc.lock().unwrap().medias = medias;
 
   Ok(StepStatus::Done)
 }

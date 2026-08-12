@@ -23,8 +23,13 @@ pub(crate) fn handle_build_package(
 ) -> Result<StepStatus, StepError> {
   // Extract what we need, releasing the lock before expensive I/O.
   let (filename, disc1_filename, sha1, rom_url, extra_discs_info, jeu, rom_unchanged) = {
-    let mut rom = rom_arc.lock().unwrap();
-    let jeu = rom.jeu.take(); // Package::new takes ownership; we'll put it back
+    let rom = rom_arc.lock().unwrap();
+    // Cloned, not taken. `Package::new` wants ownership, but two `?` sit between here
+    // and where the old code put it back — and a Transient error re-runs this same step,
+    // so the retry built the package with `jeu = None`: an empty description.xml over a
+    // good one, a pkgver bumped for it, and `ss_game_id: None` persisted. That is the
+    // damage P0.5 and P1.1 closed on other paths.
+    let jeu = rom.jeu.clone();
     let sha1 = rom.sha1.clone().unwrap_or_default();
     let (rom_url, extra_discs_info) = match &rom.source.source {
       RomSource::InternetArchive(ia) => {
@@ -152,7 +157,6 @@ pub(crate) fn handle_build_package(
   let medias = package.medias;
   {
     let mut rom = rom_arc.lock().unwrap();
-    rom.jeu = package.jeu;
     rom.medias = Some(medias);
     rom.romname = Some(romname);
     rom.package_unchanged = !package_changed;

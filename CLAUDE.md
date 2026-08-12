@@ -480,8 +480,9 @@ ScreenScraper handed back, and `base_query()` puts `devid`, `devpassword`, `ssid
   identification path. `Io` and `ChecksumMismatch` carry only a local path and two sha1s,
   so those are quoted in full.
 - **It must never reach a PKGBUILD, nor be the URL rompom fetches.** `package::media_url()`
-  builds the public `https://screenscraper.fr/medias/{systemeid}/{jeuid}/{file}` path from
-  the media slug, and it is used **twice**: for the PKGBUILD `sources`, and for rompom's
+  builds the public `https://screenscraper.fr/medias/{systemeid}/{jeuid}/{type}({region}).{format}`
+  path from `Media::name` and `Media::region` — nothing is parsed out of the API URL — and
+  it is used **twice**: for the PKGBUILD `sources`, and for rompom's
   own download. A PKGBUILD is published, and pulling every asset of every ROM through
   `mediaJeu.php` is how an account gets rate-limited off ScreenScraper. The public path
   wants a `Referer`, which the `screenscraper` library sends on every media request.

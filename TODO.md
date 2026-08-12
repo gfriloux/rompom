@@ -218,7 +218,7 @@ correction est arrivée avec ses tests : le dépôt est passé de 0 à 34 tests.
   mots de passe dans le dépôt de paquets. La reconstruction à la main
   (`https://screenscraper.fr/medias/{systemeid}/{jeuid}/{slug}.{ext}`, où `slug` sort du
   paramètre `media=` de cette même URL) est un **blanchiment délibéré**, pas une
-  duplication naïve. `media_slug()` porte le commentaire qui l'explique, pour que
+  duplication naïve. `media_url()` porte le commentaire qui l'explique, pour que
   personne ne « simplifie » ça un jour.
 - [x] `enum StepError { Interrupted, Transient, Fatal }` au lieu de la sentinelle
   `Err("interrupted")` — *fait le 2026-08-10*, remonté dans le lot v0.17 parce que P1.1
