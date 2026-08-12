@@ -870,6 +870,121 @@ mod tests {
     assert!(!rendered.contains("''''"));
   }
 
+  /// A fully scraped game: every one of the eight assets present, each with a sha1 of
+  /// its own so the snapshot pins `sha1sums` against the `sources` it lines up with.
+  ///
+  /// `rom` carries the scratch path because it is what the output directory is derived
+  /// from, while `disc1_filename` stays a bare basename — in a real run both are the
+  /// same relative name, and putting a temp path in the snapshot would make it depend on
+  /// the machine.
+  fn fully_scraped_package(directory: &Path) -> Package {
+    let asset = |name: &str, format: &str, region: Option<&str>, digit: char| Media {
+      sha1: std::iter::repeat_n(digit, 40).collect(),
+      ..api_media(name, format, region)
+    };
+    Package {
+      rom: directory
+        .join("Sonic the Hedgehog.zip")
+        .display()
+        .to_string(),
+      disc1_filename: "Sonic the Hedgehog.zip".to_string(),
+      rom_url: "https://archive.invalid/megadrive/Sonic the Hedgehog.zip".to_string(),
+      hash: SHA.to_string(),
+      jeu: Some(
+        serde_json::from_str(
+          r#"{"id":"65388","noms":[{"region":"wor","text":"Sonic"}],
+              "topstaff":"0","rotation":"0","medias":[]}"#,
+        )
+        .expect("fixture should deserialise as a JeuInfo"),
+      ),
+      medias: Medias {
+        video: Some(asset("video-normalized", "mp4", None, '1')),
+        image: Some(asset("sstitle", "png", Some("wor"), '2')),
+        thumbnail: Some(asset("box-2D", "png", Some("wor"), '3')),
+        screenshot: Some(asset("ss", "png", Some("wor"), '4')),
+        bezel: Some(asset("bezel-16-9", "png", Some("wor"), '5')),
+        marquee: Some(asset("marquee", "png", None, '6')),
+        wheel: Some(asset("wheel", "png", Some("wor"), '7')),
+        manual: Some(asset("manuel", "pdf", Some("eu"), '8')),
+      },
+      extra_discs: Vec::new(),
+    }
+  }
+
+  /// Pins the exact bytes rompom writes to a PKGBUILD.
+  ///
+  /// `sources` and `sha1sums` are two parallel arrays that `makepkg` matches by
+  /// position: entry *n* of one is the checksum of entry *n* of the other, and nothing
+  /// in the file says so. Every asset is emitted by its own block today, so the pairing
+  /// holds only for as long as each block remembers to push to both. This is what makes
+  /// that pairing something a test can see.
+  #[test]
+  fn pkgbuild_snapshot() {
+    let scratch = scratch_dir("pkgbuild-snapshot");
+    let mut package = fully_scraped_package(scratch.path());
+    let directory = scratch.path().join("Sonic the Hedgehog");
+    std::fs::create_dir_all(&directory).unwrap();
+    // build_pkgbuild reads this back to checksum it, so its content decides one line of
+    // the snapshot. `sha1sum` of the single byte "x".
+    std::fs::write(directory.join("description.xml"), "x").unwrap();
+
+    package
+      .build_pkgbuild(&system(1), &sample_game(), 3)
+      .unwrap();
+
+    let expected = [
+      "pkgname=('test-rom-sonicthehedgehog')",
+      "_romname='sonicthehedgehog'",
+      "pkgver=3",
+      "pkgrel=1",
+      "pkgdesc='Sonic & Knuckles <Special>'",
+      "arch=('any')",
+      "url='https://screenscraper.fr/gameinfos.php?gameid=65388'",
+      "license=('All rights reserved')",
+      "source=(",
+      "  'Sonic the Hedgehog.zip::https://archive.invalid/megadrive/Sonic the Hedgehog.zip'",
+      "  'description.xml'",
+      "  'video.mp4::https://screenscraper.fr/medias/1/65388/video-normalized.mp4'",
+      "  'bezel.png::https://screenscraper.fr/medias/1/65388/bezel-16-9(wor).png'",
+      "  'image.png::https://screenscraper.fr/medias/1/65388/sstitle(wor).png'",
+      "  'thumbnail.png::https://screenscraper.fr/medias/1/65388/box-2D(wor).png'",
+      "  'marquee.png::https://screenscraper.fr/medias/1/65388/marquee.png'",
+      "  'screenshot.png::https://screenscraper.fr/medias/1/65388/ss(wor).png'",
+      "  'wheel.png::https://screenscraper.fr/medias/1/65388/wheel(wor).png'",
+      "  'manual.pdf::https://screenscraper.fr/medias/1/65388/manuel(eu).pdf'",
+      ")",
+      "sha1sums=(",
+      &format!("  '{}'", SHA),
+      "  '11f6ad8ec52a2984abaafd7c3b516503785c2072'",
+      "  '1111111111111111111111111111111111111111'",
+      "  '5555555555555555555555555555555555555555'",
+      "  '2222222222222222222222222222222222222222'",
+      "  '3333333333333333333333333333333333333333'",
+      "  '6666666666666666666666666666666666666666'",
+      "  '4444444444444444444444444444444444444444'",
+      "  '7777777777777777777777777777777777777777'",
+      "  '8888888888888888888888888888888888888888'",
+      ")",
+      "",
+      "build()",
+      "{",
+      "  true",
+      "}",
+      "",
+      "",
+    ]
+    .join("\n");
+
+    // Everything up to `package()`. The install section interpolates the ROM's own path,
+    // which here is a scratch directory named after the process — a real run passes a
+    // bare basename. What this snapshot is for stops at `sha1sums`.
+    let written = std::fs::read_to_string(directory.join("PKGBUILD")).unwrap();
+    let (head, _install) = written
+      .split_once("package()")
+      .expect("a PKGBUILD always has a package() section");
+    assert_eq!(head, expected);
+  }
+
   /// `skip_serializing_if` must drop absent media rather than emit empty tags:
   /// EmulationStation treats `<thumbnail></thumbnail>` as a path to a missing file.
   #[test]
