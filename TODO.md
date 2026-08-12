@@ -234,6 +234,14 @@ correction est arrivée avec ses tests : le dépôt est passé de 0 à 34 tests.
   paramètre `media=` de cette même URL) est un **blanchiment délibéré**, pas une
   duplication naïve. `media_url()` porte le commentaire qui l'explique, pour que
   personne ne « simplifie » ça un jour.
+  - **La dérive a bien eu lieu** — *constatée et corrigée le 2026-08-12 (v0.21.0)*. Entre
+    temps, `media_url()` avait cessé de lire `media=` et reconstruisait
+    `{type}({region})`. Or `Media.region` ne nomme pas le fichier : il dit quelle région
+    l'asset **dessert**, et un même fichier en dessert plusieurs (« région principale et
+    région(s) secondaire(s) »). Castlevania III (Europe), jeu 1278 : l'entrée `manuel`
+    région `eu` porte `media=manuel(fr)`, donc rompom demandait `manuel(eu).pdf` — 404 —
+    avec le bon sha1 juste à côté dans le PKGBUILD. Le paragraphe ci-dessus décrivait
+    déjà la bonne méthode ; c'est le code qui s'en était éloigné.
 - [x] `enum StepError { Interrupted, Transient, Fatal }` au lieu de la sentinelle
   `Err("interrupted")` — *fait le 2026-08-10*, remonté dans le lot v0.17 parce que P1.1
   en dépend : sans la distinction transitoire/définitif, un quota dépassé brûlait 3
@@ -340,7 +348,12 @@ correction est arrivée avec ses tests : le dépôt est passé de 0 à 34 tests.
    découvert après coup. Deux bugs corrigés en chemin, tous deux trouvés en lisant le code
    avant d'écrire le plan : le décalage `format` de `description.xml`, et le message
    « sha1 mismatch » qui s'affichait avec deux sha1 identiques quand c'était un disque 2
-   qui avait bougé. 160 → 181 tests.
+   qui avait bougé. Puis, signalé en cours de lot, le **nom de fichier des médias** :
+   `Media.region` ne nomme pas le fichier, et la dérive décrite plus haut faisait demander
+   des URLs qui n'existent pas. Avec, sur décision de l'utilisateur, un **repli sur l'API**
+   quand le chemin public rend 404 — réserve posée et arbitrée : le PKGBUILD garde l'URL
+   publique, donc un `makepkg` en répertoire vierge échouera sur ces assets-là.
+   160 → 185 tests.
 8. **Ensuite** — reste de la dette P3 (`r`/`R`, packaging OpenBOR, et la migration
    reqwest 0.12 / rustls qui demande de bouger les trois dépôts ensemble), puis
    contribution SS sur base saine.

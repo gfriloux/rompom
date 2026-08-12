@@ -78,6 +78,32 @@ modale ouverte : sortie propre.
 **Attendu :** toutes les lignes en gris `unchanged`, aucun `pkgver` bumpé (vérifier deux
 ou trois PKGBUILD), `state.yml` inchangé dans son contenu utile.
 
+## M9 — Le manuel de Castlevania III (Europe)
+
+**Pourquoi :** D1 — c'est le cas signalé. Système 3 (NES), jeu 1278.
+
+1. Scraper cette ROM, `--debug` activé
+2. Vérifier que `manual.pdf` est bien posé dans le répertoire du paquet
+3. Vérifier l'entrée `manual.pdf::` du PKGBUILD
+
+**Attendu :** l'URL du PKGBUILD est `…/medias/3/1278/manuel(fr).pdf` et **pas** `(eu)` ;
+le fichier fait 6 305 431 octets, sha1 `a9a9c42c590c7401c99d4a28e11125b16e24ac4b`.
+Aucune ligne « public path 404 » dans le log de debug — le repli ne doit pas servir ici,
+c'est bien l'URL qui est corrigée.
+
+## M10 — Le repli API sert quand il doit servir
+
+**Pourquoi :** E1. À défaut d'un vrai 404, on le provoque.
+
+1. Prendre un paquet déjà scrapé, supprimer un média du répertoire
+2. Éditer temporairement `media_url()` pour renvoyer un nom de fichier inexistant
+   (ou tester sur un jeu dont un asset 404 réellement, s'il en reste après D1)
+3. Relancer
+
+**Attendu :** le média est quand même récupéré, la pastille passe au vert, et
+`<system>.debug.log` porte `public path 404 → fetched through the API`. **Vérifier qu'aucun
+mot de passe n'apparaît** dans ce log, dans `<system>.errors.log`, ni dans le bilan.
+
 ## M8 — `--plain` et `--debug`
 
 1. `rompom -s <system> --plain --debug` sur quelques ROMs
@@ -101,3 +127,5 @@ et les lignes `rom_unchanged` toujours présentes pour les deux origines (folder
 | M6 | | |
 | M7 | | |
 | M8 | | |
+| M9 | | |
+| M10 | | |
