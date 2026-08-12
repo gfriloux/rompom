@@ -119,13 +119,13 @@ et les lignes `rom_unchanged` toujours présentes pour les deux origines (folder
 
 | test | date | résultat |
 |---|---|---|
-| M1 | | |
-| M2 | | |
-| M3 | | |
-| M4 | | |
-| M5 | | |
-| M6 | | |
-| M7 | | |
-| M8 | | |
+| M1 | 2026-08-12 | OK |
+| M2 | 2026-08-12 | OK |
+| M3 | 2026-08-12 | OK |
+| M4 | 2026-08-12 | OK |
+| M5 | 2026-08-12 | OK |
+| M6 | 2026-08-12 | OK |
+| M7 | 2026-08-12 | OK |
+| M8 | 2026-08-12 | OK |
 | M9 | 2026-08-12 | **OK** — Castlevania III (Europe), le manuel arrive |
-| M10 | | |
+| M10 | — | **non joué** — demande de casser `media_url()` exprès. Le repli n'a pas lieu de se déclencher maintenant que les URLs sont justes ; à rejouer si un 404 réapparaît en conditions réelles. |
