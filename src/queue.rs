@@ -1,14 +1,19 @@
-use std::{
-  sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc, Condvar, Mutex,
-  },
-  time::Duration,
-};
+use std::sync::{Arc, Condvar, Mutex};
 
 use crate::rom::Rom;
 
 // ── Semaphore ─────────────────────────────────────────────────────────────
+
+/// Everything `acquire()` decides on, behind one lock.
+///
+/// `cancelled` used to be an `AtomicBool` beside the mutex, which is why `acquire()`
+/// had to wake up every 50 ms: a flag the condvar knows nothing about cannot be
+/// notified, only polled. Under the same lock it is part of what `cvar.wait()` is
+/// waiting for, and `cancel()` publishes it the same way `release()` publishes a permit.
+struct SemaphoreState {
+  available: usize,
+  cancelled: bool,
+}
 
 /// A counting semaphore backed by a `Mutex` + `Condvar`.
 ///
@@ -17,51 +22,50 @@ use crate::rom::Rom;
 /// identification modal, until it turned out the render thread already does that — and
 /// that capping it at one was what stopped more than one ROM from waiting at a time.
 pub struct Semaphore {
-  available: Mutex<usize>,
+  state: Mutex<SemaphoreState>,
   cvar: Condvar,
-  cancelled: AtomicBool,
 }
 
 impl Semaphore {
   pub fn new(count: usize) -> Arc<Self> {
     Arc::new(Self {
-      available: Mutex::new(count),
+      state: Mutex::new(SemaphoreState {
+        available: count,
+        cancelled: false,
+      }),
       cvar: Condvar::new(),
-      cancelled: AtomicBool::new(false),
     })
   }
 
   /// Acquires one permit. Returns `true` on success, `false` if cancelled.
-  /// Wakes up periodically to check the cancelled flag.
+  ///
+  /// Sleeps until a permit is released or the run is cancelled — nothing here polls.
+  /// A permit still wins over the cancelled flag: a worker that can proceed does,
+  /// and finishes the step it is on rather than abandoning it half-done.
   pub fn acquire(&self) -> bool {
-    let mut avail = self.available.lock().unwrap();
+    let mut state = self.state.lock().unwrap();
     loop {
-      if *avail > 0 {
-        *avail -= 1;
+      if state.available > 0 {
+        state.available -= 1;
         return true;
       }
-      if self.cancelled.load(Ordering::Relaxed) {
+      if state.cancelled {
         return false;
       }
-      let (guard, _) = self
-        .cvar
-        .wait_timeout(avail, Duration::from_millis(50))
-        .unwrap();
-      avail = guard;
+      state = self.cvar.wait(state).unwrap();
     }
   }
 
   /// Releases one permit, unblocking a waiting caller if any.
   pub fn release(&self) {
-    let mut avail = self.available.lock().unwrap();
-    *avail += 1;
+    self.state.lock().unwrap().available += 1;
     self.cvar.notify_one();
   }
 
   /// Cancels all pending and future `acquire()` calls, causing them to
   /// return `false`. Idempotent.
   pub fn cancel(&self) {
-    self.cancelled.store(true, Ordering::SeqCst);
+    self.state.lock().unwrap().cancelled = true;
     self.cvar.notify_all();
   }
 }
@@ -164,5 +168,67 @@ impl TaskQueue {
     inner.shutdown = true;
     self.cvar_main.notify_all();
     self.cvar_blocking.notify_all();
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use std::{sync::mpsc, thread, time::Duration};
+
+  // ── Semaphore ────────────────────────────────────────────────────────────
+
+  /// Long enough that a loaded machine does not turn a passing test into a failing one:
+  /// these assert that something happens at all, never how fast.
+  const PATIENCE: Duration = Duration::from_secs(5);
+
+  /// The nominal path: a permit handed back wakes exactly one caller waiting for it.
+  #[test]
+  fn a_released_permit_wakes_a_waiter() {
+    let sem = Semaphore::new(1);
+    assert!(sem.acquire(), "the only permit is free");
+
+    let (tx, rx) = mpsc::channel();
+    let waiter = Arc::clone(&sem);
+    let thread = thread::spawn(move || tx.send(waiter.acquire()).unwrap());
+
+    assert!(
+      rx.recv_timeout(Duration::from_millis(100)).is_err(),
+      "nothing has released a permit, so the waiter must still be parked"
+    );
+    sem.release();
+    assert_eq!(rx.recv_timeout(PATIENCE), Ok(true));
+    thread.join().unwrap();
+  }
+
+  /// Ctrl-C has to reach a worker parked on a saturated semaphore, and that is what the
+  /// flag being under the same lock buys: `cancel()` publishes it and notifies, instead
+  /// of leaving a 50 ms poll to notice it eventually.
+  #[test]
+  fn a_cancelled_waiter_wakes_up_and_says_it_got_nothing() {
+    let sem = Semaphore::new(1);
+    assert!(sem.acquire());
+
+    let (tx, rx) = mpsc::channel();
+    let waiter = Arc::clone(&sem);
+    let thread = thread::spawn(move || tx.send(waiter.acquire()).unwrap());
+
+    // Whether the waiter is already parked or has not got there yet, it must end up
+    // refused: the flag it reads and the condvar it sleeps on are the same lock.
+    sem.cancel();
+    assert_eq!(rx.recv_timeout(PATIENCE), Ok(false));
+    thread.join().unwrap();
+  }
+
+  /// Cancelling does not confiscate the permits that are still free — behaviour kept
+  /// from the polling version, and deliberate. A worker that can proceed does, and
+  /// finishes its step; refusing would turn work that was about to complete into work
+  /// the next run has to redo.
+  #[test]
+  fn a_free_permit_still_wins_over_the_cancelled_flag() {
+    let sem = Semaphore::new(1);
+    sem.cancel();
+    assert!(sem.acquire(), "the permit was free");
+    assert!(!sem.acquire(), "and now there is nothing left to hand out");
   }
 }
