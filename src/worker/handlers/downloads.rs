@@ -14,7 +14,10 @@ use crate::{
   rom::{Rom, RomSource, StepError, StepStatus},
 };
 
-use super::super::{helpers::media_failure, WorkerContext};
+use super::super::{
+  helpers::{is_not_found, media_failure},
+  WorkerContext,
+};
 
 /// Downloads one disc, reporting progress to the ROM's bar as the bytes land.
 ///
@@ -322,12 +325,33 @@ pub(crate) fn handle_download_medias(
           let needs_download =
             !dest.exists() || ctx.ss.media_download(&direct).verify_sha1(&dest).is_err();
           if needs_download {
-            let bar = rom_arc.lock().unwrap().bar.handle();
-            ctx
-              .ss
-              .media_download(&direct)
-              .fetch_with_progress(&dest, |read, total| bar.media_progress(read, total))
-              .map_err(|e| media_failure(kind, &e))?;
+            let fetch = |media: &Media| {
+              let bar = rom_arc.lock().unwrap().bar.handle();
+              ctx
+                .ss
+                .media_download(media)
+                .fetch_with_progress(&dest, |read, total| bar.media_progress(read, total))
+            };
+            // A 404 means the public path has no such file, and no retry will change
+            // that. `m` still holds the `mediaJeu.php` call ScreenScraper handed back,
+            // which always works — at the price of a request against the account, hence
+            // only here and only on a 404. Nothing was written yet: the library checks
+            // the status before it creates the file.
+            //
+            // The PKGBUILD keeps the public URL. It cannot carry this one, which has the
+            // credentials in it, and the asset is installed from the file sitting next to
+            // the PKGBUILD anyway — but a `makepkg` in a clean directory will fail on it.
+            let outcome = match fetch(&direct) {
+              Err(ref e) if is_not_found(e) => {
+                rom_arc.lock().unwrap().debug_log.push(format!(
+                  "[DownloadMedias] media {:<12}: public path 404 → fetched through the API",
+                  kind
+                ));
+                fetch(m)
+              }
+              first => first,
+            };
+            outcome.map_err(|e| media_failure(kind, &e))?;
             rom_arc.lock().unwrap().bar.media_done(kind);
           } else {
             rom_arc.lock().unwrap().bar.media_skipped(kind);

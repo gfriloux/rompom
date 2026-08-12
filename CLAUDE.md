@@ -294,6 +294,14 @@ LookupSS → WaitModal* → BuildPackage → DownloadRom ────┐
   Each asset is fetched from `package::media_url()` — the public path, not the API URL the
   response carried. A failure goes through **`media_failure()`**, never through the library
   error's `Display` — see *Credentials never reach a message* below.
+  **On a 404, and only a 404** (`helpers::is_not_found()`), the asset is fetched once more
+  through the API URL the response carried. A missing file will not appear on a retry,
+  whereas a timeout or a 5xx might — and falling back on those would push every asset of
+  every ROM through `mediaJeu.php` the day the public path has an outage, which is how an
+  account gets rate-limited. The fallback is recorded in `<system>.debug.log`, never the
+  URL. The PKGBUILD keeps the public URL, which still 404s: it cannot carry the API one
+  (credentials), so the package installs from the file rompom left beside it, but a
+  `makepkg` in a clean directory fails on that asset.
 - **`SaveState`** — writes `RomStateEntry` into shared `SystemState` (flushed to disk by
   `main.rs` every 30 s and once more after all workers join). Persists `extra_disc_sha1s` for multi-disc games.
   Emits `bar.finish()`. It does **not** touch `remaining` — see below.

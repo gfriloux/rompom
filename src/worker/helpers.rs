@@ -203,6 +203,25 @@ pub(crate) fn rom_unchanged(
 /// secret — so those are quoted in full. They are also the only two a test can build:
 /// `reqwest::Error` has no public constructor. The guarantee on the other two is
 /// structural, and visible on the next line: `err` is matched, never interpolated.
+/// Whether the public media path answered "there is no such file".
+///
+/// Only a 404 justifies falling back to the API. A timeout, a reset or a 5xx says the
+/// asset may well be there and the network is not — retrying the public path is right,
+/// and it is what the step already does. If a stumble were enough to reach for the
+/// fallback, an outage on `screenscraper.fr/medias/` would put every asset of every ROM
+/// through `mediaJeu.php` at once, which is the way to get an account rate-limited off
+/// ScreenScraper.
+///
+/// The status is read off the error, never its `Display`: that one interpolates the URL,
+/// credentials included — see `media_failure` below.
+pub(crate) fn is_not_found(err: &MediaError) -> bool {
+  matches!(
+    err,
+    MediaError::Download { source, .. }
+      if source.status() == Some(reqwest::StatusCode::NOT_FOUND)
+  )
+}
+
 pub(crate) fn media_failure(kind: &str, err: &MediaError) -> StepError {
   let reason = match err {
     MediaError::Download { .. } => "download failed".to_string(),
@@ -304,6 +323,37 @@ mod tests {
           secret
         );
       }
+    }
+  }
+
+  /// Only a missing file sends an asset to the API. A disk that filled up, a body that
+  /// stopped mid-transfer or a checksum that did not match are all things the public path
+  /// can be asked again about — and reaching for `mediaJeu.php` on any of them would mean
+  /// that a bad afternoon on `screenscraper.fr/medias/` puts every asset of every ROM
+  /// through the account's request budget.
+  ///
+  /// The 404 itself is not testable here: `reqwest::Error` has no public constructor, the
+  /// same limit `a_media_failure_never_quotes_the_url` runs into. What is testable is
+  /// that nothing else qualifies.
+  #[test]
+  fn only_a_missing_file_is_worth_going_through_the_api_for() {
+    let cases = [
+      MediaError::Io {
+        path: PathBuf::from("snes/Some Game/manual.pdf"),
+        source: std::io::Error::other("disk full"),
+      },
+      MediaError::ChecksumMismatch {
+        expected: "3f9a1c77e04b2d8815ce6f0aa19b7c4d2e5081aa".to_string(),
+        got: "0000000000000000000000000000000000000000".to_string(),
+      },
+    ];
+
+    for case in &cases {
+      assert!(
+        !is_not_found(case),
+        "{:?} must not trigger the fallback",
+        case
+      );
     }
   }
 
