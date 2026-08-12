@@ -280,7 +280,8 @@ LookupSS → WaitModal* → BuildPackage → DownloadRom ────┐
   of existing file; copies/downloads only if missing or corrupt. For multi-disc games, processes
   disc 1 (from `source`) then all `extra_discs`. The destination filename for disc 1 is derived
   from `source.file_name` (the actual disc-1 basename), not from the virtual `filename`.
-- **`DownloadMedias`** — iterates 8 canonical media kinds. For each: skips if sha1 already valid
+- **`DownloadMedias`** — iterates 8 canonical media kinds. Reads `rom.medias` by
+  **clone**, never by `take()` — see *Never empty the Rom to work on it* below. For each: skips if sha1 already valid
   on disk (`media_skipped`), downloads otherwise (`media_done`), or marks unavailable if SS has none.
   Each asset is fetched from `package::media_url()` — the public path, not the API URL the
   response carried. A failure goes through **`media_failure()`**, never through the library
@@ -465,6 +466,24 @@ the "queued" state `new_rom_bar()` set.
 
 On "no", the file is deleted and a fresh run starts.
 Second Ctrl-C triggers `std::process::exit(1)` immediately.
+
+### Never empty the Rom to work on it
+
+`BuildPackage` and `DownloadMedias` used to `take()` the field they needed out of the
+`Rom` and put it back at the end. Both have a `?` in between, and a `StepError::Transient`
+**re-runs the same step** — so the retry ran against a `Rom` the first attempt had
+emptied, and neither handler noticed:
+
+- `DownloadMedias` found `medias == None`, skipped its whole loop and returned `Done`. The
+  ROM was reported finished with no media fetched and its dots frozen wherever the first
+  attempt stopped.
+- `BuildPackage` found `jeu == None` and built the package without metadata: an empty
+  `description.xml` over a good one, a `pkgver` bumped for it, and `ss_game_id: None`
+  persisted — the damage P0.5 and P1.1 closed on other paths.
+
+Both now **clone**. One clone per ROM per step is nothing next to a download, and it
+removes the failure mode by construction rather than by remembering to restore on every
+exit path. There is no test: both handlers need a ScreenScraper client and a network.
 
 ### Credentials never reach a message
 
