@@ -1,4 +1,7 @@
-use std::sync::{Arc, Condvar, Mutex};
+use std::{
+  sync::{Arc, Condvar, Mutex},
+  time::{Duration, Instant},
+};
 
 use crate::rom::Rom;
 
@@ -75,11 +78,53 @@ impl Semaphore {
 /// A reference to a specific step of a ROM, passed through the task queue.
 pub type Task = (Arc<Mutex<Rom>>, usize);
 
+// ── Delayed lane ──────────────────────────────────────────────────────────
+
+/// Tasks waiting out a retry backoff, kept latest-first so the next one due is at the end.
+///
+/// Generic over the payload for the same reason `skip_successors` takes a `&mut [Step]`:
+/// a `Task` holds a `Rom`, a `Rom` holds a `RomBar`, and a `RomBar` cannot be built
+/// without the whole terminal interface. Left open, the scheduling arithmetic — which is
+/// all there is to get wrong here — can be tested on a list of strings.
+struct Delayed<T> {
+  entries: Vec<(Instant, T)>,
+}
+
+impl<T> Delayed<T> {
+  fn new() -> Self {
+    Self {
+      entries: Vec::new(),
+    }
+  }
+
+  /// Files a task under the instant it becomes runnable.
+  fn insert(&mut self, due: Instant, task: T) {
+    let pos = self.entries.partition_point(|(d, _)| *d > due);
+    self.entries.insert(pos, (due, task));
+  }
+
+  /// Removes and returns everything due at `now`, earliest deadline first.
+  fn take_due(&mut self, now: Instant) -> Vec<T> {
+    let mut due = Vec::new();
+    while self.entries.last().is_some_and(|(at, _)| *at <= now) {
+      due.extend(self.entries.pop().map(|(_, task)| task));
+    }
+    due
+  }
+
+  /// When the next task falls due, or `None` when none is waiting.
+  fn next_due(&self) -> Option<Instant> {
+    self.entries.last().map(|(at, _)| *at)
+  }
+}
+
 struct QueueInner {
   /// Main LIFO stack — all steps except `WaitModal`.
   main: Vec<Task>,
   /// Blocking LIFO stack — `WaitModal` steps only.
   blocking: Vec<Task>,
+  /// Steps waiting out a retry backoff before they rejoin `main`.
+  delayed: Delayed<Task>,
   /// Set by `shutdown()` to signal workers to exit.
   shutdown: bool,
 }
@@ -102,6 +147,7 @@ impl TaskQueue {
       inner: Mutex::new(QueueInner {
         main: Vec::new(),
         blocking: Vec::new(),
+        delayed: Delayed::new(),
         shutdown: false,
       }),
       cvar_main: Condvar::new(),
@@ -131,18 +177,56 @@ impl TaskQueue {
     }
   }
 
+  /// Enqueues a task that must not run before `delay` has elapsed — a step waiting out
+  /// its retry backoff.
+  ///
+  /// The wait belongs here rather than in the worker that failed. A worker parked in
+  /// `thread::sleep` for up to sixteen seconds is one that does none of the other ROMs'
+  /// work, and one that Ctrl-C cannot reach: `shutdown()` and `cancel()` both wake
+  /// threads that are waiting *on something*, and a sleeping thread waits on nothing.
+  pub fn push_after(&self, rom: Arc<Mutex<Rom>>, step_index: usize, delay: Duration) {
+    debug_assert!(
+      !rom.lock().unwrap().pipeline[step_index].kind.is_blocking(),
+      "a delayed task always rejoins the main stack, so a blocking step must never take \
+       this path"
+    );
+    let due = Instant::now() + delay;
+    let mut inner = self.inner.lock().unwrap();
+    inner.delayed.insert(due, (rom, step_index));
+    // Wakes one popper so it can arm its own timeout: workers already parked are waiting
+    // without one, and nothing else is going to come and tell them about this deadline.
+    self.cvar_main.notify_one();
+  }
+
   /// Blocks until a non-blocking task is available, then returns it.
   /// Returns `None` when the queue has been shut down.
   pub fn pop_main(&self) -> Option<Task> {
     let mut inner = self.inner.lock().unwrap();
     loop {
+      let now = Instant::now();
+      let ready = inner.delayed.take_due(now);
+      inner.main.extend(ready);
+
       if let Some(task) = inner.main.pop() {
         return Some(task);
       }
       if inner.shutdown {
+        // Anything still waiting out a backoff is dropped, deliberately: those steps are
+        // `Pending`, so `run.yml` records them and the resume replays them. Sitting on a
+        // deadline nobody will act on would only hold up the exit — which is the whole
+        // reason the sleep moved in here.
         return None;
       }
-      inner = self.cvar_main.wait(inner).unwrap();
+      inner = match inner.delayed.next_due() {
+        Some(due) => {
+          let (guard, _) = self
+            .cvar_main
+            .wait_timeout(inner, due.saturating_duration_since(now))
+            .unwrap();
+          guard
+        }
+        None => self.cvar_main.wait(inner).unwrap(),
+      };
     }
   }
 
@@ -217,6 +301,68 @@ mod tests {
     // refused: the flag it reads and the condvar it sleeps on are the same lock.
     sem.cancel();
     assert_eq!(rx.recv_timeout(PATIENCE), Ok(false));
+    thread.join().unwrap();
+  }
+
+  // ── Delayed lane ─────────────────────────────────────────────────────────
+
+  /// A backoff that has not elapsed hands nothing back, and says when to come again.
+  #[test]
+  fn a_task_is_not_due_before_its_deadline() {
+    let now = Instant::now();
+    let mut delayed = Delayed::new();
+    delayed.insert(now + Duration::from_secs(4), "retry");
+
+    assert!(delayed.take_due(now).is_empty());
+    assert_eq!(delayed.next_due(), Some(now + Duration::from_secs(4)));
+    assert_eq!(
+      delayed.take_due(now + Duration::from_secs(4)),
+      vec!["retry"]
+    );
+    assert_eq!(delayed.next_due(), None);
+  }
+
+  /// The deadline is reached, not passed: `1 << retry_count` seconds after the failure
+  /// the step is runnable, and a strict comparison would hold it for another wakeup.
+  #[test]
+  fn a_deadline_falling_exactly_now_is_due() {
+    let now = Instant::now();
+    let mut delayed = Delayed::new();
+    delayed.insert(now, "retry");
+    assert_eq!(delayed.take_due(now), vec!["retry"]);
+  }
+
+  /// Insertion order says nothing about who runs first. Backoffs double, so a step on
+  /// its fourth attempt is filed eight seconds behind one on its first, whichever
+  /// failed first.
+  #[test]
+  fn deadlines_come_back_earliest_first_whatever_the_insertion_order() {
+    let now = Instant::now();
+    let mut delayed = Delayed::new();
+    delayed.insert(now + Duration::from_secs(8), "third");
+    delayed.insert(now + Duration::from_secs(1), "first");
+    delayed.insert(now + Duration::from_secs(4), "second");
+
+    assert_eq!(delayed.next_due(), Some(now + Duration::from_secs(1)));
+    assert_eq!(
+      delayed.take_due(now + Duration::from_secs(60)),
+      vec!["first", "second", "third"]
+    );
+  }
+
+  // ── TaskQueue ────────────────────────────────────────────────────────────
+
+  /// A worker parked on an empty queue has to come back when the run ends — including
+  /// now that the wait can carry a timeout.
+  #[test]
+  fn shutdown_releases_a_parked_worker() {
+    let queue = TaskQueue::new();
+    let (tx, rx) = mpsc::channel();
+    let popper = Arc::clone(&queue);
+    let thread = thread::spawn(move || tx.send(popper.pop_main().is_none()).unwrap());
+
+    queue.shutdown();
+    assert_eq!(rx.recv_timeout(PATIENCE), Ok(true));
     thread.join().unwrap();
   }
 
