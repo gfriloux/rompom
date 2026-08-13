@@ -245,6 +245,21 @@ impl TaskQueue {
     }
   }
 
+  /// Reopens a queue that has been shut down, for another round of work.
+  ///
+  /// The three lanes are emptied first. `shutdown()` deliberately abandons whatever is
+  /// waiting out a backoff, and by the time this is called every worker of the previous
+  /// round has joined and `remaining` is zero — so anything still filed here belongs to a
+  /// ROM that already reached its leaf, and is stale by construction. The next round's
+  /// only source of tasks is the steps the caller is about to push.
+  pub fn restart(&self) {
+    let mut inner = self.inner.lock().unwrap();
+    inner.main.clear();
+    inner.blocking.clear();
+    inner.delayed = Delayed::new();
+    inner.shutdown = false;
+  }
+
   /// Signals all blocked workers to exit.
   /// Should be called once all ROMs have been fully processed.
   pub fn shutdown(&self) {
@@ -361,6 +376,32 @@ mod tests {
     let popper = Arc::clone(&queue);
     let thread = thread::spawn(move || tx.send(popper.pop_main().is_none()).unwrap());
 
+    queue.shutdown();
+    assert_eq!(rx.recv_timeout(PATIENCE), Ok(true));
+    thread.join().unwrap();
+  }
+
+  /// A retry runs a fresh pool against the same queue. Without `restart()` every worker
+  /// of the second round would find `shutdown` still set, pop nothing and exit — the
+  /// re-armed ROM would sit there, and the report would come back claiming it had run.
+  #[test]
+  fn a_restarted_queue_parks_a_worker_again() {
+    let queue = TaskQueue::new();
+    queue.shutdown();
+    assert!(
+      queue.pop_main().is_none(),
+      "precondition: the queue is shut"
+    );
+
+    queue.restart();
+    let (tx, rx) = mpsc::channel();
+    let popper = Arc::clone(&queue);
+    let thread = thread::spawn(move || tx.send(popper.pop_main().is_none()).unwrap());
+
+    assert!(
+      rx.recv_timeout(Duration::from_millis(100)).is_err(),
+      "the queue is open again, so the worker must park rather than exit"
+    );
     queue.shutdown();
     assert_eq!(rx.recv_timeout(PATIENCE), Ok(true));
     thread.join().unwrap();

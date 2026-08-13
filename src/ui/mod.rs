@@ -158,6 +158,14 @@ pub struct ModalRequest {
   pub fetch_by_id: Box<dyn Fn(u32) -> Result<String, String> + Send>,
 }
 
+/// How the user left the end-of-run screen.
+pub enum RunEnd {
+  /// `q`, or there was no screen to press it on.
+  Quit,
+  /// `r` / `R`: rows whose failures are to be run again, in arrival order.
+  Retry(Vec<usize>),
+}
+
 /// User response from the modal.
 pub enum ModalResponse {
   /// User selected one of the search candidates (returns its SS game ID).
@@ -414,8 +422,12 @@ pub(crate) struct AppState {
   /// When the run ended, which turns the banner into the end-of-run report. `None`
   /// while the workers are still going.
   pub(crate) finished_at: Option<Instant>,
-  /// Set by `q` on the end-of-run screen; `Ui::wait_for_quit` is watching for it.
+  /// Set by `q` on the end-of-run screen; `Ui::wait_for_end` is watching for it.
   pub(crate) quit: bool,
+  /// Rows `r` / `R` asked to run again. Set by the key handler and taken by
+  /// `Ui::wait_for_end`, which hands them to `main` — the only thread that may touch a
+  /// pipeline, and only once every worker of the round has joined.
+  pub(crate) retry: Option<Vec<usize>>,
   /// A row whose parked request the user asked to open. Set by the key handler and
   /// consumed by the render loop, which is the only place that owns the terminal.
   pub(crate) open_row: Option<usize>,
@@ -718,6 +730,34 @@ impl RomBar {
 
   // ── End ─────────────────────────────────────────────────────────────────
 
+  /// This ROM is going round again: the user retried its failure from the end-of-run
+  /// screen.
+  ///
+  /// Only the cells that failed go back to `Todo`. A stage reading `Done` or `Unchanged`
+  /// really did complete and its step is not being replayed — `rearm()` only takes back
+  /// the failed step and what depended on it. The media dots are left for the same
+  /// reason: if `DownloadMedias` is in the re-armed set it walks all eight again and
+  /// overwrites every one of them.
+  ///
+  /// `started_at` goes back to `None` so the `time` column times the retry rather than
+  /// carrying the first attempt's clock. `done()` counts `finished_at`, so it drops by
+  /// one per ROM re-armed — `Rate::tick` saturates, and the sparkline takes it.
+  pub fn rearmed(&self) {
+    let mut s = self.state.lock().unwrap();
+    let entry = &mut s.roms[self.index];
+    entry.started_at = None;
+    entry.finished_at = None;
+    entry.error = None;
+    entry.unchanged = false;
+    entry.attempts = 1;
+    entry.status = "queued".to_string();
+    for cell in [&mut entry.id, &mut entry.pkg, &mut entry.rom] {
+      if *cell == Cell::Failed {
+        *cell = Cell::Todo;
+      }
+    }
+  }
+
   /// This ROM finished during the run that was interrupted, and its pipeline was
   /// restored from `run.yml` rather than executed.
   ///
@@ -893,6 +933,54 @@ pub(crate) fn visible_rows(state: &AppState) -> Vec<usize> {
     .collect()
 }
 
+/// Answers `r` / `R`: which failed ROMs to send round again, or why none is going
+/// anywhere. Always returns something to show — a key that silently does nothing is
+/// indistinguishable from one that is not bound.
+///
+/// Only from the end-of-run screen. During the run nine workers are decrementing
+/// `remaining`, and re-arming a ROM into that would race the last completion: lose the
+/// race and the queue shuts down between the increment and the push, leaving a ROM
+/// re-armed into a queue nobody is reading. At the end of the round every worker has
+/// joined and `main` is the only writer, so there is nothing to synchronise.
+fn request_retry(state: &mut AppState, every: bool) -> Option<String> {
+  if state.finished_at.is_none() {
+    return Some("retry is available once the run has finished".to_string());
+  }
+
+  let rows: Vec<usize> = if every {
+    state
+      .roms
+      .iter()
+      .enumerate()
+      .filter(|(_, r)| r.failed())
+      .map(|(i, _)| i)
+      .collect()
+  } else {
+    state
+      .roms
+      .get(state.selected)
+      .filter(|r| r.failed())
+      .map(|_| vec![state.selected])
+      .unwrap_or_default()
+  };
+
+  if rows.is_empty() {
+    return Some(if every {
+      "nothing failed — there is nothing to retry".to_string()
+    } else {
+      "this ROM did not fail — R retries every failure".to_string()
+    });
+  }
+
+  let notice = format!(
+    "retrying {} rom{}...",
+    rows.len(),
+    if rows.len() == 1 { "" } else { "s" }
+  );
+  state.retry = Some(rows);
+  Some(notice)
+}
+
 /// Moves the cursor and switches filters.
 ///
 /// `selected` is an index into `roms`, not into what is on screen: a ROM keeps its
@@ -910,6 +998,14 @@ fn navigate(state: &Mutex<AppState>, code: KeyCode) {
   // throwing the whole thing out, and Ctrl-C is what stops a run.
   if code == KeyCode::Char('q') && s.finished_at.is_some() {
     s.quit = true;
+    return;
+  }
+
+  // Bound in every view, so the answer is the same wherever the failures are being read
+  // from — the report, or the errors view reached from it.
+  if matches!(code, KeyCode::Char('r') | KeyCode::Char('R')) {
+    let notice = request_retry(&mut s, code == KeyCode::Char('R'));
+    s.notice = notice;
     return;
   }
 
@@ -999,6 +1095,7 @@ impl Ui {
       pending: Vec::new(),
       finished_at: None,
       quit: false,
+      retry: None,
       open_row: None,
     }));
 
@@ -1110,15 +1207,39 @@ impl Ui {
     self.state.lock().unwrap().finished_at = Some(Instant::now());
   }
 
-  /// Blocks until the user presses `q` on the end-of-run screen.
+  /// Takes the interface back out of its report for another round.
   ///
-  /// Returns at once with no interface to press it on, and on an interrupt: a Ctrl-C run
-  /// has a `run.yml` message to print on a restored terminal, not a report to admire.
-  pub fn wait_for_quit(&self, interrupted: &AtomicBool) {
+  /// The banner returns to the progress bar on its own: it is `finished_at` that decides
+  /// which of the two `render` draws.
+  pub fn resume_run(&self) {
+    let mut s = self.state.lock().unwrap();
+    s.finished_at = None;
+    s.quit = false;
+    s.notice = None;
+  }
+
+  /// Blocks until the user leaves the end-of-run screen, and says how they left it.
+  ///
+  /// Returns `Quit` at once with no interface to press a key on, and on an interrupt: a
+  /// Ctrl-C run has a `run.yml` message to print on a restored terminal, not a report to
+  /// admire — and nothing to retry into, since the queue is going down.
+  pub fn wait_for_end(&self, interrupted: &AtomicBool) -> RunEnd {
     if is_plain() {
-      return;
+      return RunEnd::Quit;
     }
-    while !self.state.lock().unwrap().quit && !interrupted.load(Ordering::SeqCst) {
+    loop {
+      {
+        let mut s = self.state.lock().unwrap();
+        if let Some(rows) = s.retry.take() {
+          return RunEnd::Retry(rows);
+        }
+        if s.quit {
+          return RunEnd::Quit;
+        }
+      }
+      if interrupted.load(Ordering::SeqCst) {
+        return RunEnd::Quit;
+      }
       thread::sleep(Duration::from_millis(50));
     }
   }
@@ -1230,6 +1351,7 @@ mod tests {
       pending: Vec::new(),
       finished_at: None,
       quit: false,
+      retry: None,
       open_row: None,
     }));
     let bar = RomBar {

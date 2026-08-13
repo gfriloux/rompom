@@ -141,6 +141,8 @@ src/
                               (loads <system>.run.yml if present), Ctrl-C handler.
                               `interrupted` and `queue` are created before `Ui::new()` so the
                               render thread can detect Ctrl-C directly via keyboard events.
+                              run_round() / rearm_roms(): a run is one round of workers per
+                              retry, in a loop, with the end-of-run report between them.
   collect.rs                — disc_indicator() / group_multi_disc(): multi-disc grouping,
                               pure and unit-tested (moved out of main.rs in v0.18)
   conf/
@@ -324,6 +326,40 @@ single leaf of both DAGs, so "leaf reached" means "ROM done" whether it ended `D
 `Skipped` or `Failed`. Keeping the decrement in the handler would strand the counter for
 any ROM cut short by a failure, and the queue would never shut down. `Rom::finished`
 guards against a double decrement, since both branches of the DAG converge on that leaf.
+
+### Retrying a failure — `rearm()`
+
+`r` / `R` on the end-of-run screen sends failed ROMs round again. `worker::rearm()`
+takes a pipeline back to a runnable state and returns the steps ready to run; `main`
+reopens the queue (`TaskQueue::restart()`), resets `remaining` and runs another
+`run_round()`.
+
+It replays the steps that failed and everything downstream of them, and **only** those.
+That is the opposite of the resume rule below, and for a good reason: here the `Rom` is
+the very object the first pass filled in, so `sha1`, `jeu`, `medias` and `romname` are
+all still in memory — the more so since v0.21, where `BuildPackage` and `DownloadMedias`
+clone what they read instead of `take()`-ing it. A broken download therefore costs no
+second ScreenScraper lookup and bumps no `pkgver` for a package that was written
+correctly.
+
+Three things it has to get right:
+
+- **The walk tracks visited indices**, not statuses — same `WaitModal` trap as
+  `skip_successors`.
+- **`WaitModal` goes back to `Skipped`** when it is merely downstream of the failure:
+  `LookupSS` is about to run again and reopens it only if it misses again. When
+  `WaitModal` is itself the step that failed, it comes back `Pending` and is replayed on
+  the spot — its candidates live in `LookupSS`'s step data, which stays `Done`.
+- **`wait_for` is rebuilt from the re-armed set**, never restored to what the DAG
+  declared: a predecessor that stays `Done` will not notify anyone again. With `CopyRom`
+  failed and `DownloadMedias` done, `SaveState` waits on **one**. Restore the declared 2
+  and it never runs; leave the 0 it was decremented to and it runs before the download.
+
+`rearm_roms()` in `main.rs` is what puts a ROM back into `remaining`: `Rom::finished`
+goes back to `false`, or `finish_rom` would refuse to decrement on the second pass and
+the queue would never shut down. Nothing here synchronises anything, because nothing
+needs to — every worker of the previous round has joined, and `main` is the only writer.
+That is the whole reason the retry lives on the end-of-run screen and not during the run.
 
 ### Failure kinds — `StepError`
 
@@ -731,7 +767,8 @@ distinct sentences say nothing; the tally says whether the run hit a bad mirror,
 exhausted quota or a flaky link. `errors::classify()` matches on the cause text, because
 that is all that survives — the step is gone by the time the row is drawn — and a
 checksum failure wins over the transfer that carried it, since re-running fixes a flaky
-link and never fixes a mirror serving the wrong file.
+link and never fixes a mirror serving the wrong file. Once the run is over, `r` and `R`
+send the selected failure — or all of them — round again from this view; see *End of run*.
 
 The **to-identify** view (`m`, yellow) lists the ROMs blocked on the user, how long each
 has been waiting, and the candidate ScreenScraper ranked **first** — not a match score.
@@ -862,6 +899,10 @@ Pipeline transition methods (all called from `worker/handlers/`):
 - Media: `start_media(kind)`, `media_done(kind)`, `media_skipped(kind)`, `media_unavailable(kind)`
 - Resume: `restored()` — fills the three cells for a ROM whose pipeline came back from
   `run.yml`; without it a finished ROM shows three `·` under a green name
+- Retry: `rearmed()` — reopens a finished row for another round (`finished_at`, `error`,
+  `attempts` cleared, clock restarted). Only `Cell::Failed` goes back to `Cell::Todo`: a
+  stage reading `Done` or `Unchanged` really did complete and `rearm()` is not replaying
+  its step. The media dots are left for the same reason
 - End: `finish(unchanged: bool)`, `finish_error(cause)` — the latter reddens the **first
   cell that never completed**, not the one that is running: nothing is running on a
   resumed ROM
@@ -877,6 +918,9 @@ locks state, draws the frame, then calls `crossterm::event::poll(TICK_MS)` (repl
 thread can act on Ctrl-C without a signal handler.
 `Ui::summary()` extracts stats from `AppState` into a `Summary` (from `summary.rs`).
 `Ui::modal_sender()` returns the `Sender<ModalRequest>` for `worker/handlers/discovery.rs` to use.
+`Ui::wait_for_end()` blocks on the report and returns `RunEnd::Quit` or
+`RunEnd::Retry(rows)`; `Ui::resume_run()` takes the interface back out of the report for
+another round.
 Call `summary()` before dropping `Ui`, print after (terminal is restored on drop).
 
 **Modal types (public, in `ui/mod.rs`):**
@@ -927,12 +971,32 @@ the user had just typed and packaged the ROM with an empty `description.xml`. On
 When the workers have joined, `main` calls `Ui::finish_run()` — the banner turns green
 and becomes the report (`result` bar with the failed share drawn in red **at the end of
 the bar**, then throughput, volume and average rate), a `media coverage` block appears
-under it in two columns of five and four, and the grid stays exactly as it was. The user
-leaves with `q`; `Ui::wait_for_quit()` blocks `main` until then.
+under it in two columns of five and four, and the grid stays exactly as it was.
+`Ui::wait_for_end()` blocks `main` until the user leaves, and says how they left:
+
+- **`q`** → `RunEnd::Quit`, the run is over.
+- **`r` / `R`** → `RunEnd::Retry(rows)`, the selected failure or all of them. `main`
+  re-arms those pipelines (see `rearm()` above), reopens the queue, calls
+  `Ui::resume_run()` — which clears `finished_at`, so the banner goes back to being the
+  progress bar — and runs another round. A run is therefore **one round per retry**, in a
+  loop, with the report between them.
+
+`r` / `R` are bound in every view but answer `retry is available once the run has
+finished` while the pool is live: re-arming into a running pool would race the last
+completion, which is what shuts the queue down. A key that silently does nothing is
+indistinguishable from one that is not bound, hence the notice rather than nothing.
+
+Two things `r` will not do. A ROM the user **skipped at the modal** has no failed step —
+`bar.not_found()` reddens the `id` cell but the ROM finishes normally — so it is not in
+the errors view and `R` does not see it. And a ROM that failed and is retried keeps every
+stage that succeeded: `RomBar::rearmed()` only takes `Cell::Failed` back to `Cell::Todo`,
+because the steps behind the other cells are not being replayed.
 
 `Summary::print()` is **not** dead: it is the `--plain` path, and the fallback for a run
 that had nothing to do. A Ctrl-C run shows no report at all — it has a `run.yml` message
-to print on a restored terminal, which the report would only be in the way of.
+to print on a restored terminal, which the report would only be in the way of. In plain
+mode `wait_for_end()` returns `Quit` at once, so there is no retry either: there is no
+screen to press a key on.
 
 `AppState::counts()` and `AppState::media_coverage()` are shared by the report and by
 `Ui::summary()`, so the numbers on screen and the numbers printed cannot drift.

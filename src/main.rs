@@ -28,7 +28,7 @@ use screenscraper::{ApiFailure, ScreenScraper};
 
 use crate::collect::group_multi_disc;
 use crate::conf::{Conf, Source};
-use crate::queue::{Semaphore, TaskQueue};
+use crate::queue::{Semaphore, Task, TaskQueue};
 use crate::rom::{FolderSource, IaSource, Rom, RomSource, RomSourceData, StepKind, StepStatus};
 use crate::state::{write_with_rotation, SystemState};
 use crate::ui::Ui;
@@ -215,6 +215,44 @@ fn run_round(ctx: &Arc<WorkerContext>, n_main: usize) {
   for h in handles {
     h.join().unwrap();
   }
+}
+
+/// Re-arms the ROMs the user asked to run again, and hands back the steps to push.
+///
+/// Returns `(how many ROMs are back in play, the tasks to enqueue)`. The two are not the
+/// same number: a ROM whose two download branches both failed offers two ready steps, and
+/// it is ROMs that `remaining` counts.
+///
+/// Nothing here synchronises anything, and it does not need to: every worker of the
+/// previous round has joined by the time this runs, so the main thread is the only writer
+/// of the pipelines, of `remaining` and of the queue. That is the whole reason the retry
+/// lives on the end-of-run screen.
+///
+/// `Rom::finished` goes back to `false` — without it `finish_rom` would refuse to
+/// decrement when the ROM reaches its leaf a second time, `remaining` would never reach
+/// zero, and the queue would never shut down.
+fn rearm_roms(all_roms: &[Arc<Mutex<Rom>>], rows: &[usize]) -> (usize, Vec<Task>) {
+  let mut armed = 0;
+  let mut tasks = Vec::new();
+
+  for &row in rows {
+    let Some(rom_arc) = all_roms.get(row) else {
+      continue;
+    };
+    let mut rom = rom_arc.lock().unwrap();
+    let ready = worker::rearm(&mut rom.pipeline);
+    if ready.is_empty() {
+      continue;
+    }
+    rom.finished = false;
+    rom.bar.rearmed();
+    drop(rom);
+
+    armed += 1;
+    tasks.extend(ready.into_iter().map(|idx| (Arc::clone(rom_arc), idx)));
+  }
+
+  (armed, tasks)
 }
 
 /// Starts the periodic `state.yml` flush, and hands back what stops it.
@@ -820,7 +858,39 @@ fn main() {
 
   let (flushing, flusher) = spawn_flusher(Arc::clone(&state), state_path.clone());
 
-  run_round(&ctx, n_main);
+  // A run is one round of workers, plus one more for every time the user retries the
+  // failures from the end-of-run screen. Between two rounds nothing else is alive: the
+  // previous round has joined, so re-arming pipelines, reopening the queue and resetting
+  // `remaining` need no synchronisation beyond being done here, in order.
+  loop {
+    run_round(&ctx, n_main);
+
+    // Ctrl-C: no report, and nothing to retry into — the queue is going down and
+    // `run.yml` is what this run leaves behind.
+    if interrupted.load(Ordering::SeqCst) {
+      break;
+    }
+
+    ui.finish_run();
+    let rows = match ui.wait_for_end(&interrupted) {
+      ui::RunEnd::Quit => break,
+      ui::RunEnd::Retry(rows) => rows,
+    };
+
+    let (armed, tasks) = rearm_roms(&all_roms, &rows);
+    if armed == 0 {
+      // Nothing had a failed step after all. The queue stays shut, so the next round
+      // returns immediately and the report comes straight back.
+      continue;
+    }
+
+    queue.restart();
+    ctx.remaining.store(armed, Ordering::SeqCst);
+    for (rom_arc, idx) in tasks {
+      queue.push(rom_arc, idx);
+    }
+    ui.resume_run();
+  }
 
   // ── Post-join ─────────────────────────────────────────────────────────
 
@@ -888,11 +958,9 @@ fn main() {
   let mut summary = ui.summary();
   summary.step_avg_durations = step_avg_durations;
 
-  // The report is shown inside the interface, which the user leaves with `q`. Printing
-  // after the terminal is restored is the fallback for `--plain` — and the only path
-  // that ever worked before, which is why `Summary::print()` is still here.
-  ui.finish_run();
-  ui.wait_for_quit(&interrupted);
+  // The report was shown inside the interface, which the user has just left with `q`.
+  // Printing after the terminal is restored is the fallback for `--plain` — and the only
+  // path that ever worked before, which is why `Summary::print()` is still here.
   drop(ui);
   if ui::is_plain() {
     summary.print();

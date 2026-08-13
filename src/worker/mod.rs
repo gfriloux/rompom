@@ -344,6 +344,90 @@ fn skip_successors(pipeline: &mut [Step], step_idx: usize) {
   }
 }
 
+/// Puts a failed pipeline back into a runnable state, and returns the steps that are
+/// ready to run right now.
+///
+/// This is what `r` / `R` on the end-of-run screen does to a ROM. It replays the steps
+/// that failed and everything that depended on them, and **only** those: unlike a resume,
+/// the `Rom` here is the very object the first pass filled in, so `sha1`, `jeu`, `medias`
+/// and `romname` are all still there. A download that broke does not cost a second
+/// ScreenScraper lookup, and does not bump a `pkgver` for a package `BuildPackage`
+/// already wrote correctly.
+///
+/// Three things it has to get right:
+///
+/// - **The walk tracks visited indices**, not statuses — `WaitModal` is `Skipped` by
+///   default and a status guard would stop dead on it, exactly as in `skip_successors`.
+/// - **`WaitModal` goes back to `Skipped`** when it is only downstream of the failure:
+///   it becomes runnable when `LookupSS` comes back empty, and `LookupSS` is about to
+///   run again. Left `Pending`, the modal would open for a game the lookup is going to
+///   find on its own. When it is the step that *failed* — the post-modal
+///   `jeuinfo_by_gameid` breaking — it comes back `Pending` instead, and can be replayed
+///   on the spot: the candidates live in `LookupSS`'s step data, which stays `Done`.
+/// - **`wait_for` is rebuilt from the re-armed set**, not restored to what the DAG
+///   declared. With `CopyRom` failed and `DownloadMedias` done, `SaveState` waits on
+///   one predecessor, not two. Left at the zero it was decremented to, it would be
+///   pushed by `CopyRom` and then decremented past zero by nothing — but restored to the
+///   declared 2 it would never reach zero at all, and the ROM would hang forever with
+///   nothing on screen to say why.
+///
+/// Takes the pipeline rather than the `Rom` so the DAG arithmetic can be tested on a
+/// hand-built one, without a `RomBar` and the whole terminal interface behind it.
+pub fn rearm(pipeline: &mut [Step]) -> Vec<usize> {
+  let failed: std::collections::HashSet<usize> = pipeline
+    .iter()
+    .enumerate()
+    .filter(|(_, step)| matches!(step.status, StepStatus::Failed(_)))
+    .map(|(idx, _)| idx)
+    .collect();
+
+  let mut armed = std::collections::HashSet::new();
+  let mut stack: Vec<usize> = failed.iter().copied().collect();
+  while let Some(idx) = stack.pop() {
+    if !armed.insert(idx) {
+      continue;
+    }
+    stack.extend(pipeline[idx].next.iter().copied());
+  }
+
+  for &idx in &armed {
+    let step = &mut pipeline[idx];
+    step.retry_count = 0;
+    step.started_at = None;
+    step.finished_at = None;
+    step.status = if step.kind == StepKind::WaitModal && !failed.contains(&idx) {
+      StepStatus::Skipped
+    } else {
+      StepStatus::Pending
+    };
+  }
+
+  // Counted before anything is written, because counting reads the whole pipeline.
+  let waits: Vec<(usize, usize)> = armed
+    .iter()
+    .map(|&idx| {
+      let predecessors = pipeline
+        .iter()
+        .enumerate()
+        .filter(|(pred, step)| armed.contains(pred) && step.next.contains(&idx))
+        .count();
+      (idx, predecessors)
+    })
+    .collect();
+
+  let mut ready = Vec::new();
+  for &(idx, predecessors) in &waits {
+    pipeline[idx].set_wait_for(predecessors);
+    if predecessors == 0 {
+      ready.push(idx);
+    }
+  }
+  // A `HashSet` hands its contents back in whatever order it likes; the queue is a LIFO,
+  // so an unsorted push would make a retry run its steps in a different order each time.
+  ready.sort_unstable();
+  ready
+}
+
 /// Decrement `wait_for` for each successor of `step_idx`.
 /// Enqueues any successor whose counter reaches zero.
 fn do_dispatch(rom_arc: &Arc<Mutex<Rom>>, step_idx: usize, queue: &Arc<TaskQueue>) {
@@ -641,6 +725,133 @@ mod tests {
       .map(|(i, _)| i)
       .collect();
     assert_eq!(leaves, vec![6]);
+  }
+
+  // ── rearm ────────────────────────────────────────────────────────────────
+
+  /// The pipeline as `execute_step` leaves it at the end of a run: the steps that ran are
+  /// `Done`, the failed one carries its cause, `skip_successors` has cut its tail, and
+  /// every `wait_for` has been counted down to zero by the dispatches that happened.
+  ///
+  /// That last part is the state `rearm` has to repair — a counter at zero is a step that
+  /// would be pushed by nobody and everybody at once.
+  fn after_the_run(failed: &[usize], done: &[usize]) -> Vec<Step> {
+    let mut pipeline = folder_pipeline();
+    for &idx in done {
+      pipeline[idx].status = StepStatus::Done;
+    }
+    for &idx in failed {
+      pipeline[idx].status = StepStatus::Failed("connection reset".to_string());
+      skip_successors(&mut pipeline, idx);
+    }
+    for step in pipeline.iter() {
+      step.set_wait_for(0);
+    }
+    pipeline
+  }
+
+  /// The nominal retry: the download broke, so the download and the state write run
+  /// again — and nothing else. Everything upstream keeps what it produced, which is the
+  /// whole difference with a resume.
+  #[test]
+  fn rearm_replays_the_failed_step_and_its_tail() {
+    let mut pipeline = after_the_run(&[4], &[0, 1, 3, 5]);
+    pipeline[4].retry_count = 5; // budget spent reaching the failure
+
+    let ready = rearm(&mut pipeline);
+
+    assert_eq!(ready, vec![4], "CopyRom is the one step that can start now");
+    assert_eq!(pipeline[4].status, StepStatus::Pending);
+    assert_eq!(
+      pipeline[6].status,
+      StepStatus::Pending,
+      "SaveState must run"
+    );
+    assert_eq!(
+      pipeline[4].retry_count, 0,
+      "a retried step gets its whole budget back, or it fails on the first attempt"
+    );
+
+    for idx in [0, 1, 3, 5] {
+      assert_eq!(
+        pipeline[idx].status,
+        StepStatus::Done,
+        "step {idx} succeeded and must not be replayed"
+      );
+    }
+  }
+
+  /// The arithmetic that makes it work. `DownloadMedias` is `Done` and will never notify
+  /// `SaveState` again, so the leaf waits on one predecessor and not on the two the DAG
+  /// declares. Restore the declared 2 and the ROM hangs forever with nothing on screen to
+  /// say why.
+  #[test]
+  fn rearm_counts_only_the_predecessors_that_will_run_again() {
+    let mut pipeline = after_the_run(&[4], &[0, 1, 3, 5]);
+
+    rearm(&mut pipeline);
+
+    assert_eq!(pipeline[6].wait_for_count(), 1);
+    assert_eq!(pipeline[4].wait_for_count(), 0);
+  }
+
+  /// `WaitModal` is the one step whose default is not `Pending`. Downstream of a failed
+  /// `LookupSS` it goes back to `Skipped`: the lookup is about to run again and will
+  /// reopen it only if it misses again. Left `Pending`, the modal would ask the user to
+  /// identify a game ScreenScraper is about to find on its own.
+  #[test]
+  fn rearm_puts_a_downstream_wait_modal_back_to_its_default() {
+    let mut pipeline = after_the_run(&[1], &[0]);
+
+    let ready = rearm(&mut pipeline);
+
+    assert_eq!(ready, vec![1]);
+    assert_eq!(pipeline[2].status, StepStatus::Skipped);
+    assert_eq!(pipeline[3].status, StepStatus::Pending);
+    // The whole tail runs again, so every counter is back to what the DAG declared.
+    assert_eq!(pipeline[2].wait_for_count(), 1);
+    assert_eq!(pipeline[6].wait_for_count(), 2);
+  }
+
+  /// When `WaitModal` is what failed — the post-modal `jeuinfo_by_gameid` breaking — it
+  /// is replayable on the spot: the candidates live in `LookupSS`'s step data, and
+  /// `LookupSS` stays `Done` and keeps them. Sending the lookup round again would spend a
+  /// ScreenScraper request to learn what is already in memory.
+  #[test]
+  fn rearm_keeps_a_failed_wait_modal_runnable() {
+    let mut pipeline = after_the_run(&[2], &[0, 1]);
+
+    let ready = rearm(&mut pipeline);
+
+    assert_eq!(ready, vec![2]);
+    assert_eq!(pipeline[2].status, StepStatus::Pending);
+    assert_eq!(pipeline[1].status, StepStatus::Done);
+  }
+
+  /// Both branches can fail independently — the ROM download and the media download are
+  /// separate steps with separate budgets. Then the leaf really does wait on two.
+  #[test]
+  fn rearm_handles_both_branches_failing_at_once() {
+    let mut pipeline = after_the_run(&[4, 5], &[0, 1, 3]);
+
+    let ready = rearm(&mut pipeline);
+
+    assert_eq!(ready, vec![4, 5]);
+    assert_eq!(pipeline[6].wait_for_count(), 2);
+  }
+
+  /// `R` is offered whenever the report shows a failure, and the rows come from the
+  /// interface rather than from the pipelines. A ROM with nothing `Failed` must come back
+  /// with nothing to push and nothing disturbed — not with a pipeline reset under it.
+  #[test]
+  fn rearm_on_a_pipeline_that_did_not_fail_changes_nothing() {
+    let mut pipeline = after_the_run(&[], &[0, 1, 3, 4, 5, 6]);
+    let before: Vec<_> = pipeline.iter().map(|s| s.status.clone()).collect();
+
+    assert!(rearm(&mut pipeline).is_empty());
+
+    let after: Vec<_> = pipeline.iter().map(|s| s.status.clone()).collect();
+    assert_eq!(before, after);
   }
 
   /// This is the half of the fix that is easy to miss. Catching the unwind is not

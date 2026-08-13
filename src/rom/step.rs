@@ -191,6 +191,16 @@ impl Step {
     self.wait_for.load(Ordering::SeqCst)
   }
 
+  /// Sets `wait_for` outright, rather than counting down to it.
+  ///
+  /// One caller: `rearm()`, which rebuilds the counter from the set of steps that are
+  /// about to run again. The value the DAG declared is the wrong one there — a
+  /// predecessor that stays `Done` will never decrement this, so counting it would leave
+  /// the step waiting on a notification nobody is going to send.
+  pub fn set_wait_for(&self, count: usize) {
+    self.wait_for.store(count, Ordering::SeqCst);
+  }
+
   /// Returns the configured `max_retries` for this step's kind.
   pub fn max_retries(&self) -> u8 {
     self.kind.max_retries()

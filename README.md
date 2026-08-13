@@ -296,6 +296,7 @@ dots tighten, and the status becomes a word (`scrap`, `pkg`, `rom`, `8/9`, `ok`)
 | `e` | jump straight to the errors view |
 | `m` | jump to the ROMs waiting to be identified |
 | `w` | in the errors view, write `<system>.errors.log` |
+| `r` / `R` | once the run has finished, retry the selected failure / every failure |
 | `esc` | leave a filtered view |
 | `q` | leave, once the run has finished |
 | `Ctrl-C` | interrupt, saving `<system>.run.yml` |
@@ -304,6 +305,32 @@ When the run ends, the banner turns into a report — what was produced, how fas
 was transferred — with a media coverage block showing what share of the packages ended up
 with each asset. The grid stays as it was, so you can still walk it and open the errors
 view. `q` leaves.
+
+### Retrying the failures
+
+A run rarely fails all at once. A mirror has a bad minute, a media download times out, and
+you end up at the report with a handful of red rows out of a thousand.
+
+`R` sends every failure round again; `r` retries just the row under the cursor. The banner
+goes back to being a progress bar, the retried ROMs run, and the report comes back — as
+many times as you like.
+
+A retry picks up exactly where the failure was, not at the beginning. A ROM whose download
+broke is not identified against ScreenScraper a second time, and its `PKGBUILD` is not
+rewritten with a fresh `pkgver` — those steps succeeded and their results are still in
+memory. That is what makes `R` on forty ROMs cost forty downloads and nothing else.
+
+Two limits worth knowing:
+
+- The keys only work **once the run has finished**. Press them during the run and rompom
+  says so: re-arming a ROM while nine workers are finishing the others is a race it
+  refuses to run.
+- A ROM you **skipped at the identification prompt** did not fail — it was packaged with an
+  empty `description.xml` — so it is not in the errors view and `R` will not pick it up.
+  Delete its output directory and run rompom again to get another chance at it.
+
+Nothing is lost if you quit instead: the failed ROMs wrote nothing to `<system>.state.yml`,
+so `rompom -s <system>` redoes exactly them and skips everything that worked.
 
 The errors view lists only the ROMs that failed, with the cause and the number of
 attempts instead of the media dots, and counts the causes by kind underneath:

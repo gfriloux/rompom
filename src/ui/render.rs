@@ -72,7 +72,7 @@ pub(super) fn render(frame: &mut Frame, state: &mut AppState) {
     frame.render_widget(hints_or_notice(state, done_help_line(state)), areas[3]);
   } else if state.filter == Filter::Errors {
     render_errors(frame, areas[0], state);
-    frame.render_widget(hints_or_notice(state, errors_help_line()), areas[1]);
+    frame.render_widget(hints_or_notice(state, errors_help_line(state)), areas[1]);
   } else if state.filter == Filter::Unidentified {
     render_unidentified(frame, areas[0], state);
     frame.render_widget(hints_or_notice(state, unidentified_help_line()), areas[1]);
@@ -435,6 +435,7 @@ fn done_help_line(state: &AppState) -> Paragraph<'static> {
   ];
   if errors > 0 {
     pairs.insert(0, ("e", format!(" {} failures  ", errors)));
+    pairs.insert(1, ("R", " retry them  ".to_string()));
   }
   keys(&pairs)
 }
@@ -1060,13 +1061,19 @@ fn unidentified_help_line() -> Paragraph<'static> {
   ])
 }
 
-fn errors_help_line() -> Paragraph<'static> {
-  keys(&[
+/// Takes the state because two of the keys only mean something once the run is over:
+/// re-arming a pipeline is safe only when every worker has joined.
+fn errors_help_line(state: &AppState) -> Paragraph<'static> {
+  let mut pairs = vec![
     ("↑↓", " select  ".to_string()),
     ("w", " write <system>.errors.log  ".to_string()),
-    ("esc", " back  ".to_string()),
-    ("ctrl-c", " stop".to_string()),
-  ])
+  ];
+  if state.finished_at.is_some() {
+    pairs.push(("r/R", " retry this one / all  ".to_string()));
+  }
+  pairs.push(("esc", " back  ".to_string()));
+  pairs.push(("ctrl-c", " stop".to_string()));
+  keys(&pairs)
 }
 
 /// The hint line, unless something has just happened that is worth saying instead.
