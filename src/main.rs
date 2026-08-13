@@ -862,12 +862,19 @@ fn main() {
   // failures from the end-of-run screen. Between two rounds nothing else is alive: the
   // previous round has joined, so re-arming pipelines, reopening the queue and resetting
   // `remaining` need no synchronisation beyond being done here, in order.
+  // Whether a round was cut short, as opposed to Ctrl-C arriving on the report screen
+  // once everything had run. Only the first leaves work undone, and only the first is
+  // worth a `run.yml`: reading the flag after the loop would write one for a run that
+  // had finished, and offer to resume a `<n>/<n> done` next time.
+  let mut cut_short = false;
+
   loop {
     run_round(&ctx, n_main);
 
     // Ctrl-C: no report, and nothing to retry into — the queue is going down and
     // `run.yml` is what this run leaves behind.
     if interrupted.load(Ordering::SeqCst) {
+      cut_short = true;
       break;
     }
 
@@ -902,7 +909,7 @@ fn main() {
     eprintln!("Warning: could not save state: {}", e);
   }
 
-  if interrupted.load(Ordering::SeqCst) {
+  if cut_short {
     let run_state = worker::collect_run_state(&all_roms);
     match worker::save_run_state(&system_name, &run_state) {
       Ok(()) => eprintln!(
