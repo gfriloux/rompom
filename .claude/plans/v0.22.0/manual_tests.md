@@ -72,6 +72,19 @@ comme le run.
 
 **Attendu :** le fichier est réécrit pendant le tour, pas seulement à la fin.
 
+## M9 — Une ROM inconnue de ScreenScraper est identifiable à la main
+
+**Pourquoi :** ajouté en cours de lot. Avant `screenscraper` v0.8.1, une recherche par nom
+sans résultat faisait échouer `LookupSS` et la modale ne s'ouvrait jamais.
+
+1. Un système contenant une ROM que SS ne connaît ni par sha1 ni par nom — un multicart
+   pirate fait l'affaire (*Dragon Ball Party 4 In 1*, `nes`)
+2. Attendre qu'elle arrive dans la vue « à identifier » (`m`), `enter`, `i`, saisir un
+   game id
+
+**Attendu :** la ROM est dans la file `m` et non dans la vue erreurs ; le paquet sort avec
+son `description.xml` rempli.
+
 ---
 
 ## Résultats — 2026-08-13
@@ -90,15 +103,23 @@ départage pas tant que le bump n'est pas posé ; le témoin est le pied de page
 | M1 — `r` relance la ROM sélectionnée | ✅ conforme |
 | M2 — `R` relance toutes les échouées | ✅ conforme |
 | M3 — une relance qui rate revient au bilan | ✅ conforme (les 3 ROMs SS du run `nes`) |
-| M4 — `r` sur une ligne qui n'a pas échoué | à confirmer |
-| M5 — `r` pendant le run | à confirmer |
-| M6 — Ctrl-C pendant un tour de relance | à confirmer |
-| M7 — `q` après une relance | à confirmer |
-| M8 — flush de l'état pendant un tour de relance | à confirmer |
+| M4 — `r` sur une ligne qui n'a pas échoué | non déroulé |
+| M5 — `r` pendant le run | non déroulé |
+| M6 — Ctrl-C pendant un tour de relance | non déroulé |
+| M7 — `q` après une relance | non déroulé |
+| M8 — flush de l'état pendant un tour de relance | non déroulé |
+| M9 — l'identification manuelle après v0.8.1 | ✅ conforme, sur *Dragon Ball Party 4 In 1* |
 
-**Portée de la validation.** Elle a été faite sur le commit précédant la montée
-`screenscraper` v0.8.1 (`ad928c7`). Ce commit ne touche que `Cargo.toml`, `Cargo.lock` et
-le hash Nix — aucune ligne du chemin de relance — donc M1–M3 restent acquis.
+**Portée de la validation, telle qu'elle est.** M1–M3 ont été passés sur le commit
+précédant la montée `screenscraper` v0.8.1 (`ad928c7`) ; ce commit ne touche que
+`Cargo.toml`, `Cargo.lock` et le hash Nix — aucune ligne du chemin de relance — donc ils
+restent acquis. M9 a été passé après.
+
+M4 à M8 **n'ont pas été déroulés** et la release a été acceptée sans eux, sur décision du
+mainteneur. Le trou qui compte est **M6** : c'est le seul scénario qui exerce le correctif
+`cut_short` (Ctrl-C pendant un tour de relance ne doit pas écrire un `run.yml` où tout est
+`Done`), et aucun test unitaire ne le couvre — la boucle de tours demande un vrai pool et
+un vrai terminal. À dérouler à la première occasion.
 
 ## Trouvé en chemin, pas corrigé
 
