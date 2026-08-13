@@ -12,6 +12,33 @@ git-cliff; they are preserved verbatim, with far more detail, in
 [SemVer]: https://semver.org/
 [Conventional Commits]: https://www.conventionalcommits.org/
 
+## [0.22.0] — 2026-08-13
+
+### Features
+
+- **ui**: Retry failed ROMs from the end-of-run screen with r and R ([`aaacffd`](https://github.com/gfriloux/rompom/commit/aaacffd343f65f05302ac87ace08489dffb3f89b))
+
+### Bug fixes
+
+- **pipeline**: Let a ROM ScreenScraper cannot find reach the identification modal ([`ad928c7`](https://github.com/gfriloux/rompom/commit/ad928c7507ff92401b729a51154e46cdf156e174))
+- **cli**: Do not write run.yml when Ctrl-C lands on the end-of-run report ([`11398ac`](https://github.com/gfriloux/rompom/commit/11398ac23997d605a295117c363a6a0695e97424))
+- **ui**: Drop a duplicate retry request instead of running an extra round ([`154bdcc`](https://github.com/gfriloux/rompom/commit/154bdccdf8d6b3f851dd4f004d4d96012b8e8b88))
+
+### Refactoring
+
+- **pipeline**: Make the worker pool a round that can be run again ([`f68b664`](https://github.com/gfriloux/rompom/commit/f68b6646871cce33ff6e8e91e623a1d6c3927c1a))
+
+### Documentation
+
+- Hand off the screenscraper empty-search parse failure ([`ccd2e7f`](https://github.com/gfriloux/rompom/commit/ccd2e7fcbdf63697420799db39d8bbc7a0013c2d))
+- Close the r/R retry item of the P3 roadmap ([`efc3599`](https://github.com/gfriloux/rompom/commit/efc35998aab32e81958ade7aab19967c6c56e9f1))
+
+### Miscellaneous
+
+- **plans**: Record the manual identification test after screenscraper v0.8.1 ([`1f9904c`](https://github.com/gfriloux/rompom/commit/1f9904c3aeb705a78cdcf0e2b55f0ad9a97860fd))
+- **plans**: Record the v0.22.0 manual runs ([`83ac122`](https://github.com/gfriloux/rompom/commit/83ac12245efdf877c6cedeb0158e3eb4541870ea))
+- **plans**: Plan the v0.22.0 retry of failed ROMs ([`f326451`](https://github.com/gfriloux/rompom/commit/f326451ee2ef73e7194037cd95dadca2fc5f5847))
+
 ## [0.21.0] — 2026-08-12
 
 ### Features
