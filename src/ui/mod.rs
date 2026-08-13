@@ -1216,6 +1216,10 @@ impl Ui {
     s.finished_at = None;
     s.quit = false;
     s.notice = None;
+    // A second `R` landing between `wait_for_end` taking the first and this call would
+    // otherwise be serviced as an extra round once this one ends — a keypress the user
+    // made twice impatiently, honoured twice several minutes apart.
+    s.retry = None;
   }
 
   /// Blocks until the user leaves the end-of-run screen, and says how they left it.
