@@ -268,14 +268,34 @@ correction est arrivée avec ses tests : le dépôt est passé de 0 à 34 tests.
   emballé dans un guard : il sérialisait ce que le thread de rendu sérialise déjà, et sa
   capacité de 1 était ce qui empêchait la vue « à identifier » d'avoir quoi que ce soit
   à lister)*
-- [ ] **`r` / `R` — relancer les ROMs en échec depuis la TUI** *(descendu de P2.7)*.
-  Ce n'est pas de l'UI : il faut ré-armer le DAG (steps `Failed`/`Skipped` remis à
-  `Pending`), ré-incrémenter `remaining` sans casser l'invariant anti-underflow, et
-  repousser dans la queue. Après la fin du run la queue est arrêtée et les workers
-  joints, donc un `R` sur l'écran de bilan demanderait de relancer un pool. Mérite son
-  propre plan. En attendant, `w` écrit `<system>.errors.log` et relancer
-  `rompom -s <system>` refait exactement les ROMs échoués — leur `state.yml` n'a rien
-  enregistré. *(moyen)*
+- [x] **`r` / `R` — relancer les ROMs en échec depuis la TUI** *(descendu de P2.7)* —
+  *fait le 2026-08-13 (v0.22.0)*. `main` devient une boucle : un tour de workers par
+  relance, avec le bilan entre les deux. Le diagnostic était juste sur les trois points
+  (ré-armer le DAG, `remaining`, repousser dans la queue) mais taisait celui qui change
+  tout :
+  - **La relance est partielle, contrairement au resume.** Le `Rom` à la fin du run est
+    l'objet que le premier passage a rempli, pas un objet reconstruit depuis `run.yml` :
+    `sha1`, `jeu`, `medias`, `romname` sont encore là — d'autant plus depuis v0.21 où
+    `BuildPackage` et `DownloadMedias` clonent au lieu de `take()`. Un téléchargement
+    cassé ne coûte donc **aucune** requête ScreenScraper de plus et ne bumpe **aucun**
+    `pkgver` pour un paquet déjà écrit correctement. C'est ce qui rend `R` sur quarante
+    ROMs anodin.
+  - **Le compteur était le vrai piège.** `SaveState` a été décrémenté à zéro par ses deux
+    branches ; avec `CopyRom` échoué et `DownloadMedias` réussi il doit revenir à **1**.
+    Restaurer le 2 déclaré par le DAG fait attendre la ROM pour toujours ; laisser le 0
+    fait écrire l'état avant le téléchargement. `rearm()` compte les prédécesseurs **qui
+    sont dans l'ensemble re-armé**, et rien d'autre.
+  - **`WaitModal` a la même exception que dans `skip_successors`**, dans les deux sens :
+    remis à `Skipped` quand il n'est que descendant de l'échec (`LookupSS` va tourner et
+    le rouvrira s'il rate encore), mais laissé `Pending` quand c'est **lui** qui a
+    échoué — ses candidats vivent dans le `data` de `LookupSS`, qui reste `Done`.
+  - **Pas de relance en direct pendant le run** (décision de l'utilisateur) : elle
+    imposerait de passer `remaining` en `Mutex<usize>` pour ne pas courir avec la
+    dernière décrémentation, pour une valeur faible — une ROM `Failed` a déjà épuisé son
+    budget de retry. Les touches posent un `notice` plutôt que de ne rien faire.
+  - **Reste hors de portée** : re-identifier une ROM passée au modal. `Cancelled` ne fait
+    échouer aucun step, donc la ROM n'a pas d'`error` et ni la vue erreurs ni `R` ne la
+    voient.
 - [x] **Progression par téléchargement** — *fait le 2026-08-11 (v0.20.0)*, après
   `internetarchive` v0.3.0 et `screenscraper` v0.8.0. `Cell::Progress(u8)`,
   `RomBar::rom_progress()`, volume et débit à l'octet. **Le piège n'était pas le
@@ -354,6 +374,12 @@ correction est arrivée avec ses tests : le dépôt est passé de 0 à 34 tests.
    quand le chemin public rend 404 — réserve posée et arbitrée : le PKGBUILD garde l'URL
    publique, donc un `makepkg` en répertoire vierge échouera sur ces assets-là.
    160 → 185 tests.
-8. **Ensuite** — reste de la dette P3 (`r`/`R`, packaging OpenBOR, et la migration
+8. **v0.22.0 — la relance des ROMs en échec.** Le point `r`/`R`, seul, comme il le
+   demandait. Deux commits de code : le pool extrait en tour rejouable d'abord, sans
+   changement de comportement, pour que le diff du second montre la relance et non
+   l'extraction. Découpé plus fin, chaque morceau aurait été soit du code mort — clippy
+   `-D warnings` refuse une fonction sans appelant — soit une touche qui ment.
+   185 → 192 tests.
+9. **Ensuite** — reste de la dette P3 (packaging OpenBOR, et la migration
    reqwest 0.12 / rustls qui demande de bouger les trois dépôts ensemble), puis
    contribution SS sur base saine.
