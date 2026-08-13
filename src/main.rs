@@ -194,6 +194,75 @@ fn rom_info(source: &RomSourceData) -> ui::RomInfo {
   }
 }
 
+/// Runs one round of workers to exhaustion: both pools spawned, then joined.
+///
+/// A round ends when every ROM still in play has reached its pipeline leaf — `remaining`
+/// hits zero and `finish_rom` shuts the queue down — or when Ctrl-C shuts it down first.
+/// It is a function rather than a straight line in `main` because a retry runs another
+/// one, against the same context.
+fn run_round(ctx: &Arc<WorkerContext>, n_main: usize) {
+  let mut handles: Vec<thread::JoinHandle<()>> = Vec::with_capacity(n_main + N_BLOCKING_WORKERS);
+
+  for _ in 0..n_main {
+    let ctx = Arc::clone(ctx);
+    handles.push(thread::spawn(move || worker::worker_loop_main(ctx)));
+  }
+  for _ in 0..N_BLOCKING_WORKERS {
+    let ctx = Arc::clone(ctx);
+    handles.push(thread::spawn(move || worker::worker_loop_blocking(ctx)));
+  }
+
+  for h in handles {
+    h.join().unwrap();
+  }
+}
+
+/// Starts the periodic `state.yml` flush, and hands back what stops it.
+///
+/// The state used to be written once, after every worker had joined, so anything short of
+/// a clean exit or a Ctrl-C — a kill -9, an OOM, a power cut — threw away the whole run:
+/// every ROM came back as new, was re-downloaded, and had its pkgver bumped a second time
+/// for identical content.
+///
+/// Flushing mid-run is safe because `SaveState` inserts one whole `RomStateEntry` at a
+/// time under the mutex. A snapshot is therefore always a set of finished ROMs, never
+/// half of one.
+///
+/// It spans every round, retries included: a relaunched ROM downloading for two minutes
+/// deserves the same durability as the first pass.
+fn spawn_flusher(
+  state: Arc<Mutex<SystemState>>,
+  state_path: String,
+) -> (Arc<AtomicBool>, thread::JoinHandle<()>) {
+  let flushing = Arc::new(AtomicBool::new(true));
+  let handle = {
+    let flushing = Arc::clone(&flushing);
+    thread::spawn(move || {
+      let mut since_flush = 0u64;
+      while flushing.load(Ordering::Relaxed) {
+        thread::sleep(std::time::Duration::from_millis(FLUSH_POLL_MS));
+        since_flush += FLUSH_POLL_MS;
+        if since_flush < FLUSH_INTERVAL_MS {
+          continue;
+        }
+        since_flush = 0;
+        // Serialise under the lock, write without it — workers keep running.
+        //
+        // The lock is taken poison-tolerantly: a handler that panics while holding the
+        // state poisons it for the instant it takes `execute_step` to call
+        // `clear_poison()`. Landing in that window would kill this thread and silently
+        // end the periodic flushing for the rest of the run.
+        let yaml = match state.lock().unwrap_or_else(|e| e.into_inner()).to_yaml() {
+          Ok(yaml) => yaml,
+          Err(_) => continue,
+        };
+        write_with_rotation(&state_path, &yaml).ok();
+      }
+    })
+  };
+  (flushing, handle)
+}
+
 /// Something went wrong while running: no config directory, unreadable config, unknown
 /// system, a system with no source, ScreenScraper refusing the credentials.
 const EXIT_FAILURE: i32 = 1;
@@ -749,57 +818,9 @@ fn main() {
 
   // ── Launch workers ────────────────────────────────────────────────────
 
-  let mut handles: Vec<thread::JoinHandle<()>> = Vec::with_capacity(n_main + N_BLOCKING_WORKERS);
+  let (flushing, flusher) = spawn_flusher(Arc::clone(&state), state_path.clone());
 
-  for _ in 0..n_main {
-    let ctx = Arc::clone(&ctx);
-    handles.push(thread::spawn(move || worker::worker_loop_main(ctx)));
-  }
-  for _ in 0..N_BLOCKING_WORKERS {
-    let ctx = Arc::clone(&ctx);
-    handles.push(thread::spawn(move || worker::worker_loop_blocking(ctx)));
-  }
-
-  // Periodic flush. The state used to be written once, after every worker had joined,
-  // so anything short of a clean exit or a Ctrl-C — a kill -9, an OOM, a power cut —
-  // threw away the whole run: every ROM came back as new, was re-downloaded, and had
-  // its pkgver bumped a second time for identical content.
-  //
-  // Flushing mid-run is safe because `SaveState` inserts one whole `RomStateEntry` at a
-  // time under the mutex. A snapshot is therefore always a set of finished ROMs, never
-  // half of one.
-  let flushing = Arc::new(AtomicBool::new(true));
-  let flusher = {
-    let state = Arc::clone(&state);
-    let state_path = state_path.clone();
-    let flushing = Arc::clone(&flushing);
-    thread::spawn(move || {
-      let mut since_flush = 0u64;
-      while flushing.load(Ordering::Relaxed) {
-        thread::sleep(std::time::Duration::from_millis(FLUSH_POLL_MS));
-        since_flush += FLUSH_POLL_MS;
-        if since_flush < FLUSH_INTERVAL_MS {
-          continue;
-        }
-        since_flush = 0;
-        // Serialise under the lock, write without it — workers keep running.
-        //
-        // The lock is taken poison-tolerantly: a handler that panics while holding the
-        // state poisons it for the instant it takes `execute_step` to call
-        // `clear_poison()`. Landing in that window would kill this thread and silently
-        // end the periodic flushing for the rest of the run.
-        let yaml = match state.lock().unwrap_or_else(|e| e.into_inner()).to_yaml() {
-          Ok(yaml) => yaml,
-          Err(_) => continue,
-        };
-        write_with_rotation(&state_path, &yaml).ok();
-      }
-    })
-  };
-
-  for h in handles {
-    h.join().unwrap();
-  }
+  run_round(&ctx, n_main);
 
   // ── Post-join ─────────────────────────────────────────────────────────
 
