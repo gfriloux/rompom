@@ -74,6 +74,42 @@ comme le run.
 
 ---
 
-## Résultats
+## Résultats — 2026-08-13
 
-*(à remplir à l'exécution)*
+**Faux départ à consigner.** Le premier run de validation (`nes`, 1992 ROMs, 21 min 32 s)
+a tourné sur une **image antérieure au changement** : `just ci` réécrit
+`target/debug/rompom` à chaque passage, et le processus lancé avant gardait son image. Le
+symptôme n'était pas « `r` ne marche pas » mais **deux lignes d'aide absentes à la fois**
+(`R retry them` au bilan, `r/R` dans la vue erreurs) — deux libellés manquants ensemble
+désignent un binaire, pas une touche non branchée. À retenir : `rompom --version` ne
+départage pas tant que le bump n'est pas posé ; le témoin est le pied de page, ou
+`strings ./result/bin/rompom | grep -q 'retry them'`.
+
+| test | verdict |
+|---|---|
+| M1 — `r` relance la ROM sélectionnée | ✅ conforme |
+| M2 — `R` relance toutes les échouées | ✅ conforme |
+| M3 — une relance qui rate revient au bilan | ✅ conforme (les 3 ROMs SS du run `nes`) |
+| M4 — `r` sur une ligne qui n'a pas échoué | à confirmer |
+| M5 — `r` pendant le run | à confirmer |
+| M6 — Ctrl-C pendant un tour de relance | à confirmer |
+| M7 — `q` après une relance | à confirmer |
+| M8 — flush de l'état pendant un tour de relance | à confirmer |
+
+**Portée de la validation.** Elle a été faite sur le commit précédant la montée
+`screenscraper` v0.8.1 (`ad928c7`). Ce commit ne touche que `Cargo.toml`, `Cargo.lock` et
+le hash Nix — aucune ligne du chemin de relance — donc M1–M3 restent acquis.
+
+## Trouvé en chemin, pas corrigé
+
+**Un échec dur qui n'en était pas un.** Les 3 ROMs en erreur du run `nes` portaient toutes
+`ScreenScraper sent a response rompom could not parse`. Diagnostic complet dans
+`handoff_screenscraper_empty_search.md` : `jeuRecherche` dit « rien trouvé » par
+`jeux: [{}]`, ce qui faisait échouer tout l'appel et rendait la modale d'identification
+inatteignable. Corrigé en amont (`screenscraper` v0.8.1), câblé ici en `ad928c7`.
+
+**`rompom --plain | head` sort en 101.** Rust ignore `SIGPIPE` par défaut, donc `println!`
+échoue sur un tube fermé et panique ; `install_panic_hook()` avale le message, il ne reste
+que le code de sortie. Sans rapport avec ce lot, et invisible sans tube — mais le mode
+`--plain` existe précisément pour être redirigé, donc ça mérite une ligne dans `TODO.md`
+un jour.
