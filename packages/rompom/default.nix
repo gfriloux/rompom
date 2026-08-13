@@ -20,7 +20,7 @@ pkgs.pkgsStatic.rustPlatform.buildRustPackage {
     lockFile = ../../Cargo.lock;
     outputHashes = {
       "internet_archive-0.3.0" = "sha256-c6pciyhMQZU8yglV7r6fwyaeA77E+HfT6a/aXg9Fkk8=";
-      "screenscraper-0.8.0" = "sha256-IM+LMZRJugTXI4r6uA1M5y4sTlx+MWfTUBvPVidTovA=";
+      "screenscraper-0.8.1" = "sha256-HC2gdMEZB4eWm9mxfc/MkJrkmy86Agq0mr/zGTt2MSY=";
     };
   };
 

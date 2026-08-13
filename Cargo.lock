@@ -2011,8 +2011,8 @@ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
 name = "screenscraper"
-version = "0.8.0"
-source = "git+https://github.com/gfriloux/screenscraper?tag=v0.8.0#68673f785badbcba12ac8d8a20297719ad3f9bb1"
+version = "0.8.1"
+source = "git+https://github.com/gfriloux/screenscraper?tag=v0.8.1#6cc80661a70fa059131ade1636881ba3c416d55b"
 dependencies = [
  "reqwest",
  "serde",
@@ -2396,7 +2396,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",
