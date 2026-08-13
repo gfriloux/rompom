@@ -306,6 +306,18 @@ correction est arrivée avec ses tests : le dépôt est passé de 0 à 34 tests.
 - [x] **Templates** — *fait le 2026-08-11 (v0.20.0)*. `mkdir -m 0700 -p` (l'ancien
   créait un répertoire nommé `0700` et laissait les vrais aux droits par défaut) et la
   virgule parasite de `ls *.pdf,` (qui faisait perdre le manuel silencieusement).
+- [ ] **Lib `screenscraper` — une recherche sans résultat fait échouer tout l'appel.**
+  *(constaté le 2026-08-13, handoff écrit : `.claude/plans/v0.22.0/handoff_screenscraper_empty_search.md`)*
+  `jeuRecherche` répond « rien trouvé » par **HTTP 200, `success: true`, `jeux: [{}]`** —
+  une liste d'un objet vide. `JeuInfo` exige `id`/`noms`/`topstaff`/`rotation`/`medias`,
+  donc l'appel entier tombe en `Parse` → `ApiFailure::Malformed`, que rompom traduit en
+  `StepError::Fatal`. `WaitModal` est alors `Skipped` et **la modale ne s'ouvre jamais** :
+  la saisie manuelle d'un game id est inatteignable précisément pour les ROMs dont le nom
+  ne correspond à rien chez SS (multicarts, hacks, romsets exotiques). Trois ROMs sur 1992
+  sur un run `nes`. Cas *créé* par P1.1 : avant, `unwrap_or_default()` ouvrait une modale
+  vide, ce qui était par accident le bon comportement ici. Le correctif appartient à la
+  lib — l'absorber côté rompom rouvrirait le trou que P1.1 a bouché. *(petit, dépôt
+  voisin, **prioritaire**)*
 - [ ] **Lib `screenscraper` — assainir le `Display` de `Error::Request`.** La variante
   porte un `source: reqwest::Error` dont le `Display` ajoute l'URL complète, credentials
   compris. rompom est protégé (il ne cite plus l'erreur), mais le prochain consommateur
