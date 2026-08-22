@@ -22,7 +22,7 @@ getopts = "0.2.24"
 ratatui = "0.30"
 crossterm = "0.29"
 serde = { version = "1.0", features = ["derive"] }
-quick-xml = { version = "0.41.0", features = ["serialize"] }
+quick-xml = { version = "0.42.0", features = ["serialize"] }
 serde_json = "1.0.149"
 # 0.9.34+deprecated is the last release: the crate is archived. Pinned so the dead end
 # is visible here rather than discovered at the next `cargo update`.
