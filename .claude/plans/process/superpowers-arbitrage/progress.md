@@ -143,6 +143,76 @@ supprimés plutôt que laissés vides. — Pourquoi : ils ne contenaient que ça
 répertoires vides, et un répertoire vide se lit comme un emplacement conventionnel qu'il n'est
 plus. — Coût si c'est faux : un `mkdir` le jour où rompom écrit son premier skill.
 
+## Relecture de clôture
+
+Relecture dispatchée sur `$(git merge-base master HEAD)..HEAD` avec le plan, son *Review
+Focus* verbatim et les décisions de ce journal — jamais l'historique de session. Rendu :
+2 Critiques, 6 Importants, 12 Mineurs, 4 « refus de juger ». **Tous ses constats factuels
+ont été revérifiés avant d'agir**, et tous se confirmaient.
+
+Regradage par effet : un Important monte en **Critique** (les trois fichiers vivants portant
+l'ancienne norme git — c'est une contradiction normative, au même titre que la première), et
+deux Mineurs montent en **Important** (la date de dernière mise à jour, qui est une
+affirmation fausse sur le document lui-même ; et une phrase française incompréhensible dans
+une règle normative — ce n'est pas du style, c'est une instruction illisible). Rien n'a été
+descendu.
+
+Corrigé en une passe :
+
+- **Critique** — §5 prescrivait des commits que §3 et le nouveau §4 interdisent : trois
+  recettes sur huit séparaient le test de son code (« 1. snapshot mis à jour → 2. impl »),
+  donc un commit rouge, alors que §4 venait de citer §5 comme son autorité. §5 était
+  antérieure au chantier, mais c'est le renvoi de §4 qui rendait la contradiction bloquante.
+  Les trois lignes sont refondues, et une phrase sous la table dit que l'ordre des recettes
+  est logique et non commit par commit.
+- **Critique** (regradé depuis Important) — `Justfile:59`, `.github/workflows/release.yml:3`
+  et `README.md:565` affirmaient encore l'ancienne norme (« the tag is set by the
+  maintainer », « hybrid git policy: Claude never tags »). Le `Justfile` est nommé par
+  `CLAUDE.md` comme la définition unique des portes, et `README.md` est la procédure de
+  release publiée. **La ligne de ce journal affirmant « plus aucune règle normative » était
+  donc fausse hors des deux fichiers mesurés** — exactement le mode de défaillance que le
+  Review Focus n° 3 nommait, récidivant d'un cran de périmètre. Le grep de clôture porte
+  désormais sur tout le dépôt suivi.
+- **Important** — `dispatching-parallel-agents` était *Marginal* (« autorisé ») tandis que
+  §8 annonçait la relecture comme **seule** exception au lancement de sous-agents. Passé à
+  *Rejeté par défaut*.
+- **Important** — `CLAUDE.md` ne disait nulle part laquelle des deux tables fait foi, alors
+  que c'est le seul fichier toujours en contexte — donc le seul endroit où la règle
+  anti-divergence devait être lisible.
+- **Important** — `systematic-debugging` et `verification-before-completion` étaient
+  *Adopté* (« suivre le skill tel qu'il est écrit ») alors que §8 les réécrit en plus
+  étroit. Pire : `systematic-debugging` tel qu'écrit exige un test qui échoue avant tout
+  correctif, pour n'importe quel incident — ce qui réimposait à la modale ce que §4 venait
+  d'en dispenser, le Review Focus n° 5 entrant par la porte de §10. Reclassés *Adapté*, avec
+  l'écart nommé. `finishing-a-development-branch` reclassé de même : sa porte est `cargo
+  test` et son menu offre « garder la branche telle quelle », deux choses que §8 et §3
+  refusent.
+- **Important** — le chemin *Trivial* n'était dispensé de rien : lu à la lettre, corriger un
+  lien mort réclamait une branche, un sous-agent relecteur et un menu d'intégration. La
+  relecture ne vaut désormais que pour un changement borné ou architectural.
+- **Important** (constat issu d'un « refus de juger », et il avait raison de refuser) — §8
+  concédait « la seule dérogation à la règle de session qui interdit de lancer un agent sans
+  demande explicite », une règle que le relecteur n'a trouvée **nulle part** : elle vit dans
+  les instructions de session, pas dans un fichier lisible. On ne borne pas une exception à
+  une règle qu'on ne peut pas lire. Reformulé sans citer de règle externe.
+- **Important** (regradé) — `Dernière mise à jour : 2026-08-09` sur le document le jour de sa
+  plus grosse réécriture. Corrigé au 2026-09-27.
+- **Important** (regradé) — « puis chercher au moins cher que la justesse permette » dans la
+  ligne *Spike* : sans objet, incompréhensible. Réécrit.
+- Également corrigés, parce que ce sont des défauts dans du texte que ce chantier vient
+  d'écrire : le décompte de §8 disait « deux par étape, deux à la clôture » alors que le
+  journal s'écrit à chaque étape (trois et une) ; la légende *Marginal* disait « aucune règle
+  attachée » au-dessus de deux lignes qui en attachent une ; `veut dire` → `veulent dire` ;
+  « une version ou un chantier architectural » laissait lire que toute version a un plan ;
+  `l'utilisateur` et `le mainteneur` nommaient la même personne dans le même document ; et
+  les scopes `procedure` et `plans`, employés neuf fois sur neuf par ce chantier, ne
+  figuraient pas dans la table de §3.
+
+Portes après la passe : `just ci` → `EXIT=0`, 192 tests ; `just --list` parse ; le YAML du
+workflow parse ; ancres toutes résolues, aucun renvoi `§N` orphelin, §8 annonce quatre règles
+et porte quatre sous-sections, les cinq arrêts sont cinq (compté sur le texte, pas à l'œil),
+15/15 skills dans les deux tables après changement des verdicts.
+
 Décision : `design/diagrams/` est non suivi par git et préexiste au chantier. Je le laisse
 intact et le consigne en phase 0 plutôt que de le traiter en passant. — Pourquoi : il ne
 relève pas de l'arbitrage superpowers, et décider du sort d'un répertoire qu'un autre
