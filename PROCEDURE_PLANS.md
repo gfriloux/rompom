@@ -574,6 +574,20 @@ Ce que les verdicts obligent :
 seul fichier réinjecté à chaque session. Écrire deux fois, c'est accepter qu'elles
 divergent : en cas de divergence, **celle-ci fait foi**.
 
+### OpenSpec n'est pas le processus de rompom
+
+`openspec/`, `.claude/commands/opsx/` et six skills `openspec-*` avaient été installés dans
+ce dépôt et n'ont **jamais servi** : configuration par défaut sans une ligne de contexte
+projet, `specs/` et `changes/` vides, rien de suivi par git, aucun commit. Ils doublaient
+`brainstorming` / `writing-plans` / `executing-plans` avec un jeu d'artefacts plus lourd,
+alors que la convention de plans de §1 tourne depuis v0.16. Retirés le 2026-09-27.
+
+**Le processus de planification de rompom est §1 + §9, et rien d'autre.** À noter, parce que
+la suppression ne suffit pas : les skills `opsx:*` fournis par un **plugin** restent listés
+à chaque session quoi qu'on retire de ce dépôt. C'est cette ligne qui tranche, pas le `rm` —
+et une réinstallation d'OpenSpec ici serait une décision à prendre avec le mainteneur, pas
+un effet de bord d'outillage.
+
 ---
 
 ## 11. Ce qui ne change pas entre les versions
