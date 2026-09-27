@@ -56,7 +56,7 @@ changelog:
 changelog-preview:
     @git-cliff --unreleased --strip header
 
-# Per the hybrid git policy the tag is set by the maintainer, never by this recipe.
+# This recipe never sets the tag — tagging is a separate, confirmed step (PROCEDURE_PLANS.md §3/§6).
 # Bump the version everywhere and regenerate the changelog. Usage: just release 0.16.0
 release VERSION:
     #!/usr/bin/env bash

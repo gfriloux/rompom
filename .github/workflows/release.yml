@@ -1,6 +1,6 @@
 name: Release
 
-# Triggered when the maintainer pushes a vX.Y.Z tag (hybrid git policy: Claude never tags).
+# Triggered when a vX.Y.Z tag is pushed.
 # Publishes a GitHub release whose body is the changelog entry for that exact version,
 # with the static musl binary attached.
 
