@@ -89,17 +89,44 @@ Consigner le résultat dans `.claude/plans/v{X.Y.Z}/phase0_results.md`.
 
 ---
 
-## 3. Politique git — hybride
+## 3. Politique git
 
 - Claude travaille sur une **branche dédiée** (`feat/…`, `fix/…`, `chore/…`, `refactor/…`,
-  `docs/…`), jamais directement sur `master`.
+  `docs/…`, `ci/…`), jamais directement sur `master`.
 - Claude **commite atomiquement** : un changement logique = un commit, en
   [Conventional Commits](#convention-de-commit). Chaque commit passe les portes seul.
-- Claude ne fait **jamais** `merge`, `push` ni `tag`. L'utilisateur relit, merge sur
-  `master` et push.
+- Claude **mène le flux git complet** — `commit`, `merge`, `tag`, `push` — et clôt une
+  branche en **présentant les options d'intégration** plutôt qu'en décidant seul. Toutes
+  les opérations interactives passent par la règle ci-dessous.
 - **Un plan se termine toujours par un merge sur `master`.** À la clôture (portes vertes),
-  l'utilisateur merge la branche du plan, **avant** de démarrer le plan suivant. On ne
-  laisse pas une branche terminée non mergée : chaque plan part d'un `master` à jour.
+  la branche du plan est mergée **avant** de démarrer le plan suivant. On ne laisse pas une
+  branche terminée non mergée : chaque plan part d'un `master` à jour.
+
+### Git interactif — annoncer le lot, puis enchaîner
+
+Les commits et les tags sont signés OpenPGP, et le remote est en SSH adossé à une YubiKey.
+Les deux ne coûtent pas la même chose, et la règle en découle :
+
+| Opération | Ce qui protège | Coût |
+|---|---|---|
+| `commit`, `tag` | clé ed25519 **sur disque**, protégée par phrase de passe (`commit.gpgsign` et `tag.gpgsign` à `true`) | **une** saisie, puis `gpg-agent` met en cache. Aucun TTL n'est configuré, donc les défauts gpg : 10 min d'inactivité, 2 h au maximum |
+| `fetch`, `pull`, `push` | clé SSH **`ED25519-SK`** — une YubiKey | **un contact physique par connexion**, qu'aucun cache n'évite |
+
+`pinentry-qt` est configuré : la boîte de dialogue s'ouvre sur le bureau du mainteneur et
+non dans le terminal de Claude — ce qui rend l'opération possible ici, où `/dev/tty` est
+inouvrable.
+
+D'où deux cadences distinctes :
+
+1. **Annoncer le lot de commits et attendre le feu vert avant le premier** — « 5 commits
+   atomiques arrivent, tu es au clavier ? » — puis les enchaîner en s'appuyant sur le cache.
+2. **Demander confirmation avant chaque `fetch`, `pull`, `push` et `tag`** : un contact par
+   connexion pour les trois premiers, et un tag peut tomber hors de la fenêtre de cache.
+
+**Si une saisie traîne ou qu'une signature échoue, on s'arrête et on le dit.** Jamais de
+`--no-gpg-sign`, jamais de contournement d'une signature manquante : un commit non signé
+dans cet historique se voit à `git log --show-signature` et ne se rattrape pas sans le
+réécrire.
 
 ### Convention de commit
 
@@ -204,8 +231,9 @@ test + correctif.
 
 ## 6. Release
 
-**SemVer.** Le changelog est dérivé des Conventional Commits par **git-cliff**. Le tag est
-posé par le **mainteneur** (politique git hybride) et déclenche la publication.
+**SemVer.** Le changelog est dérivé des Conventional Commits par **git-cliff**. Le tag
+déclenche la publication ; il est signé et poussé sous la règle de §3, donc **confirmation
+demandée avant**, séparément du lot de commits.
 
 ```bash
 just release 0.16.0     # bump Cargo.toml + Cargo.lock + packages/rompom/default.nix
@@ -277,7 +305,7 @@ En plus, hors boucle rapide : `just audit` (CVE) et `nix flake check`
 - [ ] Tests ajoutés pour le code pur touché
 - [ ] Doc synchronisée (même commit)
 - [ ] Commits atomiques, scope réel (jamais `all`), sujets de qualité changelog
-- [ ] Branche dédiée, non mergée par Claude
+- [ ] Branche dédiée ; clôture en présentant les options d'intégration (§3)
 ```
 
 ---
@@ -292,7 +320,9 @@ En plus, hors boucle rapide : `just audit` (CVE) et `nix flake check`
 - **Le pipeline est un DAG** de steps avec `wait_for`/`next` — pas de séquence codée en dur.
 - **Les credentials ScreenScraper sont un secret** : jamais dans un log, un test, une
   fixture ou un message d'erreur.
-- **Git hybride** : branche + commits atomiques par Claude ; merge/push/tag par l'utilisateur.
+- **Git** : branche dédiée et commits atomiques, toujours. Claude mène le flux complet, en
+  annonçant le lot de commits et en demandant confirmation avant chaque `fetch`, `pull`,
+  `push` et `tag` (§3).
 - **Nix** : toujours `nix develop --command …` pour les commandes non interactives.
 - **`tmp/`** : scratch non commité (handoffs design, notes, sorties de travail).
 - **`CHANGELOG.md` est généré**, `CHANGELOG-legacy.md` est figé.
