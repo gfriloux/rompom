@@ -562,8 +562,8 @@ much more detailed form, in [CHANGELOG-legacy.md](CHANGELOG-legacy.md).
 
 ## Release
 
-Versioning follows [SemVer](https://semver.org/). The tag is set by the **maintainer** and
-triggers publication.
+Versioning follows [SemVer](https://semver.org/). Pushing the tag triggers publication, and
+it is a confirmed step of its own (`PROCEDURE_PLANS.md` §3).
 
 1. `just release X.Y.Z` — bumps the version in `Cargo.toml`, `Cargo.lock` and
    `packages/rompom/default.nix`, then regenerates `CHANGELOG.md` for that version.

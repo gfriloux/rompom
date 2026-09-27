@@ -13,15 +13,15 @@
 ## 1. Dimensionner un changement, puis créer le plan
 
 Tout changement ne mérite pas un dossier de plan. **Classer d'abord, et annoncer le
-classement à voix haute** pour que l'utilisateur puisse le renverser, puis suivre ce
+classement à voix haute** pour que le mainteneur puisse le renverser, puis suivre ce
 chemin-là.
 
 | Chemin | Ce que c'est | Artefact |
 |---|---|---|
 | **Trivial** | Aucune décision à présenter : une coquille, un lien mort, une reformulation qui ne change ni comportement ni interface. | Aucun, et pas d'accord préalable. On le fait et on dit ce qu'on a fait. |
-| **Spike** | Une question de faisabilité — « l'API ScreenScraper renvoie-t-elle ce champ ? », « ce `.chd` multi-piste est-il lisible ? ». La sortie est une **réponse**, pas du code qu'on garde. | Aucun. Énoncer la question et la sonde en deux phrases, obtenir un feu vert, puis chercher au moins cher que la justesse permette. Rapporter une recommandation ; ce qui a été construit est étiqueté jetable. |
+| **Spike** | Une question de faisabilité — « l'API ScreenScraper renvoie-t-elle ce champ ? », « ce `.chd` multi-piste est-il lisible ? ». La sortie est une **réponse**, pas du code qu'on garde. | Aucun. Énoncer la question et la sonde en deux phrases, obtenir un feu vert, puis sonder de la façon la moins coûteuse que la justesse permette. Rapporter une recommandation ; ce qui a été construit est étiqueté jetable. |
 | **Bounded** (borné) | Un changement bien cadré sur du code **déjà présent ici** : un drapeau CLI, une correction dans un handler, un champ de plus dans `description.xml`, un ajustement de template. | Pas de fichier de plan. Présenter un design court en conversation, obtenir un **oui explicite**, puis implémenter. |
-| **Architectural** | Un nouveau step de pipeline, un changement de format d'état, une refonte de l'UI, un nouveau type de source, tout ce qui déplace une responsabilité entre étages ou change le DAG. | Un plan sous `.claude/plans/`, relu par l'utilisateur **avant** implémentation. |
+| **Architectural** | Un nouveau step de pipeline, un changement de format d'état, une refonte de l'UI, un nouveau type de source, tout ce qui déplace une responsabilité entre étages ou change le DAG. | Un plan sous `.claude/plans/`, relu par le mainteneur **avant** implémentation. |
 
 Les noms *Spike*, *Bounded* et *Architectural* sont ceux du plugin `superpowers` (§10),
 volontairement laissés en anglais : un lecteur qui part de ce
@@ -43,7 +43,8 @@ c'est pourquoi il porte Objectif, Architecture, Contraintes globales et Review F
 
 ### Créer le plan (chemin architectural)
 
-Dès qu'une version ou un chantier architectural est décidé, créer :
+Dès qu'un chantier architectural est décidé — une version qui en porte un, ou un chantier
+de process — créer :
 
 ```
 .claude/plans/v{X.Y.Z}/
@@ -152,6 +153,8 @@ type(scope): message court à l'impératif
 | `ci` | `.github/workflows/`, `Justfile`, pre-commit |
 | `deps` | mises à jour de dépendances (utilisé par Renovate) |
 | `release` | bump de version (**exclu du changelog**) |
+| `procedure` | `PROCEDURE_PLANS.md` — le processus lui-même, avec sa reprise dans `CLAUDE.md` |
+| `plans` | `.claude/plans/` — plans, journaux, résultats de phase 0, handoffs |
 
 **Le scope `all` est proscrit.** Il ne dit rien et pollue le changelog.
 
@@ -234,14 +237,20 @@ tel (§5).
 
 | Type | Étage | Étapes (chacune = 1 commit) |
 |---|---|---|
-| Nouveau step de pipeline | `pipeline` | 1. step + handler (`feat(pipeline): …`) → 2. test → 3. MAJ du DAG dans `CLAUDE.md` |
-| Nouveau template PKGBUILD | `package` | 1. template + sélection (`feat(package): …`) → 2. snapshot → 3. doc |
-| Changement de `description.xml` | `package` | 1. snapshot mis à jour (`test(package): …`) → 2. impl → 3. doc |
+| Nouveau step de pipeline | `pipeline` | 1. step + handler **avec le test de ce qui est pur** (`feat(pipeline): …`) → 2. MAJ du DAG dans `CLAUDE.md` |
+| Nouveau template PKGBUILD | `package` | 1. template + sélection **+ snapshot** (`feat(package): …`) → 2. doc |
+| Changement de `description.xml` | `package` | 1. snapshot mis à jour **puis** impl, dans le **même** commit (`feat(package): …`) → 2. doc |
 | Changement d'UI / phase | `ui` | 1. impl (`feat(ui): …`) → 2. `manual_tests.md` → relecture visuelle |
 | Correction de bug | étage concerné | test de régression **+** fix dans le **même** commit (`fix(scope): …`) — cf. note ci-dessous |
 | Refactor | étage concerné | 1. refactor sans changer de snapshot (`refactor(scope): …`). Si un snapshot bouge, ce n'était pas un refactor. |
 | Changement de format d'état | `state` | migration explicite + note de rupture ; jamais de changement silencieux de `state.yml` |
-| Doc seule | — | `docs: …` |
+| Doc seule | — | `docs: …`, ou `docs(procedure): …` quand c'est le processus qui change |
+
+**L'ordre des recettes est logique, pas commit par commit.** Un test s'écrit avant le code
+qu'il couvre et se regarde échouer (§4), mais il est **commité avec lui** : §3 exige que
+chaque commit passe les portes seul, donc ni snapshot rouge ni implémentation sans son test
+ne partent isolément. Une flèche de cette table sépare deux commits ; elle ne sépare jamais
+un test de ce qu'il couvre.
 
 ### Test de régression : observé rouge, commité vert
 
@@ -310,8 +319,9 @@ En plus, hors boucle rapide : `just audit` (CVE) et `nix flake check`
 
 ## 8. Discipline d'exécution
 
-**Quatre règles**, quel que soit le type de changement : deux gouvernent la façon de mener
-une étape, deux la façon de clore une branche. La cinquième, la loi des tests, vit en §4 —
+**Quatre règles**, quel que soit le type de changement : trois se tiennent à chaque étape —
+la cause, la preuve, et la ligne de journal écrite avec le commit — et une ne joue qu'à la
+clôture de la branche. La cinquième, la loi des tests, vit en §4 —
 c'est là qu'est la discipline de test, et la séparer d'elle n'aurait servi qu'à la répéter.
 Toutes sont adaptées du plugin `superpowers` ; là où leur formulation diffère de la sienne,
 **ce document l'emporte**.
@@ -342,7 +352,7 @@ Le pipeline est un système multi-composants, et il est déjà instrumenté pour
 range les échecs par cause, et la vue *errors* de la TUI en donne le décompte. **On les lit
 avant de supposer où ça casse.**
 
-**Trois correctifs échoués veut dire que la conception est fausse.** Si chaque correctif
+**Trois correctifs échoués veulent dire que la conception est fausse.** Si chaque correctif
 découvre un problème ailleurs, ou si chacun réclame « juste un petit remaniement » : on
 s'arrête, on ne tente pas un quatrième, et on pose la question d'architecture. Ce n'est plus
 une hypothèse fausse, c'est une frontière mal placée.
@@ -371,16 +381,18 @@ et une longue série de verts sont les trois moments pour lesquels cette règle 
 
 ### Relecture de clôture — un contexte frais
 
-Avant de présenter les options d'intégration (§3), la branche reçoit **une** relecture par
-un contexte **qui ne l'a pas écrite**. Relire son propre diff n'est pas cette relecture :
-même auteur, mêmes angles morts.
+Avant de présenter les options d'intégration (§3), une branche portant un changement
+**borné ou architectural** (§1) reçoit **une** relecture par un contexte **qui ne l'a pas
+écrite**. Relire son propre diff n'est pas cette relecture : même auteur, mêmes angles
+morts. Un changement trivial n'y passe pas — il n'a ni plan, ni décision à présenter, et
+brûler un contexte sur une coquille est ce que le chemin Trivial existe pour éviter.
 
 Comment obtenir ce contexte, par ordre de préférence :
 
 1. **Un sous-agent relecteur** — le chemin normal. Il lit le diff dans son propre contexte
-   et seuls ses constats reviennent. C'est la **seule dérogation** à la règle de session qui
-   interdit de lancer un agent sans demande explicite, et elle ne vaut **que** pour cette
-   relecture.
+   et seuls ses constats reviennent. Lancer un sous-agent n'est **pas** une pratique par
+   défaut sur rompom : cette relecture en est la seule exception, et elle ne s'étend à rien
+   d'autre (§10, `dispatching-parallel-agents` et `subagent-driven-development`).
 2. À défaut, une session `/clear`ée, relisant depuis le diff et le plan seuls.
 
 **Demander au mainteneur de regarder n'est pas un substitut** : il est la personne que la
@@ -550,14 +562,14 @@ Ce que les verdicts obligent :
 | **Rejeté par défaut** | Ne pas l'utiliser sans demande explicite du mainteneur. |
 | **Rejeté** | Ne pas l'utiliser. |
 | **Surclassé** | Ses instructions ne lient pas ici. |
-| **Marginal** | Autorisé, jamais par défaut, aucune règle attachée. |
+| **Marginal** | Hors de la pratique courante d'ici. Autorisé dans le cas étroit que sa ligne décrit, et dans aucun autre. |
 
 | Skill | Verdict | Pourquoi |
 |---|---|---|
-| `systematic-debugging` | **Adopté** | Cf. [§8 → Cause avant correctif](#cause-avant-correctif). Rien n'était écrit sur le débogage, sur un projet dont l'historique de bugs est une suite de symptômes traités avant leur cause. |
-| `verification-before-completion` | **Adopté** | Cf. [§8 → Preuve avant affirmation](#preuve-avant-affirmation). §7 disait **quoi** vérifier, jamais **quand**. |
+| `systematic-debugging` | **Adapté** | Sa discipline est reprise en [§8 → Cause avant correctif](#cause-avant-correctif), et c'est **§8 qui lie**. Le skill impose par ailleurs un test qui échoue avant tout correctif, pour n'importe quel incident : §4 en dispense ce qui n'est pas testable ici, et cette dispense gagne. Rien n'était écrit sur le débogage, sur un projet dont l'historique de bugs est une suite de symptômes traités avant leur cause. |
+| `verification-before-completion` | **Adapté** | Repris en [§8 → Preuve avant affirmation](#preuve-avant-affirmation), avec la table de preuves de ce dépôt — c'est elle qui lie, pas les exemples du skill. §7 disait **quoi** vérifier, jamais **quand**. |
 | `receiving-code-review` | **Adopté** | Évaluer le retour, le vérifier contre ce dépôt, contredire avec un argument. Pas d'acquiescement de façade. |
-| `finishing-a-development-branch` | **Adopté** | Suite verte avant de présenter, base confirmée, options d'intégration présentées et non choisies. Sous la règle du lot de §3 — c'est elle qui remplace l'exécution silencieuse du menu. |
+| `finishing-a-development-branch` | **Adapté** | Suite verte avant de présenter, base confirmée, options d'intégration présentées et non choisies. Deux écarts qui lient : la porte est `just ci` à 0 et non `cargo test` (§8), et son option « garder la branche telle quelle » n'existe pas ici — §3 interdit de laisser une branche terminée non mergée. Sous la règle du lot de §3, qui remplace l'exécution silencieuse du menu. |
 | `test-driven-development` | **Adapté** | L'Iron Law lie le code pur et rien d'autre ; test et correctif dans le même commit. Cf. [§4](#ce-que-la-loi-des-tests-lie-et-ce-quelle-ne-lie-pas). |
 | `writing-plans` | **Adapté** | En-tête, Contraintes globales, Review Focus, blocs Consomme/Produit et règle « pas de réservé » : dedans (§9). Son emplacement `docs/superpowers/plans/` : non, les plans vivent sous `.claude/plans/`. Sa granularité « une étape = un commit » : non, elle produirait des commits rouges (§4). |
 | `executing-plans` | **Adapté** | Le journal et « on statue, on ne bloque pas » : dedans (§8). Son espace de travail `.superpowers/sdd/` et ses scripts : non — le journal est commité à côté de son plan. Et il **ne se supprime pas** en fin de chantier, contrairement à ce que le skill ordonne : c'est le compte rendu, pas du scratch. |
@@ -566,9 +578,9 @@ Ce que les verdicts obligent :
 | `subagent-driven-development` | **Rejeté par défaut** | Un implémenteur plus un relecteur par étape, chacun relisant `CLAUDE.md` depuis zéro, ne se rentabilise pas à la taille des chantiers d'ici. Disponible sur demande ; à **proposer** quand un plan dépasse une petite dizaine d'étapes. La relecture de clôture est gardée dans tous les cas. |
 | `using-git-worktrees` | **Rejeté** | Un second worktree ne partage pas `target/` : la première porte y est une reconstruction à froid de tout l'arbre de dépendances. `.direnv` est perdu, donc `nix develop` réévalue. Et son étape 2 lance `cargo build` dès qu'un `Cargo.toml` est à la racine — ce qui est le cas — hors `nix develop`, donc avec la mauvaise toolchain. La branche dédiée de §3 **est** l'isolation. Ceci rejette le workflow manuel du skill, pas un worktree natif que le mainteneur demanderait. |
 | `using-superpowers` | **Surclassé** | Son « 1 % de chance → tu DOIS l'invoquer » ne bat pas une ligne de cette table. C'est la raison pour laquelle cette table existe. |
-| `dispatching-parallel-agents` | **Marginal** | Du travail réellement indépendant est rare ici : le pipeline est un DAG, et ses étages se lisent ensemble. Pas interdit, jamais par défaut. |
-| `writing-skills` | **Marginal** | rompom n'écrit aucun skill, et ceux qui traînaient sous `.claude/skills/` n'étaient pas les nôtres. Aucune porte de ce dépôt ne peut donc vérifier cette règle ; le jour où un skill rompom voit le jour, le skill s'applique. |
-| `diagnosing-superpowers` | **Marginal** | Uniquement pour construire un rapport de bug à l'intention des mainteneurs du plugin. Sans rapport avec rompom. |
+| `dispatching-parallel-agents` | **Rejeté par défaut** | Du travail réellement indépendant est rare ici : le pipeline est un DAG, et ses étages se lisent ensemble. Surtout, §8 ne concède qu'**une** exception au fait que lancer un sous-agent n'est pas la pratique par défaut, et c'est la relecture de clôture — un skill dont l'objet est d'en lancer plusieurs ne peut pas être « autorisé » à côté. |
+| `writing-skills` | **Marginal** | rompom n'écrit aucun skill, et ceux qui traînaient sous `.claude/skills/` n'étaient pas les nôtres. Aucune porte de ce dépôt ne peut donc vérifier cette règle. Si un skill rompom voit le jour, le verdict devient **Adopté** pour lui. |
+| `diagnosing-superpowers` | **Marginal** | Rien à voir avec rompom : il ne sert qu'à construire un rapport de bug à l'intention des mainteneurs du plugin, et n'a pas d'autre usage ici. |
 
 `CLAUDE.md` porte la **même** table, condensée et groupée par verdict, parce que c'est le
 seul fichier réinjecté à chaque session. Écrire deux fois, c'est accepter qu'elles
@@ -611,5 +623,5 @@ un effet de bord d'outillage.
 
 ---
 
-**Dernière mise à jour :** 2026-08-09
+**Dernière mise à jour :** 2026-09-27
 **Statut :** Actif
