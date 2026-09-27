@@ -50,6 +50,7 @@ Dès qu'une version ou un chantier architectural est décidé, créer :
   plan.md           ← contexte, périmètre, phases, décisions, fichiers touchés
   manual_tests.md   ← tests manuels (enrichis au fil du dev, exécutés en validation)
   phase0_results.md ← état réel du dépôt avant de coder (cf. §2)
+  progress.md       ← journal de bord : ce qui s'est réellement passé (cf. §8)
 ```
 
 Un chantier de **process** n'est pas une version : il vit sous
@@ -96,8 +97,9 @@ Consigner le résultat dans `.claude/plans/v{X.Y.Z}/phase0_results.md`.
 - Claude **commite atomiquement** : un changement logique = un commit, en
   [Conventional Commits](#convention-de-commit). Chaque commit passe les portes seul.
 - Claude **mène le flux git complet** — `commit`, `merge`, `tag`, `push` — et clôt une
-  branche en **présentant les options d'intégration** plutôt qu'en décidant seul. Toutes
-  les opérations interactives passent par la règle ci-dessous.
+  branche en **présentant les options d'intégration** plutôt qu'en décidant seul, après la
+  relecture de clôture de §8. Toutes les opérations interactives passent par la règle
+  ci-dessous.
 - **Un plan se termine toujours par un merge sur `master`.** À la clôture (portes vertes),
   la branche du plan est mergée **avant** de démarrer le plan suivant. On ne laisse pas une
   branche terminée non mergée : chaque plan part d'un `master` à jour.
@@ -308,9 +310,11 @@ En plus, hors boucle rapide : `just audit` (CVE) et `nix flake check`
 
 ## 8. Discipline d'exécution
 
-Les règles ci-dessous valent quel que soit le type de changement. Elles sont adaptées du
-plugin `superpowers` ; là où leur formulation diffère de la sienne, **ce document
-l'emporte**.
+**Quatre règles**, quel que soit le type de changement : deux gouvernent la façon de mener
+une étape, deux la façon de clore une branche. La cinquième, la loi des tests, vit en §4 —
+c'est là qu'est la discipline de test, et la séparer d'elle n'aurait servi qu'à la répéter.
+Toutes sont adaptées du plugin `superpowers` ; là où leur formulation diffère de la sienne,
+**ce document l'emporte**.
 
 ### Cause avant correctif
 
@@ -364,6 +368,93 @@ commande le prouve ; la lancer en entier, pas une variante restreinte ; lire tou
 « Ça devrait aller », « le changement est trivial », « clippy est passé » ne prouvent rien :
 clippy n'est pas un compilateur et `just ci` n'est pas un `makepkg`. La fatigue, la pression
 et une longue série de verts sont les trois moments pour lesquels cette règle existe.
+
+### Relecture de clôture — un contexte frais
+
+Avant de présenter les options d'intégration (§3), la branche reçoit **une** relecture par
+un contexte **qui ne l'a pas écrite**. Relire son propre diff n'est pas cette relecture :
+même auteur, mêmes angles morts.
+
+Comment obtenir ce contexte, par ordre de préférence :
+
+1. **Un sous-agent relecteur** — le chemin normal. Il lit le diff dans son propre contexte
+   et seuls ses constats reviennent. C'est la **seule dérogation** à la règle de session qui
+   interdit de lancer un agent sans demande explicite, et elle ne vaut **que** pour cette
+   relecture.
+2. À défaut, une session `/clear`ée, relisant depuis le diff et le plan seuls.
+
+**Demander au mainteneur de regarder n'est pas un substitut** : il est la personne que la
+relecture protège, et son feu vert n'est pas une relecture. Si aucun contexte frais n'est
+disponible, le dire franchement dans le message de clôture — une auto-relecture est plus
+faible, et savoir si ça suffit avant de merger est une décision qui lui revient, prise en
+connaissance de cause.
+
+Le relecteur reçoit la plage de diff (`$(git merge-base master HEAD)..HEAD`), le plan, sa
+section *Review Focus* verbatim et les décisions du journal. **Jamais l'historique de
+session** : ça le mettrait sur le fil du raisonnement au lieu du produit. Puis :
+
+- **Regrader chaque constat par son effet**, pas selon que le plan mentionnait ou non
+  l'entrée qui le déclenche. Un plan est un document d'intention ; son silence sur une
+  entrée n'autorise pas cette entrée à casser un paquet. Un constat classé mineur parce que
+  le plan se taisait a noté le plan, pas l'effet.
+- **Critique et Important** prennent **une** passe de correction, chacune vérifiée par sa
+  propre reproduction, puis les portes relancées.
+- **Mineur** part au journal et au message de clôture comme point différé. Il n'entre pas
+  dans la passe — c'est au mainteneur de trancher.
+- Un constat délibérément non corrigé **est** une décision, et elle remonte.
+
+Le retour de relecture s'évalue, il ne se joue pas : reformuler le point technique, le
+vérifier contre ce dépôt, contredire avec un argument quand il est faux. « Tu as tout à fait
+raison » n'est pas une réponse. Et un relecteur peut se tromper — y compris un sous-agent
+qui rend un constat assuré sur du code qu'il a mal lu.
+
+### Le journal de bord
+
+Un chantier qui traverse plusieurs sessions perd son contexte à la compaction. Le plan dit
+l'intention ; le **journal** dit ce qui s'est réellement passé, et c'est la seule chose qui
+survit.
+
+**Un journal par fichier de plan**, à côté de lui et **commité** :
+
+| Fichier de plan | Son journal |
+|---|---|
+| `.claude/plans/v{X.Y.Z}/plan.md` | `.claude/plans/v{X.Y.Z}/progress.md` |
+| `.claude/plans/process/<nom>/plan.md` | `.claude/plans/process/<nom>/progress.md` |
+
+Un changement **borné** n'a pas de plan, donc pas de journal : ses décisions vont dans le
+message de clôture, qui devient alors le seul compte rendu — une raison de plus pour que le
+cliquet de §1 penche vers le chemin lourd quand un changement risque de grossir.
+
+La première ligne nomme le plan suivi. Exemple :
+
+```markdown
+# Journal — plan : .claude/plans/v0.23.0/plan.md
+
+Pré-vol : l'étape 3 consomme le champ que l'étape 1 ajoute au `Rom` — les noms concordent.
+Étape 1 : terminée (c485656, `just ci` → 0).
+Étape 2 : Décision : le sha1 des disques 2+ est stocké dans une liste et non dans une map —
+  l'ordre porte le numéro de disque — coût si c'est faux : une migration de `state.yml`.
+Étape 2 : terminée (a1b2c3d, `just ci` → 0).
+Final : mineur (différé) : `read_pkgver()` mériterait un test sur un PKGBUILD tronqué.
+```
+
+Les règles :
+
+- **On statue, on ne bloque pas.** Un conflit dans le plan, une ambiguïté, un défaut du
+  plan : on tranche, on écrit `Décision : <ce qui est décidé> — <pourquoi> — <ce que ça coûte
+  si c'est faux>`, et on continue. Une entorse au plan sans décision écrite est une décision
+  prise en secret.
+- **Cinq choses arrêtent le travail** au lieu d'être tranchées : une opération destructrice
+  ou irréversible ; un point touchant à un secret, les credentials ScreenScraper en tête ;
+  une commande git interactive, sous la règle du lot de §3 ; un plan si cassé que toute suite
+  est une devinette ; et **trois correctifs échoués** sur le même problème, qui est une
+  question d'architecture et jamais une quatrième tentative.
+- **La ligne s'écrit dans le même message que le commit**, pas plus tard. La compaction
+  n'attend pas un moment commode.
+- **Après une compaction, le journal et `git log` font foi, pas le souvenir.** Une étape qui
+  porte une ligne `terminée` est faite ; on reprend à la première qui n'en a pas.
+- Chaque `Décision :` et chaque mineur différé est **répété dans le message de clôture**.
+  C'est le seul endroit où ces décisions atteignent le mainteneur.
 
 ---
 
