@@ -115,6 +115,34 @@ quatre sous-sections ; les cinq arrêts sont au nombre de cinq et incluent celui
 correctifs échoués introduit à l'étape 3 ; le chemin `progress.md` est identique en §1 et §8 ;
 la dérogation sous-agent est nommée comme dérogation.
 
+Étape 6 : terminée (`f6ca397`, signée `G`). Le plan porte les neuf champs du gabarit étendu,
+neuf blocs *Produit* et neuf *Consomme* pour neuf étapes, aucun réservé.
+
+Décision : le champ `Type` du plan passe de « méthodes de travail » à `process`, la valeur que
+le gabarit vient d'ouvrir. — Pourquoi : la vérification de l'étape 6 est « ce plan satisfait le
+gabarit », et un champ hors énumération ne la satisfait qu'à peu près. — Coût si c'est faux :
+un libellé change dans un fichier de plan.
+
+Étape 7 : terminée (`f0ccb04`, signée `G`). 15 skills sur 15 dans **les deux** tables, vérifié
+en bouclant sur `ls` du répertoire du plugin ; cinq ancres, toutes résolues ; onze sections,
+les renvois §1 à §10 pointent tous sur une section existante, aucun orphelin.
+
+Défaut, le mien : depuis l'étape 1 le texte de §1 portait le renvoi « cf. §Arbitrage des
+skills » vers une section qui n'existait pas encore — un renvoi mort pendant six commits. Il
+est devenu `(§10)` à l'étape 7. La vérification de l'étape 1 ne cherchait pas les renvois
+morts, seulement la cohérence de la numérotation ; c'est le contrôle d'ancres écrit à l'étape 7
+qui l'aurait attrapé s'il avait existé plus tôt. À retenir : un renvoi vers une section qu'une
+étape ultérieure crée est une dette, pas une avance.
+
+Étape 8 : terminée (`5d19d47`, signée `G`). Les trois chemins OpenSpec ont disparu, 15 fichiers
+retirés, et `git status` ne porte plus que `design/diagrams/`. La ligne d'arbitrage nomme les
+skills `opsx:*` du plugin.
+
+Décision : `.claude/commands/` et `.claude/skills/`, vidés de leur contenu OpenSpec, sont
+supprimés plutôt que laissés vides. — Pourquoi : ils ne contenaient que ça, git ne suit pas les
+répertoires vides, et un répertoire vide se lit comme un emplacement conventionnel qu'il n'est
+plus. — Coût si c'est faux : un `mkdir` le jour où rompom écrit son premier skill.
+
 Décision : `design/diagrams/` est non suivi par git et préexiste au chantier. Je le laisse
 intact et le consigne en phase 0 plutôt que de le traiter en passant. — Pourquoi : il ne
 relève pas de l'arbitrage superpowers, et décider du sort d'un répertoire qu'un autre
