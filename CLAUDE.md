@@ -1,7 +1,9 @@
 # rompom
 
-> **Before any work on the code, read [`PROCEDURE_PLANS.md`](./PROCEDURE_PLANS.md).
-> No coding without a validated plan.** It defines the plan layout (`.claude/plans/vX.Y.Z/`),
+> **Before any work on the code, read [`PROCEDURE_PLANS.md`](./PROCEDURE_PLANS.md), and
+> size the change first** (§1 — Trivial / Spike / Bounded / Architectural). Only an
+> architectural change gets a plan file, and that one is never coded before the plan is
+> validated. `PROCEDURE_PLANS.md` also defines the plan layout (`.claude/plans/vX.Y.Z/`),
 > the commit convention, the test discipline, the release process and the quality gates.
 
 CLI tool that, given a system name, iterates over Internet Archive items to find ROMs,
@@ -31,7 +33,10 @@ call it. Never add a check to CI without adding it to the Justfile.
 
 ## Guard-rails (what does not change)
 
-- **`PROCEDURE_PLANS.md` is the process of record.** No coding without a validated plan.
+- **`PROCEDURE_PLANS.md` is the process of record.** Classify the change out loud first
+  (§1) — Trivial, Spike, Bounded or Architectural. Only an architectural one gets a plan
+  file; a bounded one gets a short design in chat and an explicit yes. In doubt, take the
+  heavier path — the ratchet never goes down mid-task.
 - **Git is hybrid.** Claude works on a **dedicated branch**, commits **atomically**
   (Conventional Commits, real scope — never `all`), and **never** runs `merge`, `push` or
   `tag`. The maintainer reviews, merges onto `master` and pushes.

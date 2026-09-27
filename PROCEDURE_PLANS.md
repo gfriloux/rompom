@@ -4,14 +4,46 @@
 > code. Chaque changement est décomposé en étapes atomiques, testables et commitables
 > isolément.
 >
-> **Règle fondamentale : on ne code pas sans plan validé.**
+> **Règle fondamentale : on dimensionne le changement avant de le planifier** (§1), et un
+> changement architectural ne se code pas sans plan validé.
 > Et : lis [`CLAUDE.md`](CLAUDE.md) (architecture, pipeline, invariants) avant tout changement.
 
 ---
 
-## 1. Créer le plan avant tout
+## 1. Dimensionner un changement, puis créer le plan
 
-Dès qu'une version ou une feature est évoquée, créer :
+Tout changement ne mérite pas un dossier de plan. **Classer d'abord, et annoncer le
+classement à voix haute** pour que l'utilisateur puisse le renverser, puis suivre ce
+chemin-là.
+
+| Chemin | Ce que c'est | Artefact |
+|---|---|---|
+| **Trivial** | Aucune décision à présenter : une coquille, un lien mort, une reformulation qui ne change ni comportement ni interface. | Aucun, et pas d'accord préalable. On le fait et on dit ce qu'on a fait. |
+| **Spike** | Une question de faisabilité — « l'API ScreenScraper renvoie-t-elle ce champ ? », « ce `.chd` multi-piste est-il lisible ? ». La sortie est une **réponse**, pas du code qu'on garde. | Aucun. Énoncer la question et la sonde en deux phrases, obtenir un feu vert, puis chercher au moins cher que la justesse permette. Rapporter une recommandation ; ce qui a été construit est étiqueté jetable. |
+| **Bounded** (borné) | Un changement bien cadré sur du code **déjà présent ici** : un drapeau CLI, une correction dans un handler, un champ de plus dans `description.xml`, un ajustement de template. | Pas de fichier de plan. Présenter un design court en conversation, obtenir un **oui explicite**, puis implémenter. |
+| **Architectural** | Un nouveau step de pipeline, un changement de format d'état, une refonte de l'UI, un nouveau type de source, tout ce qui déplace une responsabilité entre étages ou change le DAG. | Un plan sous `.claude/plans/`, relu par l'utilisateur **avant** implémentation. |
+
+Les noms *Spike*, *Bounded* et *Architectural* sont ceux du plugin `superpowers`
+(cf. §Arbitrage des skills), volontairement laissés en anglais : un lecteur qui part de ce
+document pour grep le plugin doit retomber dessus. *Trivial* est à nous — le plugin n'a pas
+ce chemin, et une coquille n'a pas à passer par un accord préalable.
+
+Trois règles encadrent la table.
+
+**Borné se mesure au dépôt, pas à la familiarité.** Si le flux qu'on change n'est pas déjà
+là à lire, le changement n'est pas borné.
+
+**Le cliquet est à sens unique.** Dans le doute entre deux chemins, prendre le plus lourd.
+Une complexité découverte en cours de route fait monter d'un cran : on s'arrête, on le dit,
+on remonte. Rien ne redescend en cours de route, et on ne choisit jamais une étiquette pour
+s'épargner du travail.
+
+**Pas de spec séparée.** Pour un changement architectural, `plan.md` **est** la spec —
+c'est pourquoi il porte Objectif, Architecture, Contraintes globales et Review Focus (§8).
+
+### Créer le plan (chemin architectural)
+
+Dès qu'une version ou un chantier architectural est décidé, créer :
 
 ```
 .claude/plans/v{X.Y.Z}/
@@ -19,6 +51,10 @@ Dès qu'une version ou une feature est évoquée, créer :
   manual_tests.md   ← tests manuels (enrichis au fil du dev, exécutés en validation)
   phase0_results.md ← état réel du dépôt avant de coder (cf. §2)
 ```
+
+Un chantier de **process** n'est pas une version : il vit sous
+`.claude/plans/process/<nom>/`, avec les mêmes fichiers, moins `manual_tests.md` quand il
+n'y a rien à vérifier à la main.
 
 Les plans vivent **dans `.claude/plans/`**, jamais à la racine. Un plan obsolète est
 **supprimé**, pas dupliqué en `_v2`/`_v3`.
