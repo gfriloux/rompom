@@ -39,7 +39,7 @@ on remonte. Rien ne redescend en cours de route, et on ne choisit jamais une ét
 s'épargner du travail.
 
 **Pas de spec séparée.** Pour un changement architectural, `plan.md` **est** la spec —
-c'est pourquoi il porte Objectif, Architecture, Contraintes globales et Review Focus (§8).
+c'est pourquoi il porte Objectif, Architecture, Contraintes globales et Review Focus (§9).
 
 ### Créer le plan (chemin architectural)
 
@@ -279,7 +279,68 @@ En plus, hors boucle rapide : `just audit` (CVE) et `nix flake check`
 
 ---
 
-## 8. Gabarit de plan
+## 8. Discipline d'exécution
+
+Les règles ci-dessous valent quel que soit le type de changement. Elles sont adaptées du
+plugin `superpowers` ; là où leur formulation diffère de la sienne, **ce document
+l'emporte**.
+
+### Cause avant correctif
+
+**Pas de correctif avant que la cause soit comprise.** Un correctif qui fait disparaître le
+symptôme sans explication est un échec, même quand l'erreur disparaît.
+
+1. **Lire l'erreur en entier.** Le message porte souvent la réponse : un `ApiFailure`
+   nomme son code HTTP, un `ChecksumMismatch` donne les deux sha1, un panic donne sa
+   localisation. On ne saute pas au diagnostic depuis le nom du step.
+2. **Reproduire au plus étroit.** Descendre de `just ci` au test unitaire nommé, ou d'un run
+   complet à une seule ROM. Une défaillance qu'on déclenche en une commande est une
+   défaillance sur laquelle on peut raisonner.
+3. **Regarder ce qui a changé.** `git diff`, les derniers commits, une dépendance bumpée,
+   un tag de lib déplacé. Une casse apparue après une mise à jour de `screenscraper` ou
+   d'`internetarchive` est un changement amont, pas un bug d'ici.
+4. **Comparer à ce qui marche.** Un autre handler qui fait la même chose, un autre template,
+   la même ROM sur un autre système. Lister **toutes** les différences : « ça ne peut pas
+   compter » est la phrase par laquelle on saute la cause.
+5. **Une hypothèse, un changement minimal.** L'énoncer — « je pense que `media_url()` dérive
+   le nom de `region` au lieu du paramètre `media=` » — puis ne tester que ça. Une nouvelle
+   hypothèse **remplace** l'ancienne ; les correctifs ne s'empilent pas.
+
+Le pipeline est un système multi-composants, et il est déjà instrumenté pour ça :
+`--debug` écrit `<system>.debug.log` avec la décision de chaque step, `<system>.errors.log`
+range les échecs par cause, et la vue *errors* de la TUI en donne le décompte. **On les lit
+avant de supposer où ça casse.**
+
+**Trois correctifs échoués veut dire que la conception est fausse.** Si chaque correctif
+découvre un problème ailleurs, ou si chacun réclame « juste un petit remaniement » : on
+s'arrête, on ne tente pas un quatrième, et on pose la question d'architecture. Ce n'est plus
+une hypothèse fausse, c'est une frontière mal placée.
+
+### Preuve avant affirmation
+
+**Si la commande n'a pas été lancée dans ce message, son résultat ne peut pas être
+affirmé.** Avant toute phrase disant que quelque chose passe, marche ou est fini : quelle
+commande le prouve ; la lancer en entier, pas une variante restreinte ; lire toute la sortie
+**et le code de sortie** ; vérifier que la sortie soutient vraiment l'affirmation — sinon,
+énoncer l'état réel, avec la sortie.
+
+| Affirmation | Preuve exigée |
+|---|---|
+| « les portes passent » | `just ci`, code de sortie **0** lu — la queue verte de `just test` ne dit rien des trois portes qui la précèdent |
+| « le binaire que tu testes est à jour » | la reconstruction lancée dans ce message : `just ci` réécrit `target/debug` sous un run en cours, et un binaire périmé ne signale pas qu'il l'est |
+| « le paquet Nix build » | `just build-static` — `just ci` compile en **debug**, le paquet en **release** |
+| « le bug est corrigé » | le symptôme d'origine rejoué, pas le code relu |
+| « plus aucune trace de X » | le grep, zéro résultat, écrit **dans la langue et la tournure du fichier** — un grep bâti sur la formulation attendue ne prouve pas l'absence du concept |
+| « ScreenScraper répond ceci » | l'appel réellement passé, et rien de secret imprimé |
+| « le rendu est correct » | rien, de ce côté : la TUI n'est pas observable ici (pas de terminal de contrôle). Ça part dans `manual_tests.md` (§4) |
+
+« Ça devrait aller », « le changement est trivial », « clippy est passé » ne prouvent rien :
+clippy n'est pas un compilateur et `just ci` n'est pas un `makepkg`. La fatigue, la pression
+et une longue série de verts sont les trois moments pour lesquels cette règle existe.
+
+---
+
+## 9. Gabarit de plan
 
 ```markdown
 ## Plan : [Titre]
@@ -310,7 +371,7 @@ En plus, hors boucle rapide : `just audit` (CVE) et `nix flake check`
 
 ---
 
-## 9. Ce qui ne change pas entre les versions
+## 10. Ce qui ne change pas entre les versions
 
 - **Un `description.xml` par paquet ROM.** Le `gamelist.xml` est régénéré par hook
   post-install Batocera — rompom ne l'écrit jamais.
