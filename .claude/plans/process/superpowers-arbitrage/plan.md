@@ -1,6 +1,6 @@
 # Plan : arbitrer superpowers sur rompom
 
-**Type :** méthodes de travail (process/outillage, pas une fonctionnalité produit)
+**Type :** `process` — méthodes de travail, pas une fonctionnalité produit
 **Étage(s) :** `doc`
 **Objectif :** décider, une fois et par écrit, quelles parties du plugin `superpowers`
 gouvernent le travail sur rompom et lesquelles sont surclassées — pour que le hook

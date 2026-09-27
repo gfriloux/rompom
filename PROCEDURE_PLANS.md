@@ -460,13 +460,29 @@ Les règles :
 
 ## 9. Gabarit de plan
 
+Ce gabarit sert le chemin **architectural** de §1. Un changement borné n'a pas de fichier de
+plan, un trivial n'a rien du tout.
+
 ```markdown
 ## Plan : [Titre]
 
-**Type :** [pipeline | package | ui | conf | state | bug | refactor | doc]
-**Objectif :** ...
-**Pourquoi :** ...
+**Type :** [pipeline | package | ui | conf | state | bug | refactor | doc | process]
 **Étage(s) :** [conf | collect | pipeline | package | state | ui | nix | doc]
+**Objectif :** une phrase — ce que ça construit.
+**Pourquoi :** d'où on part, ce qui ne va pas.
+**Architecture :** deux ou trois phrases sur l'approche retenue.
+**Spec :** le document dont ce plan dérive, ou « aucune — ce plan est sa propre spec » (§1).
+
+### Contraintes globales
+Les exigences valables pour **toutes** les étapes, une ligne chacune, valeurs exactes :
+versions planchers, fichiers interdits au diff, formats à ne pas casser, décisions déjà
+arrêtées avec le mainteneur. Chaque étape les porte implicitement.
+
+### Review Focus
+Les modes de défaillance que les tests de ce plan **n'exercent pas** et qui mordraient un
+utilisateur : une ligne chacun, le plus probable d'abord. Écrits une fois, au moment du
+plan ; relus tels quels à la clôture (§8). Une section vide veut dire qu'on a cherché et
+n'a rien trouvé, pas qu'on a sauté la recherche.
 
 ### Fichiers touchés
 - [ ] `src/...`
@@ -476,16 +492,41 @@ Les règles :
 ### Étapes atomiques
 #### Étape 1 : [Titre]
 **Description :** ...
+**Produit :** ce sur quoi les étapes suivantes s'appuient — noms exacts de fonctions, de
+champs du `Rom`, de sections.
+**Consomme :** ce que cette étape prend à une précédente, aux mêmes noms exacts.
 **Vérification :** `just ci` (ou la cible pertinente)
 **Commit :** `type(scope): message`
 
 ### Portes de qualité
 - [ ] `just ci` passe
-- [ ] Tests ajoutés pour le code pur touché
+- [ ] Tests ajoutés pour le code pur touché (§4)
 - [ ] Doc synchronisée (même commit)
 - [ ] Commits atomiques, scope réel (jamais `all`), sujets de qualité changelog
 - [ ] Branche dédiée ; clôture en présentant les options d'intégration (§3)
+- [ ] Relecture de clôture par un contexte frais, constats regradés par effet (§8)
+- [ ] Journal tenu ; décisions et mineurs différés répétés dans le message de clôture (§8)
 ```
+
+### Pourquoi *Consomme* / *Produit*
+
+Chaque step du pipeline alimente les suivants **par le `Rom`, pas par le disque** — c'est
+l'invariant que `CLAUDE.md` documente, et celui dont dépend toute la logique de reprise. Un
+plan qui ajoute ou déplace un step doit donc déclarer ce qu'il dépose dans le `Rom` et ce
+qu'il y lit : « l'étape 2 remplit `rom.medias`, l'étape 3 le consomme » devient une
+dépendance déclarée plutôt qu'une chose à se rappeler quatre sessions plus tard.
+
+Un **balayage pré-vol**, avant la première étape, la vérifie : une ligne de journal par
+couple producteur / consommateur, avec ce qu'on a trouvé. Les étapes qui ne partagent rien
+n'ont pas de ligne ; un plan dont aucune étape ne partage rien porte la seule ligne
+`Pré-vol : aucune interface partagée`.
+
+### Pas de réservé
+
+Une étape contient ce qu'il faut pour la mener, pas la promesse de le trouver. Sont des
+**défauts de plan** : « TBD », « à compléter », « gérer les cas limites », « ajouter la
+validation appropriée », « comme l'étape 2 » sans répéter le contenu, et toute étape qui dit
+quoi faire sans montrer comment.
 
 ---
 
