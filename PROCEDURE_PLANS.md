@@ -199,6 +199,33 @@ ratatui, la modale d'identification, `makepkg` sur Batocera. Ces points partent 
 Un snapshot qui change par accident = **blocage dur**. Le régénérer est un acte
 intentionnel, et le diff se relit.
 
+### Ce que la loi des tests lie, et ce qu'elle ne lie pas
+
+L'*Iron Law* du plugin `superpowers` — « pas de code de production sans un test qui échoue
+d'abord » — **tient ici**, contrairement à ce qu'on pourrait supposer d'un outil dont
+l'essentiel du travail passe par le réseau : `just test` porte une vraie suite unitaire, et
+une fonction pure se teste en trente secondes.
+
+**Elle lie le code pur.** Pas de fonction pure nouvelle sans son test écrit d'abord et
+**regardé échouer**. Un test qu'on n'a jamais vu rouge ne prouve rien : il peut tester
+l'implémentation plutôt que le comportement, ou passer pour une raison étrangère à ce qu'on
+croyait vérifier.
+
+**Elle ne lie pas** ce que la liste ci-dessus range en manuel : les appels ScreenScraper et
+Internet Archive, les handlers qui en dépendent, le rendu ratatui, la modale, `makepkg`. Un
+test écrit là pour satisfaire le rituel ne teste rien — il faudrait mocker au point de ne
+plus vérifier que le mock. Ces points vont dans `manual_tests.md`, et leur absence de
+couverture automatique **se déclare** dans le plan plutôt que de se deviner.
+
+**Le test et le correctif partent dans le même commit** (§5). C'est l'entorse assumée à la
+granularité du plugin, qui commiterait le test rouge séparément : §3 exige que chaque commit
+passe les portes seul, et un commit rouge casse `git bisect`. Le message de commit porte
+alors la preuve, en décrivant ce que le test produisait avant le correctif.
+
+**Un refactor ne change aucun test.** S'il faut toucher un test pour qu'un refactor passe,
+ce n'était pas un refactor — c'est un changement de comportement, et il se planifie comme
+tel (§5).
+
 ---
 
 ## 5. Types de changement & recettes
