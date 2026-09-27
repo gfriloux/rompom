@@ -18,4 +18,4 @@ Ces deux fichiers viennent d'un handoff de design produit hors du dépôt. Ils d
 | `mockups.dc.html` | les maquettes, à ouvrir dans un navigateur. Le HTML **simule** une grille monospace : chaque `<div>` est une ligne de terminal, chaque `<span class="c" style="width:Nch">` une colonne de N cellules. Ce n'est pas du code à reprendre — la cible est ratatui. |
 
 Ils vivaient dans `tmp/`, qui est du scratch non versionné par convention
-(`PROCEDURE_PLANS.md` §10) : un `rm -rf tmp` et la spec était perdue.
+(`PROCEDURE_PLANS.md` §11) : un `rm -rf tmp` et la spec était perdue.

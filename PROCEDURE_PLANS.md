@@ -23,8 +23,8 @@ chemin-là.
 | **Bounded** (borné) | Un changement bien cadré sur du code **déjà présent ici** : un drapeau CLI, une correction dans un handler, un champ de plus dans `description.xml`, un ajustement de template. | Pas de fichier de plan. Présenter un design court en conversation, obtenir un **oui explicite**, puis implémenter. |
 | **Architectural** | Un nouveau step de pipeline, un changement de format d'état, une refonte de l'UI, un nouveau type de source, tout ce qui déplace une responsabilité entre étages ou change le DAG. | Un plan sous `.claude/plans/`, relu par l'utilisateur **avant** implémentation. |
 
-Les noms *Spike*, *Bounded* et *Architectural* sont ceux du plugin `superpowers`
-(cf. §Arbitrage des skills), volontairement laissés en anglais : un lecteur qui part de ce
+Les noms *Spike*, *Bounded* et *Architectural* sont ceux du plugin `superpowers` (§10),
+volontairement laissés en anglais : un lecteur qui part de ce
 document pour grep le plugin doit retomber dessus. *Trivial* est à nous — le plugin n'a pas
 ce chemin, et une coquille n'a pas à passer par un accord préalable.
 
@@ -530,7 +530,53 @@ quoi faire sans montrer comment.
 
 ---
 
-## 10. Ce qui ne change pas entre les versions
+## 10. Arbitrage des skills `superpowers`
+
+Le plugin `superpowers` injecte son skill `using-superpowers` dans **chaque** session — au
+démarrage, après un `/clear`, après chaque compaction — enveloppé dans
+`<EXTREMELY_IMPORTANT>`, avec la règle « s'il y a ne serait-ce qu'1 % de chance qu'un skill
+s'applique, tu DOIS l'invoquer ». Le plugin énonce aussi que les instructions utilisateur
+priment sur ses skills. La table ci-dessous **est** cette primauté, rendue explicite.
+**Là où un skill et ce document ne disent pas la même chose, ce document l'emporte.**
+Arbitré contre `superpowers` 6.4.1.
+
+Ce que les verdicts obligent :
+
+| Verdict | Sens opératoire |
+|---|---|
+| **Adopté** | Suivre le skill tel qu'il est écrit. Le lire quand la situation se présente. |
+| **Adapté** | La forme du skill tient, mais c'est la version de **ce** document qui lie — y compris là où elle est plus étroite. Lire ce document, pas le skill. |
+| **Réduit** | Seule la partie nommée ici s'applique. Tout le reste du skill — ses portes, ses artefacts, ses étapes supplémentaires — ne s'applique pas. |
+| **Rejeté par défaut** | Ne pas l'utiliser sans demande explicite du mainteneur. |
+| **Rejeté** | Ne pas l'utiliser. |
+| **Surclassé** | Ses instructions ne lient pas ici. |
+| **Marginal** | Autorisé, jamais par défaut, aucune règle attachée. |
+
+| Skill | Verdict | Pourquoi |
+|---|---|---|
+| `systematic-debugging` | **Adopté** | Cf. [§8 → Cause avant correctif](#cause-avant-correctif). Rien n'était écrit sur le débogage, sur un projet dont l'historique de bugs est une suite de symptômes traités avant leur cause. |
+| `verification-before-completion` | **Adopté** | Cf. [§8 → Preuve avant affirmation](#preuve-avant-affirmation). §7 disait **quoi** vérifier, jamais **quand**. |
+| `receiving-code-review` | **Adopté** | Évaluer le retour, le vérifier contre ce dépôt, contredire avec un argument. Pas d'acquiescement de façade. |
+| `finishing-a-development-branch` | **Adopté** | Suite verte avant de présenter, base confirmée, options d'intégration présentées et non choisies. Sous la règle du lot de §3 — c'est elle qui remplace l'exécution silencieuse du menu. |
+| `test-driven-development` | **Adapté** | L'Iron Law lie le code pur et rien d'autre ; test et correctif dans le même commit. Cf. [§4](#ce-que-la-loi-des-tests-lie-et-ce-quelle-ne-lie-pas). |
+| `writing-plans` | **Adapté** | En-tête, Contraintes globales, Review Focus, blocs Consomme/Produit et règle « pas de réservé » : dedans (§9). Son emplacement `docs/superpowers/plans/` : non, les plans vivent sous `.claude/plans/`. Sa granularité « une étape = un commit » : non, elle produirait des commits rouges (§4). |
+| `executing-plans` | **Adapté** | Le journal et « on statue, on ne bloque pas » : dedans (§8). Son espace de travail `.superpowers/sdd/` et ses scripts : non — le journal est commité à côté de son plan. Et il **ne se supprime pas** en fin de chantier, contrairement à ce que le skill ordonne : c'est le compte rendu, pas du scratch. |
+| `requesting-code-review` | **Adapté** | Le principe du contexte frais et la règle « jamais l'historique de session » : dedans. Sa cadence — une relecture par tâche et avant chaque merge — non : **une** relecture à la clôture de branche (§8). |
+| `brainstorming` | **Réduit** | Seul son triage est repris, devenu [§1](#1-dimensionner-un-changement-puis-créer-le-plan), avec un chemin **Trivial** qu'il n'a pas. Pas de document de spec séparé : `plan.md` est la spec. Pas de compagnon visuel dans le navigateur. |
+| `subagent-driven-development` | **Rejeté par défaut** | Un implémenteur plus un relecteur par étape, chacun relisant `CLAUDE.md` depuis zéro, ne se rentabilise pas à la taille des chantiers d'ici. Disponible sur demande ; à **proposer** quand un plan dépasse une petite dizaine d'étapes. La relecture de clôture est gardée dans tous les cas. |
+| `using-git-worktrees` | **Rejeté** | Un second worktree ne partage pas `target/` : la première porte y est une reconstruction à froid de tout l'arbre de dépendances. `.direnv` est perdu, donc `nix develop` réévalue. Et son étape 2 lance `cargo build` dès qu'un `Cargo.toml` est à la racine — ce qui est le cas — hors `nix develop`, donc avec la mauvaise toolchain. La branche dédiée de §3 **est** l'isolation. Ceci rejette le workflow manuel du skill, pas un worktree natif que le mainteneur demanderait. |
+| `using-superpowers` | **Surclassé** | Son « 1 % de chance → tu DOIS l'invoquer » ne bat pas une ligne de cette table. C'est la raison pour laquelle cette table existe. |
+| `dispatching-parallel-agents` | **Marginal** | Du travail réellement indépendant est rare ici : le pipeline est un DAG, et ses étages se lisent ensemble. Pas interdit, jamais par défaut. |
+| `writing-skills` | **Marginal** | rompom n'écrit aucun skill, et ceux qui traînaient sous `.claude/skills/` n'étaient pas les nôtres. Aucune porte de ce dépôt ne peut donc vérifier cette règle ; le jour où un skill rompom voit le jour, le skill s'applique. |
+| `diagnosing-superpowers` | **Marginal** | Uniquement pour construire un rapport de bug à l'intention des mainteneurs du plugin. Sans rapport avec rompom. |
+
+`CLAUDE.md` porte la **même** table, condensée et groupée par verdict, parce que c'est le
+seul fichier réinjecté à chaque session. Écrire deux fois, c'est accepter qu'elles
+divergent : en cas de divergence, **celle-ci fait foi**.
+
+---
+
+## 11. Ce qui ne change pas entre les versions
 
 - **Un `description.xml` par paquet ROM.** Le `gamelist.xml` est régénéré par hook
   post-install Batocera — rompom ne l'écrit jamais.

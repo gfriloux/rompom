@@ -60,6 +60,30 @@ call it. Never add a check to CI without adding it to the Justfile.
   error message.
 - **`tmp/`** is scratch, never committed.
 
+## Superpowers — arbitration
+
+The `superpowers` plugin re-injects its `using-superpowers` skill at every startup,
+`/clear` and compaction, and claims any skill with a 1% chance of applying. The plugin
+itself defers to user instructions; this is that deferral. **Where a skill and
+`PROCEDURE_PLANS.md` disagree, `PROCEDURE_PLANS.md` wins.** Full table with rationale:
+`PROCEDURE_PLANS.md` §10.
+
+| Verdict | Skills |
+|---------|--------|
+| **Adopted** — follow as written | `systematic-debugging`, `verification-before-completion`, `receiving-code-review`, `finishing-a-development-branch` (under the interactive batch rule) |
+| **Adapted** — this repo's version binds | `test-driven-development` (the iron law binds pure code only; test and fix in one commit), `writing-plans` and `executing-plans` (our locations, our gates, the ledger committed beside its plan and never deleted), `requesting-code-review` (**one** review at branch close, not one per task) |
+| **Reduced** — only the named part applies | `brainstorming` — keep the triage, plus a **Trivial** path it lacks; no separate spec file, no visual companion |
+| **Rejected by default** — ask first | `subagent-driven-development` — propose it past roughly ten steps |
+| **Rejected** | `using-git-worktrees` — no shared `target/`, no `.direnv`, and its setup step runs `cargo build` outside `nix develop`. The dedicated branch is the isolation |
+| **Overridden** | `using-superpowers` — its "1% chance" rule does not beat this table |
+| **Marginal** — allowed, never the default | `dispatching-parallel-agents`, `writing-skills`, `diagnosing-superpowers` |
+
+Four rules carry most of the weight day to day: **no fix before the root cause** (and three
+failed fixes means the design is wrong, not a fourth attempt), **no claim without the command
+run in this message** (with its exit code read), **one fresh-context review before a branch
+closes** — the only case where dispatching a subagent is authorized unasked — and **rule
+rather than stall**: decide, write the ruling in the ledger, keep going.
+
 ## Configuration
 
 The user config is loaded from `~/.config/rompom.yml`. See `rompom.yml` at the repo root
