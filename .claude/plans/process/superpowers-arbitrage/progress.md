@@ -213,6 +213,19 @@ workflow parse ; ancres toutes résolues, aucun renvoi `§N` orphelin, §8 annon
 et porte quatre sous-sections, les cinq arrêts sont cinq (compté sur le texte, pas à l'œil),
 15/15 skills dans les deux tables après changement des verdicts.
 
+## Les deux différés, tranchés par le mainteneur (2026-09-27)
+
+Le relecteur avait refusé de juger si la clé `ED25519-SK` exige réellement un contact : le
+drapeau `no-touch-required` vit dans la moitié privée et n'est pas lisible. **Le mainteneur
+confirme qu'un `git push` lui fait toucher la YubiKey.** La ligne de §3 est donc juste telle
+qu'elle est écrite, et la cadence « confirmation avant chaque `fetch`/`pull`/`push` » repose
+sur un fait établi et non sur une inférence depuis le type de clé.
+
+Décision : le sujet de `00a9d91` garde « chantier », mot français dans un sujet anglais qui
+partira dans une note de version sous *Miscellaneous*. — Pourquoi : choix du mainteneur, qui
+préfère y faire attention à l'avenir plutôt que de réécrire un commit signé pour un mot. —
+Coût si c'est faux : une ligne de changelog porte un mot français.
+
 Décision : `design/diagrams/` est non suivi par git et préexiste au chantier. Je le laisse
 intact et le consigne en phase 0 plutôt que de le traiter en passant. — Pourquoi : il ne
 relève pas de l'arbitrage superpowers, et décider du sort d'un répertoire qu'un autre
