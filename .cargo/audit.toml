@@ -21,4 +21,12 @@ ignore = [
   # out: screenscraper and internetarchive pin reqwest 0.11 too, so all three must move
   # together. Tracked in TODO.md P3 and gfriloux/rompom#42.
   "RUSTSEC-2026-0258",
+
+  # rustls 0.21.12 — two more advisories published 2026-10-14, same rustls 0.21 <-
+  # reqwest 0.11 chain as everything above (downgrade-to-classical-KX, and a Debug
+  # impl that can print TLS secrets). Fixed by rustls >=0.23.46, i.e. the same
+  # reqwest 0.12 migration already blocked on screenscraper/internetarchive. Tracked
+  # in TODO.md P3 and gfriloux/rompom#42.
+  "RUSTSEC-2026-0349",
+  "RUSTSEC-2026-0346",
 ]
