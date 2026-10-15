@@ -14,4 +14,11 @@ ignore = [
   "RUSTSEC-2026-0098",
   "RUSTSEC-2026-0099",
   "RUSTSEC-2026-0104",
+
+  # h2 0.3.27 — "unbounded empty DATA frames", pulled in by the same reqwest 0.11 <-
+  # hyper 0.14 chain as the webpki advisories above. No patched 0.3.x release exists;
+  # the fix is h2 >=0.4.16, which only ships with reqwest 0.12. Same blocker, same way
+  # out: screenscraper and internetarchive pin reqwest 0.11 too, so all three must move
+  # together. Tracked in TODO.md P3 and gfriloux/rompom#42.
+  "RUSTSEC-2026-0258",
 ]
